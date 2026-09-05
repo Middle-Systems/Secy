@@ -14,6 +14,52 @@
 
 export const API_BASE = '/api';
 
+/* -------------------------------------------------------------------------- */
+/* Auth                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The bearer token for outgoing requests.
+ *
+ * Held in a module variable rather than read from `localStorage` per request:
+ * `AuthProvider` is the single owner of the session and pushes the token here
+ * with `setAuthToken()`, so there is exactly one place that decides what
+ * "signed in" means, and storage stays an implementation detail of the provider.
+ */
+let authToken: string | null = null;
+
+/** Set (or clear, with `null`) the token sent as `Authorization: Bearer`. */
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+/** Called when the backend rejects a request from an apparently-signed-in caller. */
+export type UnauthorizedHandler = () => void;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+/**
+ * Register the callback fired on a 401. `AuthProvider` uses it to drop the
+ * session and send the user back to `/login`; pass `null` to unregister.
+ */
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler;
+}
+
+/**
+ * `/auth/**` is exempt from the 401 handler: a rejected sign-in means "wrong
+ * password", not "your session expired", and bouncing the user off the login
+ * screen they are already on would be a loop. The login form reports those
+ * itself.
+ */
+function shouldReportUnauthorized(path: string): boolean {
+  return !path.replace(/^\//, '').startsWith('auth/');
+}
+
 /** Error thrown for any non-2xx response. */
 export class ApiError extends Error {
   readonly status: number;
@@ -93,6 +139,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers: {
       Accept: 'application/json',
       ...(body !== undefined && !isBodyInit ? { 'Content-Type': 'application/json' } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...headers,
     },
     body: body === undefined ? undefined : isBodyInit ? (body as BodyInit) : JSON.stringify(body),
@@ -101,6 +148,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const payload = await parseBody(response);
 
   if (!response.ok) {
+    // A 401 while we believed we had a session means the token is gone or
+    // expired; tell the provider before the caller sees the error, so the
+    // redirect happens even for a rejection nobody catches.
+    if (response.status === 401 && authToken && shouldReportUnauthorized(path)) {
+      unauthorizedHandler?.();
+    }
     throw new ApiError(response, payload);
   }
 
