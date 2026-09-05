@@ -22,7 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
+  openjdk-17-jdk \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Stable JAVA_HOME regardless of architecture
+RUN ln -sfn "$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")" /usr/lib/jvm/current
+ENV JAVA_HOME=/usr/lib/jvm/current
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
