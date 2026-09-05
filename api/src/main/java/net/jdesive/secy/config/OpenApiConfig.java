@@ -1,8 +1,11 @@
 package net.jdesive.secy.config;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +20,9 @@ public class OpenApiConfig {
 
     private static final String FALLBACK_VERSION = "0.0.1-SNAPSHOT";
 
+    /** Referenced by name from {@code @SecurityRequirement} annotations on the controllers. */
+    private static final String BEARER_SCHEME = "bearerAuth";
+
     /**
      * @param buildProperties present when the build emitted {@code META-INF/build-info.properties}
      *                        (see the {@code springBoot { buildInfo() }} block in build.gradle);
@@ -28,7 +34,17 @@ public class OpenApiConfig {
                 ? buildProperties.getIfAvailable().getVersion()
                 : FALLBACK_VERSION;
 
-        return new OpenAPI().info(new Info()
+        return new OpenAPI()
+                // Declared once and applied to every operation, which is what puts the "Authorize"
+                // button in Swagger UI. Endpoints that are genuinely anonymous (/auth/login,
+                // /auth/register) simply ignore the header they are sent.
+                .components(new Components().addSecuritySchemes(BEARER_SCHEME, new SecurityScheme()
+                        .type(SecurityScheme.Type.HTTP)
+                        .scheme("bearer")
+                        .bearerFormat("JWT")
+                        .description("Paste the `token` from POST /auth/login.")))
+                .addSecurityItem(new SecurityRequirement().addList(BEARER_SCHEME))
+                .info(new Info()
                 .title("Secy API")
                 .description("""
                         Security posture management for the Secy platform. Ingests vulnerability \
