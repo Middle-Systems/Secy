@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * shadcn/ui design tokens. The palette is carried over from the MDB theme the
+   * Angular app used, so the rebuild keeps the same visual identity:
+   *   primary #3b71ca · success #00b74a · danger #dc4c64
+   *   content bg #f8f9fa · borders #dee2e6 · muted text #6c757d
+   */
+  :root {
+    --background: 210 17% 98%;
+    --foreground: 210 11% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 11% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 11% 15%;
+
+    --primary: 217 57% 51%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 17% 96%;
+    --secondary-foreground: 210 11% 15%;
+
+    --muted: 210 17% 96%;
+    --muted-foreground: 208 7% 46%;
+
+    --accent: 210 33% 96%;
+    --accent-foreground: 217 57% 51%;
+
+    --destructive: 350 67% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 14% 89%;
+    --input: 210 14% 89%;
+    --ring: 217 57% 51%;
+
+    --success: 144 100% 36%;
+
+    --severity-critical: 350 67% 58%;
+    --severity-high: 25 95% 53%;
+    --severity-medium: 40 100% 50%;
+    --severity-low: 199 89% 48%;
+
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    /* Kills the outer scrollbar — only `.app-content` scrolls. */
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  #root {
+    height: 100%;
+  }
+}
+
+@layer components {
+  /*
+   * App shell geometry, ported 1:1 from the Angular `styles.scss` /
+   * `layout.component.scss`: fixed 240px sidenav, 58px header, 45px sticky
+   * footer, and a single scroll container in the middle.
+   *
+   * These live here (rather than as inline utilities) because several of them
+   * need `calc()` against the shell dimensions.
+   */
+  .app-content {
+    height: calc(100vh - theme('spacing.header') - theme('spacing.footer'));
+  }
+
+  .app-footer-sticky {
+    width: calc(100% - theme('spacing.sidenav'));
+  }
+
+  /* Pulsing green status indicator from the old footer. */
+  .badge-dot {
+    @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full animate-pulse-green;
+    background-color: hsl(var(--success));
+  }
+}
