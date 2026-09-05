@@ -1,0 +1,108 @@
+/* Modal Header Styling */
+.secy-modal-header {
+  border-bottom: 1px solid #f1f3f5;
+  background-color: #ffffff;
+}
+
+/* Row Separation Logic */
+.secy-history-table thead th {
+  background-color: #fcfcfd;
+  font-size: 0.65rem;
+  letter-spacing: 0.05rem;
+  font-weight: 800;
+  color: #adb5bd;
+  text-transform: uppercase;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.secy-history-table tbody tr:hover {
+  background-color: #f8fbff;
+}
+
+.small-hash {
+  background: #f8f9fa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #6c757d;
+  font-size: 0.75rem;
+}
+
+/* Findings Badges */
+.finding-badge {
+  display: flex;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  overflow: hidden;
+  font-family: 'Roboto Mono', monospace;
+}
+
+.finding-badge .label {
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  background: #f1f3f5;
+  color: #495057;
+  display: flex;
+  align-items: center;
+}
+
+.finding-badge .count {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: #fff;
+  font-weight: 700;
+}
+
+/* Priority Red Alert State */
+.finding-badge.priority.has-threats {
+  border-color: #f5c2c7;
+}
+
+.finding-badge.priority.has-threats .label {
+  background: #f8d7da;
+  color: #842029;
+}
+
+.finding-badge.priority.has-threats .count {
+  color: #842029;
+}
+
+.tool-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 200px;
+}
+
+.secy-history-table td:first-child {
+  min-width: 120px;
+}
+
+.tool-tag {
+  cursor: help; /* Indicates there is more info on hover */
+  border-left: 3px solid #3b71ca; /* Secy Blue accent */
+  background: #f8f9fa;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tool-tag i {
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+
+.badge-success {
+  background-color: #d1e7dd;
+  color: #0a58ca;
+  font-size: 0.65rem;
+  letter-spacing: 0.5px;
+}
+
+.badge-light {
+  font-size: 0.65rem;
+  letter-spacing: 0.5px;
+}

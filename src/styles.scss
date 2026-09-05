@@ -1,12 +1,54 @@
 /* You can add global styles to this file, and also import other style files */
 @import '@fortawesome/fontawesome-free/css/all.css';
 @import 'mdb-angular-ui-kit/assets/scss/mdb.scss';
+@import 'ngx-toastr/toastr';
 
-.grow {
-  flex: 1;
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* This kills the outer scrollbar */
 }
 
-.content {
+.app-footer-sticky {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: calc(100% - 240px); /* Adjust this if your sidebar width is different */
+  height: 45px;
+  background-color: #ffffff;
+  border-top: 1px solid #dee2e6;
+  z-index: 1050;
+
+  /* ADD THESE THREE LINES */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 2. Adjust main content to not get hidden behind footer */
+.app-content {
+  flex: 1;
+  margin-left: 240px;
+  height: calc(100vh - 108px); /* Height minus Header(58px) and Footer(50px) */
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+/* 3. Bring back the Pulse Indicator */
+.badge-dot {
+  width: 10px;
+  height: 10px;
+  background-color: #00b74a !important; /* Force the color */
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 8px;
+  position: relative; /* Context for the pulse */
+  z-index: 1040;
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0% { box-shadow: 0 0 0 0 rgba(0, 183, 74, 0.7); }
+  70% { box-shadow: 0 0 0 8px rgba(0, 183, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 183, 74, 0); }
 }

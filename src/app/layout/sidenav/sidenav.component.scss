@@ -1,0 +1,38 @@
+/* Sidebar width and positioning */
+.sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  padding: 58px 0 0; /* Height of your navbar if you have one */
+  width: 240px;
+  z-index: 600;
+}
+
+/* Styling for the Active Link */
+.list-group-item.active {
+  background-color: #f0f4f8 !important; /* Soft blue highlight */
+  color: #3b71ca !important;
+  border-left: 4px solid #3b71ca; /* Indication bar */
+  font-weight: 600;
+  border-radius: 0;
+}
+
+.list-group-item-action:hover {
+  background-color: #f8f9fa;
+}
+
+.list-group-item i {
+  width: 20px;
+  text-align: center;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* Give it a slight hover effect */
+a[routerLink]:hover {
+  color: #2b59a2 !important; /* A slightly darker primary */
+  text-decoration: underline !important;
+}

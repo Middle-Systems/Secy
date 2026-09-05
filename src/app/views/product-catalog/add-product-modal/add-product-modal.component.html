@@ -1,0 +1,20 @@
+<div class="modal-header">
+  <h5 class="modal-title" id="exampleModalLabel">Register New Product</h5>
+  <button type="button" class="btn-close" aria-label="Close" (click)="modalRef.close()"></button>
+</div>
+<form [formGroup]="productForm" (ngSubmit)="submitForm()">
+  <div class="modal-body">
+    <div class="mb-3">
+      <label class="form-label fw-bold">Product Name</label>
+      <input type="text" class="form-control" formControlName="name" placeholder="Enter name...">
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-bold">Description</label>
+      <textarea class="form-control" formControlName="description" rows="3"></textarea>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-light shadow-0" (click)="modalRef.close()">Cancel</button>
+    <button type="submit" class="btn btn-primary" [disabled]="productForm.invalid">Save Product</button>
+  </div>
+</form>

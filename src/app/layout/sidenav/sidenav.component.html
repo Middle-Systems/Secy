@@ -1,1 +1,47 @@
-<p>sidenav works!</p>
+<nav id="sidebarMenu" class="collapse d-lg-block sidebar collapse bg-white border-end">
+  <div class="position-sticky">
+    <div class="list-group list-group-flush mx-3 mt-4">
+
+      <p class="text-uppercase ml-3 small fw-bold text-muted mb-2">Monitoring</p>
+
+      <a routerLink="dashboard" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-chart-line fa-fw me-3"></i><span>Threat Intelligence</span>
+      </a>
+
+      <a routerLink="dashboard" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-chart-line fa-fw me-3"></i><span>Security Posture</span>
+      </a>
+
+      <p class="text-uppercase ml-3 small fw-bold text-muted mt-4 mb-2">Threat Intelligence</p>
+
+      <a routerLink="cve-database" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-database fa-fw me-3"></i><span>CVE Database</span>
+      </a>
+
+      <a routerLink="kev-database" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-fire fa-fw me-3"></i><span>KEV Database</span>
+      </a>
+
+      <a routerLink="epss-database" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-percentage fa-fw me-3"></i><span>EPSS Database</span>
+      </a>
+
+      <p class="text-uppercase ml-3 small fw-bold text-muted mt-4 mb-2">Asset Management</p>
+
+      <a routerLink="/product-catalog" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-cubes fa-fw me-3"></i><span>Product Catalog</span>
+      </a>
+
+      <a routerLink="/infrastructure" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-server fa-fw me-3"></i> Infrastructure
+      </a>
+
+      <p class="text-uppercase ml-3 small fw-bold text-muted mt-4 mb-2">Configuration</p>
+
+      <a routerLink="compliance" routerLinkActive="active" class="list-group-item list-group-item-action py-2 ripple">
+        <i class="fas fa-clipboard-check fa-fw me-3"></i><span>Compliance</span>
+      </a>
+
+    </div>
+  </div>
+</nav>

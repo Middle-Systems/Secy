@@ -1,0 +1,64 @@
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-5">
+    <div>
+      <h2 class="secy-page-title m-0">Software Product Catalog</h2>
+      <p class="text-muted small m-0">Manage and monitor security posture across your product portfolio</p>
+    </div>
+    <button class="btn btn-secy-primary shadow-sm" (click)="openAddProductModal()">
+      <i class="fas fa-plus me-2"></i>REGISTER NEW PRODUCT
+    </button>
+  </div>
+
+  <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-4">
+    <div class="col" *ngFor="let product of products">
+      <div class="secy-card h-100 d-flex flex-column w-100">
+        <div class="card-content flex-grow-1">
+          <div class="d-flex justify-content-between align-items-start mb-1">
+            <h4 class="product-title m-0">{{ product.name }}</h4>
+            <div class="active-tag text-uppercase">{{ product.activeSbomStatus }}</div>
+          </div>
+
+          <div class="metadata-group mb-3">
+            <code class="product-id-hash" mdbTooltip="Click to copy Product ID">{{ product.id | slice:0:8 }}...</code>
+            <span class="metadata-divider">|</span>
+            <span class="last-scanned-meta" mdbTooltip="Last Scanned Date">
+              <i class="far fa-clock"></i> {{ product.lastScanned | date:'MMM d, HH:mm' }}
+            </span>
+          </div>
+
+          <div class="intel-summary d-flex my-3">
+            <div class="intel-item">
+              <span class="intel-label">Total Findings</span>
+              <span class="intel-value">{{product.vulnerabilityCount}}</span>
+            </div>
+            <div class="intel-divider"></div>
+            <div class="intel-item">
+              <span class="intel-label">Actionable</span>
+              <span class="intel-value" [class.text-danger]="product.actionableCount > 0">
+                {{product.actionableCount}}
+              </span>
+            </div>
+          </div>
+
+          <p class="product-desc text-muted small">{{ product.description }}</p>
+        </div>
+
+        <div class="card-actions d-flex justify-content-between align-items-center">
+          <div class="d-flex gap-2">
+            <button class="btn-secy-secondary" (click)="openUploadModal(product)">
+              <i class="fas fa-upload me-1"></i> UPLOAD
+            </button>
+
+            <button class="btn-secy-tertiary" (click)="openHistory(product)" title="View Version History">
+              <i class="fas fa-history"></i>
+            </button>
+          </div>
+
+          <button class="btn-secy-primary" (click)="openDetailsModal(product)">
+            DETAILS
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

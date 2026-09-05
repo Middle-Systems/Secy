@@ -21,7 +21,11 @@
     "lib": [
       "es2020",
       "dom"
-    ]
+    ],
+    "paths": {
+      "rxjs/Observable": ["node_modules/rxjs"],
+      "rxjs/Subscription": ["node_modules/rxjs"]
+    }
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,

@@ -1,0 +1,76 @@
+.footer {
+  background-color: #ffffff;
+  transition: all 0.3s ease;
+}
+
+.footer .small {
+  font-size: 0.85rem;
+}
+
+@keyframes pulse-green {
+  0% { box-shadow: 0 0 0 0 rgba(0, 183, 74, 0.7); }
+  70% { box-shadow: 0 0 0 6px rgba(0, 183, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 183, 74, 0); }
+}
+
+.footer a:hover {
+  color: #3b71ca !important;
+  text-decoration: underline !important;
+}
+
+/* Fix the alignment of the dot and text */
+.nvd-status-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px; /* Space between dot and text */
+  vertical-align: middle;
+}
+
+.badge-dot {
+  width: 10px;
+  height: 10px;
+  background-color: #00b74a; /* Ensure color is set */
+  display: inline-block;
+  border-radius: 50%;
+  flex-shrink: 0; /* Prevent the dot from squishing */
+  animation: pulse-green 2s infinite;
+}
+
+/* Sticky Footer Container */
+.app-footer-sticky {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: calc(100% - 240px); /* Adjust based on your sidebar width */
+  height: 45px;
+  background-color: #ffffff;
+  border-top: 1px solid #dee2e6;
+  z-index: 1050;
+  display: flex;
+  align-items: center; /* Vertically centers the content */
+}
+
+/* Pulse Indicator Fix */
+.nvd-status-wrapper {
+  display: flex;
+  align-items: center;
+  white-space: nowrap; /* Prevents text from wrapping and mushing */
+}
+
+.badge-dot {
+  width: 10px;
+  height: 10px;
+  background-color: #00b74a !important;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 10px;
+  flex-shrink: 0; /* Keeps the dot perfectly round */
+  box-shadow: 0 0 0 rgba(0, 183, 74, 0.4);
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0% { box-shadow: 0 0 0 0 rgba(0, 183, 74, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(0, 183, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 183, 74, 0); }
+}

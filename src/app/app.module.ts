@@ -19,8 +19,9 @@ import { MdbScrollspyModule } from 'mdb-angular-ui-kit/scrollspy';
 import { MdbTabsModule } from 'mdb-angular-ui-kit/tabs';
 import { MdbTooltipModule } from 'mdb-angular-ui-kit/tooltip';
 import { MdbValidationModule } from 'mdb-angular-ui-kit/validation';
-import { provideAnimations } from '@angular/platform-browser/animations';
+import {BrowserAnimationsModule, provideAnimations} from '@angular/platform-browser/animations';
 import {LayoutModule} from "./layout/layout.module";
+import { provideToastr } from 'ngx-toastr';
 
 @NgModule({
   declarations: [
@@ -45,10 +46,16 @@ import {LayoutModule} from "./layout/layout.module";
     MdbScrollspyModule,
     MdbTabsModule,
     MdbTooltipModule,
-    MdbValidationModule
+    MdbValidationModule,
+    BrowserAnimationsModule
   ],
   providers: [
-    provideAnimations()
+    provideAnimations(),
+    provideToastr({
+      timeOut: 4000,
+      positionClass: 'toast-bottom-right',
+      preventDuplicates: true,
+    }),
   ],
   bootstrap: [AppComponent]
 })

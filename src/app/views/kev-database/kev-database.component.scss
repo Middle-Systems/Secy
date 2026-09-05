@@ -1,0 +1,45 @@
+/* Styling for Ransomware alert badge */
+.bg-danger-soft {
+  background-color: rgba(249, 49, 84, 0.1);
+  border: 1px solid rgba(249, 49, 84, 0.2);
+}
+
+.extra-small {
+  font-size: 0.7rem;
+}
+
+/* Ensure the table doesn't feel cramped */
+.table td {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.table thead th {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #eee;
+}
+
+/* Specific styling for the Ransomware status */
+.ransomware-pill {
+  font-weight: 600;
+  padding: 0.5em 0.8em;
+  border-radius: 50px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+/* Confirmed State (Red) */
+.ransomware-pill.confirmed {
+  background-color: rgba(220, 53, 69, 0.1); /* Light red tint */
+  color: #dc3545;
+  border: 1px solid rgba(220, 53, 69, 0.25);
+}
+
+/* Unconfirmed State (Grey) */
+.ransomware-pill.unconfirmed {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  border: 1px solid #dee2e6;
+}

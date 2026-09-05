@@ -1,0 +1,53 @@
+.bg-light-primary { background-color: rgba(59, 113, 202, 0.1) !important; }
+.bg-light-danger { background-color: rgba(187, 45, 59, 0.1) !important; }
+.bg-light-warning { background-color: rgba(253, 126, 20, 0.1) !important; }
+.bg-light-info { background-color: rgba(13, 202, 240, 0.1) !important; }
+
+.card {
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+}
+
+.card-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 1.2rem;
+}
+
+.extra-small {
+  font-size: 0.7rem;
+}
+
+.text-truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.confirmed-pill {
+  background-color: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
+  font-size: 0.65rem;
+  border-radius: 4px;
+}
+
+.list-group-item:hover {
+  background-color: #fbfbfb;
+  cursor: pointer;
+}
+
+/* Custom Scrollbar for the feed */
+.list-group::-webkit-scrollbar {
+  width: 4px;
+}
+.list-group::-webkit-scrollbar-thumb {
+  background: #e0e0e0;
+  border-radius: 10px;
+}

@@ -1,16 +1,21 @@
-<div class="container-fluid">
-  <div class="row">
-    <div class="col-12 p-0">
-      <app-header></app-header>
-    </div>
-  </div>
-</div>
-<div class="container-fluid">
-  <div class="row grow">
-    <app-sidenav class="col-2 p-0 custom-nav border-end"></app-sidenav>
-    <div class="content col-10 ps-2 padding h-100">
-      <router-outlet></router-outlet>
+<div class="app-wrapper">
+  <header class="app-header">
+    <app-header></app-header>
+  </header>
+
+  <div class="app-body">
+    <aside class="app-sidebar">
+      <app-sidenav></app-sidenav>
+    </aside>
+
+    <main class="app-content">
+      <div class="container-fluid py-4">
+        <router-outlet></router-outlet>
+      </div>
+    </main>
+
+    <footer class="app-footer-sticky">
       <app-footer></app-footer>
-    </div>
+    </footer>
   </div>
 </div>
