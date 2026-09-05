@@ -81,6 +81,12 @@ schema under test is built by Hibernate from the entities, not by Liquibase. Tha
 suite fully offline and lets the changesets stay Postgres-dialect (`float4`, `uuid`, `timestamp(6)`,
 quoted `"group"`), which H2 would not accept verbatim.
 
+Gotcha: `src/test/resources/application.properties` **replaces** `src/main/resources/application.properties`
+outright — it does not merge with it. Spring resolves `classpath:application.properties` to the first
+match on the classpath, and test resources come first, so any main-profile-only key reads back as
+`null` under test. If you add a property to the main file that your `@SpringBootTest` needs, add it
+to the test file too.
+
 The consequence: **the changelog itself is not exercised by `./gradlew test`.** Verify it against a
 real PostgreSQL before merging — e.g. point `SECY_DB_URL` at a scratch database and boot the app, or
 run `liquibase update` against it. `ddl-auto=validate` in the main profile is the safety net: if a
