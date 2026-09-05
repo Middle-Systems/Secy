@@ -19,20 +19,20 @@ This is a monorepo containing both halves of the platform:
 
 | Path  | Stack | Description |
 |-------|-------|-------------|
-| `ui/` | Angular 18 (module-based), MDB UI Kit, Chart.js | Web client — dashboards, threat-intel databases, product/SBOM catalog. See [`ui/`](ui/). |
+| `ui/` | React 18 + Vite, TypeScript, TanStack Router/Query, Tailwind + shadcn/ui, Recharts | Web client — dashboards, threat-intel databases, product/SBOM catalog. See [`ui/README.md`](ui/README.md). |
 | `api/`| Spring Boot 3.3 (Java 17), Gradle, JPA/PostgreSQL | REST backend — feed ingestion (NVD/EPSS/KEV), SBOM parsing, correlation, stats. See [`api/README.md`](api/README.md). |
 
 The backend was previously the standalone `secy-api` repository; its history is preserved here under `api/` via a git subtree.
 
 ## 🚀 Development
-Both services expect to run together. The frontend proxies `/api/*` to the backend (`ui/src/proxy.conf.js`).
+Both services expect to run together. The frontend proxies `/api/*` to the backend (`ui/vite.config.ts`).
 
 ```bash
 # Backend — starts PostgreSQL via Docker Compose automatically (spring-boot-docker-compose)
 cd api && ./gradlew bootRun          # http://localhost:8080
 
 # Frontend
-cd ui && npm install && npm start    # http://localhost:4200
+cd ui && npm install && npm run dev  # http://localhost:4200
 ```
 
 When the frontend runs inside the devcontainer and the backend runs on the host, the proxy targets `host.docker.internal:8080` automatically. Override with `API_TARGET=http://host:port`.
