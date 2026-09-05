@@ -4,6 +4,13 @@
 # NVD API key — https://nvd.nist.gov/developers/request-an-api-key
 nvd.apikey=
 
+# JWT signing key (HS256) — at least 32 characters. Leave blank and the app generates a
+# random one per process: fine for local dev, but every restart invalidates issued tokens.
+# Generate one with:  openssl rand -base64 48
+#secy.auth.jwt.secret=
+# Turn registration off once the accounts you need exist (the first account is ADMIN).
+#secy.auth.registration-enabled=true
+
 # Point at your own database if not using the bundled compose.yaml
 #spring.datasource.url=jdbc:postgresql://localhost:5433/secy
 #spring.datasource.username=secy
