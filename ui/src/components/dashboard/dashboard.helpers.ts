@@ -13,31 +13,6 @@ export interface VendorCount {
   count: number;
 }
 
-const integerFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-
-/** Format an integer with thousands separators. Non-finite input becomes "0". */
-export function formatInteger(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '0';
-  return integerFormatter.format(Math.round(value));
-}
-
-const dateFormatter = new Intl.DateTimeFormat('en-US', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-});
-
-/**
- * Format an ISO-8601 string as "Sep 3, 2026". Empty input renders an em dash;
- * an unparseable string is returned unchanged.
- */
-export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return dateFormatter.format(parsed);
-}
-
 /** Count occurrences of each key across `items`; blank/nullish keys are skipped. */
 export function countBy<T>(
   items: readonly T[],

@@ -4,8 +4,6 @@ import type { KEV } from '@/api/types';
 
 import {
   countBy,
-  formatDate,
-  formatInteger,
   isKnownRansomware,
   recentlyAddedKev,
   topN,
@@ -28,31 +26,6 @@ function kev(overrides: Partial<KEV>): KEV {
     ...overrides,
   };
 }
-
-describe('formatInteger', () => {
-  it('adds thousands separators', () => {
-    expect(formatInteger(1234567)).toBe('1,234,567');
-  });
-
-  it('rounds and guards non-finite input', () => {
-    expect(formatInteger(12.6)).toBe('13');
-    expect(formatInteger(undefined)).toBe('0');
-    expect(formatInteger(Number.NaN)).toBe('0');
-    expect(formatInteger(Infinity)).toBe('0');
-  });
-});
-
-describe('formatDate', () => {
-  it('formats an ISO string', () => {
-    expect(formatDate('2026-09-03T19:00:00')).toBe('Sep 3, 2026');
-  });
-
-  it('handles empty and unparseable input', () => {
-    expect(formatDate('')).toBe('—');
-    expect(formatDate(undefined)).toBe('—');
-    expect(formatDate('not-a-date')).toBe('not-a-date');
-  });
-});
 
 describe('countBy / topN', () => {
   it('counts keys and skips blank ones', () => {

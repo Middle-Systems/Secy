@@ -10,8 +10,9 @@ import {
   YAxis,
 } from 'recharts';
 
+import { formatInteger } from '@/lib/format';
+
 import type { VendorCount } from './dashboard.helpers';
-import { formatInteger } from './dashboard.helpers';
 
 const SERIES_LABEL = 'Known Exploited CVEs';
 

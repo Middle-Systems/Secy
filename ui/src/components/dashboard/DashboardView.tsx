@@ -7,12 +7,13 @@ import { StatCard } from '@/components/common/StatCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
+import { formatInteger } from '@/lib/format';
+
 import { ExploitFeed } from './ExploitFeed';
 import { RansomwareTargets } from './RansomwareTargets';
 import { SeverityDonut } from './SeverityDonut';
 import { VendorExposureChart } from './VendorExposureChart';
 import {
-  formatInteger,
   recentlyAddedKev,
   topRansomwareTargets,
   topVendorsByExposure,

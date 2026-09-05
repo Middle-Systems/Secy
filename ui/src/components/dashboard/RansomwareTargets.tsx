@@ -1,5 +1,6 @@
+import { formatInteger } from '@/lib/format';
+
 import type { VendorCount } from './dashboard.helpers';
-import { formatInteger } from './dashboard.helpers';
 
 /** Ranked leaderboard of the vendors most often hit by ransomware-linked KEVs. */
 export function RansomwareTargets({ data }: { data: VendorCount[] }) {

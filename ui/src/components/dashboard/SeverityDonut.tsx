@@ -1,6 +1,6 @@
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 
-import { formatInteger } from './dashboard.helpers';
+import { formatInteger } from '@/lib/format';
 
 interface SeverityDonutProps {
   critical: number;
