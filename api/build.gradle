@@ -32,6 +32,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'com.github.package-url:packageurl-java:1.5.0'
 	implementation 'org.liquibase:liquibase-core'
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
@@ -42,6 +43,12 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.security:spring-security-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+springBoot {
+	// Emits META-INF/build-info.properties so a BuildProperties bean is available at
+	// runtime — OpenApiConfig reads the project version from it.
+	buildInfo()
 }
 
 tasks.named('test') {

@@ -1,5 +1,7 @@
 package net.jdesive.secy.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.cyclonedx.CycloneDXFile;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
@@ -18,6 +20,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Slf4j
+@Tag(name = "SBOM", description = "CycloneDX SBOM upload and the vulnerability alerts derived from it")
 @RestController
 @RequestMapping("sbom")
 public class SBOMController {
@@ -33,6 +36,7 @@ public class SBOMController {
         this.alertRepository = alertRepository;
     }
 
+    @Operation(summary = "Upload a CycloneDX SBOM for a product, scan it, and make it the active one")
     @PostMapping("/{productId}/sboms")
     public ResponseEntity<SBOM> uploadSbom(
             @PathVariable UUID productId,
@@ -50,6 +54,7 @@ public class SBOMController {
         return new ResponseEntity<>(savedSbom, HttpStatus.CREATED);
     }
 
+    @Operation(summary = "List the vulnerability alerts raised against an SBOM's components")
     @GetMapping("/{sbomId}/vulnerabilities")
     public ResponseEntity<List<VulnerabilityAlert>> getSbomVulnerabilities(@PathVariable UUID sbomId) {
         // Using the high-performance query we built earlier
