@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-router';
 import { render, type RenderOptions } from '@testing-library/react';
 
+import { RoutePending } from '@/components/common/RoutePending';
 import { createQueryClient } from '@/lib/query-client';
 import { routeTree } from '@/routeTree';
 
@@ -29,6 +30,11 @@ export function renderApp(initialPath = '/dashboard') {
   const router = createRouter({
     routeTree: routeTree as AnyRoute,
     history: createMemoryHistory({ initialEntries: [initialPath] }),
+    // Route views are code-split via `lazyRouteComponent` (see `src/routes/*`);
+    // mirror the real router so tests render the same pending fallback, and show
+    // it immediately so the shell commits without waiting out `defaultPendingMs`.
+    defaultPendingComponent: RoutePending,
+    defaultPendingMs: 0,
   });
 
   const result = render(

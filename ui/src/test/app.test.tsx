@@ -7,7 +7,8 @@ describe('app shell', () => {
   it('renders the shell chrome and mounts the dashboard view', async () => {
     renderApp('/dashboard');
 
-    // Header
+    // Header — rendered eagerly around the route outlet (which shows the
+    // router's pending fallback until the lazy dashboard chunk loads).
     await waitFor(() => {
       expect(screen.getByAltText('Secy')).toBeInTheDocument();
     });
@@ -22,12 +23,16 @@ describe('app shell', () => {
     // Footer
     expect(screen.getByText('All systems operational')).toBeInTheDocument();
 
-    // Routed view — the dashboard mounts and shows its global-sync loader while
-    // the stats query is in flight.
+    // Routed view — once the lazily code-split chunk resolves the dashboard
+    // mounts and shows its global-sync loader while the stats query is in flight.
     expect(
-      screen.getByText('Synchronizing Global Threat Intelligence…'),
+      await screen.findByText(
+        'Synchronizing Global Threat Intelligence…',
+        {},
+        { timeout: 45000 },
+      ),
     ).toBeInTheDocument();
-  });
+  }, 60000);
 
   it('redirects / to /dashboard', async () => {
     const { router } = renderApp('/');
