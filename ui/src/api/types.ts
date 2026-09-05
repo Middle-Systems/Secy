@@ -58,6 +58,48 @@ export interface PageParams {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Ingestion jobs — POST /api/{feed}/ingest, GET /api/jobs                    */
+/* -------------------------------------------------------------------------- */
+
+/** The feed an ingestion job pulls. One job per value may be active at a time. */
+export type JobType = 'NVD' | 'EPSS' | 'KEV';
+
+/**
+ * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
+ * last three are terminal, which is what stops the poll in `useJob`. Use
+ * `isTerminalJobStatus` from `@/lib/jobs` rather than comparing by hand.
+ */
+export type JobStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+/**
+ * A background feed ingestion.
+ *
+ * `POST /api/{feed}/ingest` answers 202 with one of these instead of blocking
+ * for the whole download; the client then polls `GET /api/jobs/{id}`. Listing
+ * jobs (`GET /api/jobs`) returns them inside the usual `Page<T>` envelope.
+ */
+export interface Job {
+  /** UUID. */
+  id: string;
+  type: JobType;
+  status: JobStatus;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+  /** Null while the job is still queued. */
+  startedAt?: string | null;
+  /** Null until the job reaches a terminal status. */
+  finishedAt?: string | null;
+  /** Records written so far — a running count while `RUNNING`. */
+  itemsProcessed: number;
+  /** Last progress line, or the failure message once the job has failed. */
+  message?: string | null;
+  /** Principal name of whoever triggered it, or "system". */
+  triggeredBy?: string | null;
+  /** Server-side optimistic lock. Present on the wire; the UI ignores it. */
+  version?: number;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Dashboard stats — GET /api/stats/dashboard                                 */
 /* -------------------------------------------------------------------------- */
 

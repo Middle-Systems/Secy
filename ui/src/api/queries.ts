@@ -12,6 +12,7 @@
  *    those from the view (`import { toast } from 'sonner'`) so copy stays local
  *    to the screen that triggered the action.
  */
+import { useEffect, useRef } from 'react';
 import {
   keepPreviousData,
   useMutation,
@@ -21,11 +22,16 @@ import {
   type UseQueryOptions,
 } from '@tanstack/react-query';
 
+import { isTerminalJobStatus } from '@/lib/jobs';
+
 import { api } from './client';
 import type {
   CreateProductPayload,
   DashboardStats,
   EPSS,
+  Job,
+  JobStatus,
+  JobType,
   KEV,
   Page,
   PageParams,
@@ -66,6 +72,11 @@ export const queryKeys = {
     vulnerabilities: (sbomId: string) =>
       [...queryKeys.sbom.all, 'vulnerabilities', sbomId] as const,
   },
+  jobs: {
+    all: ['jobs'] as const,
+    detail: (jobId: string) => [...queryKeys.jobs.all, 'detail', jobId] as const,
+    list: (params: JobListParams) => [...queryKeys.jobs.all, 'list', params] as const,
+  },
 } as const;
 
 /** Options a caller may override on any of the query hooks below. */
@@ -77,6 +88,87 @@ type MutationOverrides<TData, TVariables> = Omit<
 
 /** Default page size — matches the Spring controllers' `size` default. */
 export const DEFAULT_PAGE_SIZE = 15;
+
+/* -------------------------------------------------------------------------- */
+/* Ingestion jobs                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** Filters accepted by `GET /api/jobs`. */
+export interface JobListParams {
+  page: number;
+  size: number;
+  type?: JobType;
+  status?: JobStatus;
+}
+
+/** How often `useJob` re-reads a job that has not finished yet. */
+export const JOB_POLL_INTERVAL_MS = 2_000;
+
+/** Which feed's cached data a finished job has just invalidated. */
+const FEED_KEYS: Record<JobType, readonly unknown[]> = {
+  KEV: queryKeys.kev.all,
+  EPSS: queryKeys.epss.all,
+  NVD: queryKeys.nvd.all,
+};
+
+/**
+ * GET /api/jobs/:jobId — poll one ingestion job.
+ *
+ * Disabled until `jobId` is truthy, so a component can call it before an
+ * ingest has been kicked off. While the job is `QUEUED` or `RUNNING` it
+ * refetches every {@link JOB_POLL_INTERVAL_MS}; once it reaches a terminal
+ * status the interval is dropped, so a finished job costs nothing.
+ *
+ * When a job lands on `SUCCEEDED` this also invalidates the feed it filled and
+ * the dashboard stats — that is the moment the ingested rows actually exist,
+ * not the moment the ingest was enqueued.
+ */
+export function useJob(
+  jobId: string | undefined,
+  { poll = true }: { poll?: boolean } = {},
+  options?: QueryOverrides<Job>,
+) {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: queryKeys.jobs.detail(jobId ?? ''),
+    queryFn: () => api.get<Job>(`/jobs/${jobId}`),
+    enabled: Boolean(jobId),
+    refetchInterval: (q) => {
+      if (!poll) return false;
+      return isTerminalJobStatus(q.state.data?.status) ? false : JOB_POLL_INTERVAL_MS;
+    },
+    ...options,
+  });
+
+  // Invalidate once per job, not once per poll after it succeeds.
+  const invalidatedFor = useRef<string | null>(null);
+  const { status, type } = query.data ?? {};
+
+  useEffect(() => {
+    if (!jobId || status !== 'SUCCEEDED' || !type) return;
+    if (invalidatedFor.current === jobId) return;
+    invalidatedFor.current = jobId;
+    void queryClient.invalidateQueries({ queryKey: FEED_KEYS[type] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
+  }, [jobId, status, type, queryClient]);
+
+  return query;
+}
+
+/** GET /api/jobs?page&size&type&status — recent-first list of ingestion jobs. */
+export function useJobs(
+  { page = 0, size = 5, type, status }: Partial<JobListParams> = {},
+  options?: QueryOverrides<Page<Job>>,
+) {
+  const params: JobListParams = { page, size, type, status };
+  return useQuery({
+    queryKey: queryKeys.jobs.list(params),
+    queryFn: () => api.get<Page<Job>>('/jobs', { query: { page, size, type, status } }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
 
 /* -------------------------------------------------------------------------- */
 /* Dashboard stats                                                            */
@@ -109,15 +201,24 @@ export function useKevPage(
   });
 }
 
-/** GET /api/kev/ingest — pulls the latest CISA KEV catalog. */
-export function useIngestKev(options?: MutationOverrides<void, void>) {
+/**
+ * POST /api/kev/ingest — queues a pull of the latest CISA KEV catalog.
+ *
+ * Resolves as soon as the job is enqueued, with the `Job` to poll through
+ * {@link useJob}; it does not wait for the catalog to download. Posting again
+ * while a KEV ingest is already queued or running returns that same job, so a
+ * double click cannot stack two pulls.
+ *
+ * Only the job list is invalidated here — the KEV table has not changed yet.
+ * `useJob` invalidates the feed when the job actually succeeds.
+ */
+export function useIngestKev(options?: MutationOverrides<Job, void>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.get<void>('/kev/ingest'),
+    mutationFn: () => api.post<Job>('/kev/ingest'),
     ...options,
     onSuccess: (...args) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.kev.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       options?.onSuccess?.(...args);
     },
   });
@@ -141,15 +242,17 @@ export function useEpssPage(
   });
 }
 
-/** GET /api/epss/ingest — pulls the latest FIRST EPSS scores. */
-export function useIngestEpss(options?: MutationOverrides<void, void>) {
+/**
+ * POST /api/epss/ingest — queues a pull of the latest FIRST EPSS scores.
+ * Returns the `Job` to poll; see {@link useIngestKev} for the full contract.
+ */
+export function useIngestEpss(options?: MutationOverrides<Job, void>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.get<void>('/epss/ingest'),
+    mutationFn: () => api.post<Job>('/epss/ingest'),
     ...options,
     onSuccess: (...args) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.epss.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       options?.onSuccess?.(...args);
     },
   });
@@ -174,19 +277,19 @@ export function useNvdSearch(
 }
 
 /**
- * GET /api/nvd/ingest — pulls CVE records from the NVD feed.
+ * POST /api/nvd/ingest — queues a pull of CVE records from the NVD feed.
+ * Returns the `Job` to poll; see {@link useIngestKev} for the full contract.
  *
- * Note: the Angular `NvdService` requested this as a relative `api/nvd/ingest`
- * (no leading slash), which only worked from the app root. Fixed here.
+ * This is the one that most needed to stop being synchronous: a full NVD pull
+ * runs for minutes, and the old `GET` held the request open for all of it.
  */
-export function useIngestNvd(options?: MutationOverrides<void, void>) {
+export function useIngestNvd(options?: MutationOverrides<Job, void>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.get<void>('/nvd/ingest'),
+    mutationFn: () => api.post<Job>('/nvd/ingest'),
     ...options,
     onSuccess: (...args) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.nvd.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       options?.onSuccess?.(...args);
     },
   });
