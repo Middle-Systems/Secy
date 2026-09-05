@@ -6,6 +6,7 @@ import { useEpssPage, useIngestEpss } from '@/api/queries';
 import { DataTable } from '@/components/common/DataTable';
 import { IngestButton } from '@/components/common/IngestButton';
 import { ListPageHeader } from '@/components/common/ListPageHeader';
+import { RecentIngestions } from '@/components/jobs/RecentIngestions';
 import { Pagination } from '@/components/common/Pagination';
 import { SearchInput } from '@/components/common/SearchInput';
 import { Button } from '@/components/ui/button';
@@ -84,6 +85,8 @@ export function EpssDatabaseView() {
           </>
         }
       />
+
+      <RecentIngestions type="EPSS" />
 
       {showInlineError ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-border py-16 text-center">

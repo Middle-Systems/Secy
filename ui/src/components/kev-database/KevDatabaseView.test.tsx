@@ -6,11 +6,22 @@ import type { KEV, Page } from '@/api/types';
 import { renderWithProviders } from '@/test/render';
 
 const useKevPage = vi.fn();
-const mutateAsync = vi.fn().mockResolvedValue(undefined);
+const useJobs = vi.fn();
+// Ingests are background jobs now: the mutation resolves with the queued Job,
+// and the button polls `useJob` from there.
+const mutateAsync = vi.fn().mockResolvedValue({
+  id: 'job-1',
+  type: 'KEV',
+  status: 'QUEUED',
+  createdAt: '2026-09-05T12:00:00',
+  itemsProcessed: 0,
+});
 
 vi.mock('@/api/queries', () => ({
   useKevPage: (...args: unknown[]) => useKevPage(...args),
   useIngestKev: () => ({ mutateAsync, isPending: false }),
+  useJob: () => ({ data: undefined, isPending: false, isError: false }),
+  useJobs: (...args: unknown[]) => useJobs(...args),
 }));
 
 import { KevDatabaseView } from './KevDatabaseView';
@@ -46,6 +57,8 @@ function page(content: KEV[]): Page<KEV> {
 }
 
 function mockQuery(over: Record<string, unknown>) {
+  // No ingestion history by default — RecentIngestions renders nothing.
+  useJobs.mockReturnValue({ data: undefined, isPending: false, isError: false });
   useKevPage.mockReturnValue({
     data: undefined,
     isPending: false,

@@ -7,6 +7,7 @@ import type { KEV } from '@/api/types';
 import { DataTable } from '@/components/common/DataTable';
 import { IngestButton } from '@/components/common/IngestButton';
 import { ListPageHeader } from '@/components/common/ListPageHeader';
+import { RecentIngestions } from '@/components/jobs/RecentIngestions';
 import { Pagination } from '@/components/common/Pagination';
 import { SearchInput } from '@/components/common/SearchInput';
 import { Button } from '@/components/ui/button';
@@ -87,6 +88,8 @@ export function KevDatabaseView() {
           </>
         }
       />
+
+      <RecentIngestions type="KEV" />
 
       {showInlineError ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-border py-16 text-center">

@@ -6,11 +6,22 @@ import type { EPSS, Page } from '@/api/types';
 import { renderWithProviders } from '@/test/render';
 
 const useEpssPage = vi.fn();
-const mutateAsync = vi.fn().mockResolvedValue(undefined);
+const useJobs = vi.fn();
+// Ingests are background jobs now: the mutation resolves with the queued Job,
+// and the button polls `useJob` from there.
+const mutateAsync = vi.fn().mockResolvedValue({
+  id: 'job-1',
+  type: 'EPSS',
+  status: 'QUEUED',
+  createdAt: '2026-09-05T12:00:00',
+  itemsProcessed: 0,
+});
 
 vi.mock('@/api/queries', () => ({
   useEpssPage: (...args: unknown[]) => useEpssPage(...args),
   useIngestEpss: () => ({ mutateAsync, isPending: false }),
+  useJob: () => ({ data: undefined, isPending: false, isError: false }),
+  useJobs: (...args: unknown[]) => useJobs(...args),
 }));
 
 const toastError = vi.fn();
@@ -50,6 +61,8 @@ function page(content: EPSS[]): Page<EPSS> {
 }
 
 function mockQuery(over: Record<string, unknown>) {
+  // No ingestion history by default — RecentIngestions renders nothing.
+  useJobs.mockReturnValue({ data: undefined, isPending: false, isError: false });
   useEpssPage.mockReturnValue({
     data: undefined,
     isPending: false,
