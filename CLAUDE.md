@@ -51,5 +51,7 @@ or run the backend on the host entirely.
   under `src/routes/` and assembled in `src/routeTree.ts`, shared types live in `src/api/types.ts`,
   and `@/` aliases `ui/src/`. Style with Tailwind + the shadcn primitives in `src/components/ui/`.
 - API: `net.jdesive.secy` package; `controller` / `service` / `persistence` (repo + `entity`) / `model`.
-- `api/src/main/resources/application.properties` currently holds real-looking DB creds and an
-  NVD API key — treat as secrets to externalize, don't copy into new files.
+- API config is env-var driven: `NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`, `SECY_DB_PASSWORD`
+  (see `application.properties` for defaults). For local dev, copy
+  `application-local.properties.example` → `application-local.properties` (git-ignored) and fill in
+  the NVD key. Never put a real secret in a tracked file.

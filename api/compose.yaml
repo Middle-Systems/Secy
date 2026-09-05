@@ -3,7 +3,7 @@ services:
     image: 'postgres:latest'
     environment:
       - 'POSTGRES_DB=secy'
-      - 'POSTGRES_PASSWORD=secy'
+      - 'POSTGRES_PASSWORD=${SECY_DB_PASSWORD:-secy}'
       - 'POSTGRES_USER=secy'
     ports:
       - '5433:5432'

@@ -1,0 +1,10 @@
+# Copy to `application-local.properties` (git-ignored) and fill in your own values.
+# Anything set here overrides application.properties for local development only.
+
+# NVD API key — https://nvd.nist.gov/developers/request-an-api-key
+nvd.apikey=
+
+# Point at your own database if not using the bundled compose.yaml
+#spring.datasource.url=jdbc:postgresql://localhost:5433/secy
+#spring.datasource.username=secy
+#spring.datasource.password=secy

@@ -29,11 +29,18 @@ Both services expect to run together. The frontend proxies `/api/*` to the backe
 
 ```bash
 # Backend — starts PostgreSQL via Docker Compose automatically (spring-boot-docker-compose)
-cd api && ./gradlew bootRun          # http://localhost:8080
+cd api
+cp src/main/resources/application-local.properties.example src/main/resources/application-local.properties
+#   ...then put your NVD API key in that (git-ignored) file
+./gradlew bootRun                    # http://localhost:8080
 
 # Frontend
 cd ui && npm install && npm run dev  # http://localhost:4200
 ```
+
+API configuration is environment-variable driven (`NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`,
+`SECY_DB_PASSWORD`); `application-local.properties` is the local-only override for those. Get an NVD
+API key at <https://nvd.nist.gov/developers/request-an-api-key>.
 
 When the frontend runs inside the devcontainer and the backend runs on the host, the proxy targets `host.docker.internal:8080` automatically. Override with `API_TARGET=http://host:port`.
 

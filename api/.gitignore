@@ -1,6 +1,11 @@
 HELP.md
 .gradle
 build/
+
+### Local secrets / config (never commit) ###
+.env
+src/main/resources/application-local.properties
+
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
