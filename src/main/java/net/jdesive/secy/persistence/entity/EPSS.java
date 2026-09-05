@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
+import java.util.Date;
+
 @Setter
 @Getter
 @Entity
@@ -18,5 +21,7 @@ public class EPSS {
     private float epss;
 
     private float percentile;
+
+    private LocalDateTime date;
 
 }

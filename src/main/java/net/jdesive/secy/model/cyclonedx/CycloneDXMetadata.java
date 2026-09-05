@@ -10,7 +10,7 @@ public class CycloneDXMetadata {
 
     private Date timestamp;
 
-    private List<CycloneDXTool> tools;
+    private CycloneDXToolComponent tools;
 
     private CycloneDXComponent component;
 

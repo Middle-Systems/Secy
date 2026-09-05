@@ -9,12 +9,16 @@ import net.jdesive.secy.model.nvd.*;
 import net.jdesive.secy.persistence.VulnerabilityRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -45,6 +49,11 @@ public class NVDService {
         }
 
         return optional.get();
+    }
+
+    public Page<Vulnerability> findByIdContainingIgnoreCaseOrDescriptionContainingIgnoreCase(String search, int page, int size) {
+        return vulnerabilityRepository.findByIdContainingIgnoreCaseOrDescriptionContainingIgnoreCase(
+                search, search, PageRequest.of(page, size));
     }
 
     public void ingestData() {
@@ -78,8 +87,8 @@ public class NVDService {
 
             Vulnerability vulnerability = new Vulnerability();
             vulnerability.setId(nvdVulnerability.getCve().getId());
-            vulnerability.setPublished(nvdVulnerability.getCve().getPublished());
-            vulnerability.setLastModified(nvdVulnerability.getCve().getLastModified());
+            vulnerability.setPublished(LocalDateTime.ofInstant(nvdVulnerability.getCve().getPublished().toInstant(), ZoneId.systemDefault()));
+            vulnerability.setLastModified(LocalDateTime.ofInstant(nvdVulnerability.getCve().getLastModified().toInstant(), ZoneId.systemDefault()));
             vulnerability.setSourceIdentifier(nvdVulnerability.getCve().getSourceIdentifier());
             vulnerability.setDescription(description);
             vulnerability.setVulnStatus(nvdVulnerability.getCve().getVulnStatus());

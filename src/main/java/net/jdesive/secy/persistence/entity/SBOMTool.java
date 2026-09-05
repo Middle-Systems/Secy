@@ -8,6 +8,8 @@ import lombok.Setter;
 import lombok.ToString;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.UUID;
+
 @Getter
 @Setter
 @Entity
@@ -17,13 +19,16 @@ public class SBOMTool {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    private String id;
+    private UUID id;
 
-    private String vendor;
+    @Column(name = "`group`")
+    private String group;
 
     private String name;
 
     private String version;
+
+    private String type;
 
     @JsonIncludeProperties(value = {"id"})
     @ManyToOne(fetch = FetchType.LAZY)

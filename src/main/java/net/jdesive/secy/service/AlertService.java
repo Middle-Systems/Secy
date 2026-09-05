@@ -2,6 +2,7 @@ package net.jdesive.secy.service;
 
 import com.github.packageurl.MalformedPackageURLException;
 import com.github.packageurl.PackageURL;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.persistence.*;
 import net.jdesive.secy.persistence.entity.*;
@@ -9,7 +10,9 @@ import net.jdesive.secy.util.Version;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -63,46 +66,64 @@ public class AlertService {
             this.dockerMisconfigurationAlertRepository.save(alert);
         });
     }
-
+    
     public void generateAlerts(SBOM sbom) {
-        cpeMatchRepository.findAll().forEach(cpeMatch -> {
-            String[] splitStr = cpeMatch.getCriteria().split(":");
+        log.info("Starting optimized vulnerability scan for SBOM: {}", sbom.getId());
 
-            String packageName = splitStr[4];
-            String packageVersion = splitStr[5];
+        List<VulnerabilityAlert> newAlerts = new ArrayList<>();
 
-            for (SBOMComponent component : sbom.getComponents()) {
+        // 1. Group components by name to reduce redundant DB hits
+        for (SBOMComponent component : sbom.getComponents()) {
+            try {
+                PackageURL purl = new PackageURL(component.getPurl());
+                String name = purl.getName();
+                String versionStr = purl.getVersion();
 
-                try {
-                    PackageURL purl = new PackageURL(component.getPurl());
-                    if (purl.getName().equals(packageName)) {
-                        if (packageVersion.equals("*")) {
-                            VulnerabilityAlert alert = new VulnerabilityAlert();
-                            alert.setVulnerability(cpeMatch.getOperator().getCve());
-                            alert.setComponent(component);
-                            this.vulnerabilityAlertRepository.save(alert);
-                            continue;
-                        }
-                        try {
-                            Version packageVersionObj = new Version(purl.getVersion());
-                            Version vulnVersion = new Version(packageVersion);
-                            if(packageVersionObj.compareTo(vulnVersion) <= 0) {
-                                VulnerabilityAlert alert = new VulnerabilityAlert();
-                                alert.setVulnerability(cpeMatch.getOperator().getCve());
-                                alert.setComponent(component);
-                                this.vulnerabilityAlertRepository.save(alert);
-                            }
-                        } catch (IllegalArgumentException ex) {
-                            log.error("Error parsing version for CPE: {}", cpeMatch);
-                        }
+                // 2. Query only for CPEs that match this specific package name
+                // You should add this method to your cpeMatchRepository
+                String pattern = "cpe:2.3:a:%:" + name + ":%";
+                List<CPEMatch> matches = cpeMatchRepository.findByCriteriaWithDetails(pattern);
 
+                for (CPEMatch match : matches) {
+                    // Criteria format: cpe:2.3:a:vendor:packageName:version:...
+                    String[] splitStr = match.getCriteria().split(":");
+                    if (splitStr.length < 6) continue;
+
+                    String vulnVersion = splitStr[5];
+
+                    if (isVulnerable(versionStr, vulnVersion)) {
+                        VulnerabilityAlert alert = new VulnerabilityAlert();
+                        alert.setVulnerability(match.getOperator().getCve());
+                        alert.setComponent(component);
+                        newAlerts.add(alert);
                     }
-                } catch (MalformedPackageURLException e) {
-                    log.error("Error parsing package url of component {}", component.getId());
                 }
-
+            } catch (MalformedPackageURLException e) {
+                log.error("Invalid PURL for component {}: {}", component.getId(), component.getPurl());
             }
-        });
+        }
+
+        // 3. Batch save everything at the end
+        if (!newAlerts.isEmpty()) {
+            vulnerabilityAlertRepository.saveAll(newAlerts);
+            log.info("Scan complete. Generated {} alerts.", newAlerts.size());
+        }
+    }
+
+    // Helper to keep the logic clean
+    private boolean isVulnerable(String componentVersion, String cpeVersion) {
+        if ("*".equals(cpeVersion) || "-".equals(cpeVersion)) return true;
+
+        try {
+            // Only attempt rich version comparison if both look like numbers/dots
+            Version compV = new Version(componentVersion);
+            Version vulnV = new Version(cpeVersion);
+            return compV.compareTo(vulnV) <= 0;
+        } catch (Exception e) {
+            // Fallback: If we can't parse them, just do a direct match
+            log.warn("Could not parse versions for comparison: {} vs {}", componentVersion, cpeVersion);
+            return componentVersion.equals(cpeVersion);
+        }
     }
 
 }

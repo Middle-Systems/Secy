@@ -7,10 +7,9 @@ import java.util.List;
 @Data
 public class CycloneDXTool {
 
-    private String vendor;
+    private String group;
     private String name;
+    private String type;
     private String version;
-
-    private List<CycloneDXToolHashes> hashes;
 
 }

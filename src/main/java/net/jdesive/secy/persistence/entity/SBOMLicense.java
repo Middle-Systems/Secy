@@ -8,6 +8,8 @@ import lombok.Setter;
 import lombok.ToString;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.UUID;
+
 @Getter
 @Setter
 @Entity
@@ -17,7 +19,7 @@ public class SBOMLicense {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    private String id;
+    private UUID id;
 
     private String license;
 

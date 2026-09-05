@@ -7,6 +7,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
 import java.util.Date;
 
 @Getter
@@ -24,7 +25,7 @@ public class KEV {
 
     private String name;
 
-    private Date added;
+    private LocalDateTime added;
 
     @Column(length = 1024)
     private String description;
