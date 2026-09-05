@@ -1,0 +1,6 @@
+databaseChangeLog:
+  - includeAll:
+      # Relative to this file's own directory (db/changelog/), so a new migration is
+      # a new file in changes/ — this master changelog never needs editing.
+      path: changes/
+      relativeToChangelogFile: true
