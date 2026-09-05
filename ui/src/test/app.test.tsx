@@ -4,7 +4,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { renderApp } from '@/test/render';
 
 describe('app shell', () => {
-  it('renders the shell chrome and the dashboard placeholder', async () => {
+  it('renders the shell chrome and mounts the dashboard view', async () => {
     renderApp('/dashboard');
 
     // Header
@@ -22,8 +22,11 @@ describe('app shell', () => {
     // Footer
     expect(screen.getByText('All systems operational')).toBeInTheDocument();
 
-    // Routed view
-    expect(screen.getByText('Dashboard — coming soon')).toBeInTheDocument();
+    // Routed view — the dashboard mounts and shows its global-sync loader while
+    // the stats query is in flight.
+    expect(
+      screen.getByText('Synchronizing Global Threat Intelligence…'),
+    ).toBeInTheDocument();
   });
 
   it('redirects / to /dashboard', async () => {
