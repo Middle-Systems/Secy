@@ -37,6 +37,11 @@ cd ui && npm install && npm start    # http://localhost:4200
 
 When the frontend runs inside the devcontainer and the backend runs on the host, the proxy targets `host.docker.internal:8080` automatically. Override with `API_TARGET=http://host:port`.
 
+## 📄 License
+Secy is licensed under the **GNU Affero General Public License v3.0** ([`LICENSE`](LICENSE)). You can run it, modify it, and self-host it freely; if you offer it as a network service, the AGPL requires you to make your modified source available to its users.
+
+The project is run on an **open-core** basis: the platform in this repository is and stays AGPL. Some future enterprise-oriented add-ons (e.g. SSO, fine-grained RBAC, audit logging) will be distributed under a separate commercial license. A hosted, managed version is offered as a paid service — self-hosting the open-source platform is always free.
+
 ## 🧠 How It Works: 
 Noise Reduction LogicThe primary goal of Secy is to separate "vulnerabilities that exist" from "vulnerabilities that matter." To do this, the platform passes every ingested finding through a three-stage intelligence funnel.
 
