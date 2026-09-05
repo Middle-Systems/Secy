@@ -5,6 +5,8 @@ import net.jdesive.secy.persistence.entity.CPEMatch;
 import net.jdesive.secy.persistence.entity.CPEOperator;
 import net.jdesive.secy.persistence.entity.Reference;
 import net.jdesive.secy.persistence.entity.Vulnerability;
+import net.jdesive.secy.model.ingest.IngestResult;
+import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.model.nvd.*;
 import net.jdesive.secy.persistence.VulnerabilityRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 
 @Slf4j
 @Service
@@ -30,9 +33,12 @@ public class NVDService {
 
     private VulnerabilityRepository vulnerabilityRepository;
 
+    private final RestTemplate restTemplate;
+
     @Autowired
-    public NVDService(VulnerabilityRepository vulnerabilityRepository) {
+    public NVDService(VulnerabilityRepository vulnerabilityRepository, RestTemplate restTemplate) {
         this.vulnerabilityRepository = vulnerabilityRepository;
+        this.restTemplate = restTemplate;
     }
 
     private final String cveApiUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0";
@@ -56,24 +62,43 @@ public class NVDService {
                 search, search, PageRequest.of(page, size));
     }
 
-    public void ingestData() {
+    /** Ingest with nothing watching. Kept so any non-job caller still works. */
+    public IngestResult ingestData() {
+        return ingestData(JobProgress.NOOP);
+    }
+
+    /**
+     * Pull every CVE page from the NVD 2.0 feed, reporting the running count to {@code progress}
+     * after each page — this is the long one, so the job row needs to move.
+     *
+     * @throws CancellationException if {@code progress} asks to stop between pages
+     */
+    public IngestResult ingestData(JobProgress progress) {
 
        NVDCVEResult result = this.getDataAtOffset(0);
-       this.saveVulnerabilities(result);
+       int processed = this.saveVulnerabilities(result);
        int total = result.getTotalResults();
        int offset = this.resultsPerPage;
+       progress.report(processed, "Ingested " + processed + " of " + total + " CVE records…");
 
        while(offset < total) {
 
+           if (progress.isCancelled()) {
+               throw new CancellationException("NVD ingest cancelled after " + processed + " records");
+           }
+
            NVDCVEResult nestedResult = this.getDataAtOffset(offset);
            offset = this.resultsPerPage + offset;
-           this.saveVulnerabilities(nestedResult);
+           processed += this.saveVulnerabilities(nestedResult);
+           progress.report(processed, "Ingested " + processed + " of " + total + " CVE records…");
        }
 
+       return IngestResult.of(processed, "CVE records");
     }
 
+    /** @return how many vulnerabilities were written */
     @Transactional
-    public void saveVulnerabilities(NVDCVEResult result) {
+    public int saveVulnerabilities(NVDCVEResult result) {
 
         List<Vulnerability> vulns = new ArrayList<>();
         for (NVDVulnerability nvdVulnerability : result.getVulnerabilities()) {
@@ -168,6 +193,7 @@ public class NVDService {
             vulns.add(vulnerability);
         }
         this.vulnerabilityRepository.saveAll(vulns);
+        return vulns.size();
     }
 
     private NVDCVEResult getDataAtOffset(int offset) {
@@ -185,9 +211,7 @@ public class NVDService {
                 .encode()
                 .toUriString();
 
-        RestTemplate template = new RestTemplate();
-
-        ResponseEntity<NVDCVEResult> result = template.exchange(urlTemplate, HttpMethod.GET, entity, NVDCVEResult.class);
+        ResponseEntity<NVDCVEResult> result = this.restTemplate.exchange(urlTemplate, HttpMethod.GET, entity, NVDCVEResult.class);
 
         if (!result.getStatusCode().is2xxSuccessful()) {
             throw new RuntimeException("Error processing NVD Data. API returned non success status code. [" + result.getStatusCode().value() + "]");

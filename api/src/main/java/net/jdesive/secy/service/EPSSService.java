@@ -3,7 +3,8 @@ package net.jdesive.secy.service;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.epss.EPSSData;
 import net.jdesive.secy.model.epss.EPSSResponse;
-import net.jdesive.secy.model.nvd.NVDCVEResult;
+import net.jdesive.secy.model.ingest.IngestResult;
+import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.EPSSRepository;
 import net.jdesive.secy.persistence.entity.EPSS;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 
 @Slf4j
 @Service
@@ -31,9 +33,12 @@ public class EPSSService {
 
     private final EPSSRepository epssRepository;
 
+    private final RestTemplate restTemplate;
+
     @Autowired
-    public EPSSService(EPSSRepository epssRepository) {
+    public EPSSService(EPSSRepository epssRepository, RestTemplate restTemplate) {
         this.epssRepository = epssRepository;
+        this.restTemplate = restTemplate;
     }
 
     public Page<EPSS> getPagedEpss(int page, int size, String search) {
@@ -46,20 +51,39 @@ public class EPSSService {
         return epssRepository.searchEpss(search, pageable);
     }
 
-    public void ingestEPSSData() {
+    /** Ingest with nothing watching. Kept so any non-job caller still works. */
+    public IngestResult ingestEPSSData() {
+        return ingestEPSSData(JobProgress.NOOP);
+    }
+
+    /**
+     * Pull every EPSS page from FIRST, reporting the running count to {@code progress} after each
+     * one so the ingestion job row moves while the run is going.
+     *
+     * @throws CancellationException if {@code progress} asks to stop between pages
+     */
+    public IngestResult ingestEPSSData(JobProgress progress) {
         EPSSResponse result = this.getDataAtOffset(0);
         int total = result.getTotal();
         int offset = this.resultsPerPage;
-        this.saveEPSS(result);
+        int processed = this.saveEPSS(result);
+        progress.report(processed, "Ingested " + processed + " of " + total + " EPSS scores…");
 
         while(offset < total) {
+            if (progress.isCancelled()) {
+                throw new CancellationException("EPSS ingest cancelled after " + processed + " scores");
+            }
             EPSSResponse nestedResult = this.getDataAtOffset(offset);
             offset = this.resultsPerPage + offset;
-            this.saveEPSS(nestedResult);
+            processed += this.saveEPSS(nestedResult);
+            progress.report(processed, "Ingested " + processed + " of " + total + " EPSS scores…");
         }
+
+        return IngestResult.of(processed, "EPSS scores");
     }
 
-    public void saveEPSS(EPSSResponse response) {
+    /** @return how many scores were written */
+    public int saveEPSS(EPSSResponse response) {
         List<EPSS> epsses = new ArrayList<>();
         for (EPSSData epssData : response.getData()) {
             EPSS epss = new EPSS();
@@ -70,6 +94,7 @@ public class EPSSService {
             epsses.add(epss);
         }
         this.epssRepository.saveAll(epsses);
+        return epsses.size();
     }
 
     private EPSSResponse getDataAtOffset(int offset) {
@@ -86,9 +111,7 @@ public class EPSSService {
                 .encode()
                 .toUriString();
 
-        RestTemplate template = new RestTemplate();
-
-        ResponseEntity<EPSSResponse> result = template.exchange(urlTemplate, HttpMethod.GET, entity, EPSSResponse.class);
+        ResponseEntity<EPSSResponse> result = this.restTemplate.exchange(urlTemplate, HttpMethod.GET, entity, EPSSResponse.class);
 
         if (!result.getStatusCode().is2xxSuccessful()) {
             throw new RuntimeException("Error processing EPSS Data. API returned non success status code. [" + result.getStatusCode().value() + "]");
