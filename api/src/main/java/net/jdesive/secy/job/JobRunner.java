@@ -2,6 +2,7 @@ package net.jdesive.secy.job;
 
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.config.AsyncConfig;
+import net.jdesive.secy.events.FeedIngestedEvent;
 import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.Job;
@@ -12,6 +13,7 @@ import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -56,6 +58,8 @@ public class JobRunner {
 
     private final IngestionJobProperties properties;
 
+    private final ApplicationEventPublisher events;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -69,13 +73,15 @@ public class JobRunner {
                      EPSSService epssService,
                      NVDService nvdService,
                      @Qualifier(AsyncConfig.INGESTION_EXECUTOR) Executor executor,
-                     IngestionJobProperties properties) {
+                     IngestionJobProperties properties,
+                     ApplicationEventPublisher events) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
         this.nvdService = nvdService;
         this.executor = executor;
         this.properties = properties;
+        this.events = events;
     }
 
     /**
@@ -137,6 +143,10 @@ public class JobRunner {
             IngestResult result = dispatch(type, progress);
             jobService.finish(id, JobStatus.SUCCEEDED, result.itemsProcessed(), result.message());
             log.info("{} ingestion job {} succeeded: {}", type, id, result.message());
+            // Downstream consequences of a feed changing (re-running the actionable funnel over
+            // existing alerts) hang off this event rather than another job row. See
+            // ReEnrichmentListener.
+            events.publishEvent(new FeedIngestedEvent(id, type));
         } catch (CancellationException e) {
             Thread.currentThread().interrupt();
             jobService.finish(id, JobStatus.CANCELLED, progress.itemsProcessed, "Cancelled before completion.");

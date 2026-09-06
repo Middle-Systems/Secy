@@ -20,7 +20,8 @@ items: KEV-listed OR EPSS > 0.1.
   - `host.docker.internal:8080` when `DEVCONTAINER=true` (frontend in container, backend on host), else
   - `localhost:8080`.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
-  `/products`, `/sbom/{id}/vulnerabilities`, `/stats/dashboard`, plus CIS/docker controllers.
+  `/products`, `/sbom/{id}/vulnerabilities`, `/actionable`, `/actionable/{id}`, `/stats/dashboard`,
+  plus CIS/docker controllers.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via
@@ -58,7 +59,9 @@ devcontainer reaches it via `host.docker.internal:5433` — `SECY_DB_URL` is pre
 - API: `net.jdesive.secy` package; `controller` / `service` / `persistence` (repo + `entity`) / `model`.
 - API config is env-var driven: `NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`, `SECY_DB_PASSWORD`,
   `SECY_AUTH_JWT_SECRET` (HS256 signing key, ≥32 chars; blank generates a throwaway one per process
-  and logs a WARN), `SECY_AUTH_REGISTRATION_ENABLED`
+  and logs a WARN), `SECY_AUTH_REGISTRATION_ENABLED`,
+  `SECY_ACTIONABLE_EPSS_THRESHOLD` (default `0.1` — an alert is actionable when its CVE is
+  KEV-listed **or** its EPSS score is strictly above this)
   (see `application.properties` for defaults). For local dev, copy
   `application-local.properties.example` → `application-local.properties` (git-ignored) and fill in
   the NVD key. Never put a real secret in a tracked file.

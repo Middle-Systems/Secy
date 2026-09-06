@@ -10,6 +10,7 @@ import net.jdesive.secy.util.Version;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -26,16 +27,20 @@ public class AlertService {
 
     private final DockerComplianceReportRepository dockerComplianceReportRepository;
 
+    private final EnrichmentService enrichmentService;
+
     @Autowired
     public AlertService(CPEMatchRepository cpeMatchRepository, VulnerabilityAlertRepository vulnerabilityAlertRepository,
                         DockerVulnerabilityAlertRepository dockerVulnerabilityAlertRepository,
                         DockerMisconfigurationAlertRepository dockerMisconfigurationAlertRepository,
-                        DockerComplianceReportRepository dockerComplianceReportRepository) {
+                        DockerComplianceReportRepository dockerComplianceReportRepository,
+                        EnrichmentService enrichmentService) {
         this.cpeMatchRepository = cpeMatchRepository;
         this.vulnerabilityAlertRepository = vulnerabilityAlertRepository;
         this.dockerVulnerabilityAlertRepository = dockerVulnerabilityAlertRepository;
         this.dockerMisconfigurationAlertRepository = dockerMisconfigurationAlertRepository;
         this.dockerComplianceReportRepository = dockerComplianceReportRepository;
+        this.enrichmentService = enrichmentService;
     }
 
     public void generateDockerComplianceAlerts(String reportId) {
@@ -48,6 +53,12 @@ public class AlertService {
         this.generateAlerts(optional.get());
     }
 
+    /**
+     * Docker/CIS alerts are a separate entity ({@link DockerVulnerabilityAlert}) with no join to
+     * {@link Vulnerability}, so the actionable funnel does not reach them yet. Phase 5 folds the
+     * compliance path into the same enrichment once the report vulnerabilities resolve to CVEs;
+     * until then these rows stay outside {@code GET /actionable} by design.
+     */
     public void generateAlerts(DockerComplianceReport report) {
         report.getVulnerabilities().forEach(vuln -> {
             DockerVulnerabilityAlert alert = new DockerVulnerabilityAlert();
@@ -95,6 +106,10 @@ public class AlertService {
                         VulnerabilityAlert alert = new VulnerabilityAlert();
                         alert.setVulnerability(match.getOperator().getCve());
                         alert.setComponent(component);
+                        alert.setCreatedAt(LocalDateTime.now());
+                        // Run the funnel here, once, rather than joining KEV/EPSS per request.
+                        // Nothing in the SBOM path carries a scanner fix version yet (Phase 4).
+                        enrichmentService.enrich(alert);
                         newAlerts.add(alert);
                     }
                 }
