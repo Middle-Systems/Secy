@@ -10,7 +10,7 @@ compliance reports into a short, ranked list of vulnerabilities that actually ma
 
 Someone clones the repo, runs `docker compose up`, registers the first (admin) user,
 points Secy at their assets, and gets an **Actionable Items** screen driven by the
-funnel: *KEV-listed **OR** EPSS > 0.1*.
+funnel: *KEV-listed **OR** EPSS > 0.1 **OR** a matched compromise indicator*.
 
 ### Decisions locked in (2026-09-05)
 
@@ -22,11 +22,12 @@ funnel: *KEV-listed **OR** EPSS > 0.1*.
 | Feeds (MVP) | NVD, KEV, EPSS, **OSV.dev**, **CISA Vulnrichment / CVE List v5**. OSV supplies package↔CVE matches + per-ecosystem fix versions; Vulnrichment/CVE-5.1 supplies SSVC decision points, current CVSS/CWE/CPE (NVD has a backlog) and `REJECTED`/`DISPUTED` status. KEV = exploitation, EPSS = probability — neither is replaceable. NVD stays canonical for non-package (OS/firmware/proprietary) CPE data. Further feeds tracked in **Feed backlog** below. |
 | Fix version | Every actionable item carries a fix state: `FIXED` (+ version(s)), `NO_FIX` (none published yet), `UNKNOWN`. Shown as a badge/column; opt-in "only with a fix" filter, remembered per-user. Sources in precedence order: OSV (packages) → scanner `FixedVersion` (assets) → NVD CPE-range-derived (approximate, flagged). |
 | Exploit signal | Beyond KEV membership, each alert carries `exploitMaturity` (`NONE` / `POC` / `WEAPONIZED` / `IN_THE_WILD`) derived from a merged public-exploit index (Nuclei templates + Metasploit modules + PoC-in-GitHub) and KEV. Plus `kevDueDate`, `knownRansomwareUse`, `epssPercentile` surfaced directly. |
+| Compromise detection | Supply-chain scope only (what Secy actually holds data for): match SBOM components + file hashes against **OpenSSF Malicious Packages** and **abuse.ch MalwareBazaar**. Produces a `CompromiseFinding` (separate from `VulnerabilityAlert`) — "you ship a known-malicious dependency/file", not "you have a vuln". IOC-vs-telemetry validation needs a data source Secy doesn't have → **vNext**, see below. |
 | SBOM formats | **CycloneDX + SPDX**, both normalized to one internal component model. |
-| Infra inventory | **Trivy / Grype JSON ingest** for MVP. **Cloud/agent discovery** is a stretch item (Phase 9) and may land as a fast-follow. |
+| Infra inventory | **Trivy / Grype JSON ingest** for MVP. **Cloud/agent discovery** is a stretch item (Phase 10) and may land as a fast-follow. |
 | Compliance | Docker / CIS: finish the backend, build the Compliance view. |
 | Triage | Alert state workflow (ack / snooze / resolve / false-positive) with history. |
-| Ingestion | Scheduled auto-refresh of NVD/KEV/EPSS on a cron; NVD incremental pulls. |
+| Ingestion | Scheduled auto-refresh of every feed on a cron; NVD incremental pulls. |
 | Notifications | Email + generic webhook on new actionable items. |
 | Reporting | CSV + PDF export of the actionable list / posture summary. |
 | Capacity | Solo + Claude Code sessions. Milestone-paced, no hard date. |
@@ -35,8 +36,8 @@ funnel: *KEV-listed **OR** EPSS > 0.1*.
 
 Multi-tenancy, billing, self-serve sign-up, OIDC/SSO, fine-grained RBAC, audit log
 (these are the planned open-core commercial add-ons), Helm chart, hosted SaaS,
-agent-based fleet discovery (unless Phase 9 finishes early), SPDX RDF/XML (JSON only),
-non-Docker CIS benchmarks.
+agent-based fleet discovery (unless Phase 10 finishes early), SPDX RDF/XML (JSON only),
+non-Docker CIS benchmarks, SIEM/EDR-backed IOC validation (vNext).
 
 ---
 
@@ -61,9 +62,10 @@ non-Docker CIS benchmarks.
 4. No fix-version data anywhere — an alert can't say whether a patch exists.
 5. Only 3 feeds; no OSV (package matching leans entirely on NVD CPE guessing), no exploit-availability signal, and NVD's analysis backlog leaves recent CVEs with no CVSS/CWE.
 6. KEV is ingested but `dueDate` / `knownRansomwareCampaignUse` are unused; EPSS percentile isn't stored.
-7. CycloneDX model is bespoke; no shared normalized component model; no SPDX.
-8. No app container images, no top-level compose, no CI.
-9. Feeds only refresh on a manual button press; NVD pull is a full re-pull.
+7. No malicious-package / IOC detection — a backdoored dependency reads the same as a clean one.
+8. CycloneDX model is bespoke; no shared normalized component model; no SPDX.
+9. No app container images, no top-level compose, no CI.
+10. Feeds only refresh on a manual button press; NVD pull is a full re-pull.
 
 ---
 
@@ -120,19 +122,33 @@ Each phase is independently shippable and leaves `master` green
 - Docker vuln alerts feed the same enrichment/funnel as SBOM alerts where a CVE is present.
 - **UI**: build the **Compliance** view — report list, per-report control breakdown (pass/fail/skip), misconfiguration list with remediation, linked vuln actionable items.
 
-### Phase 6 — Triage workflow
-- **State machine** on every alert: `OPEN → ACKNOWLEDGED → SNOOZED(until) → RESOLVED | FALSE_POSITIVE`, plus `assignee` and free-text `notes` / comment thread with an append-only history table.
+### Phase 6 — Supply-chain compromise detection
+*Goal: distinguish "you have a vulnerability" from "you are shipping something known-bad."*
+
+- **Feeds**: **OpenSSF Malicious Packages** (`ossf/malicious-packages`, OSV-format — reuses the Phase 2 OSV ingester almost verbatim) into `malicious_package` (ecosystem, name, affected versions, category, origin, references); **abuse.ch MalwareBazaar** SHA-256 hashes into `malware_hash` (hash, family, first/last seen, confidence). `POST /threat/ingest` + scheduled refresh.
+- **Matching**:
+  - SBOM / asset components → `malicious_package` by ecosystem + name + version range.
+  - CycloneDX component `hashes` and any scanner-reported file digests → `malware_hash`.
+- **Data model**: `CompromiseFinding` — `type` (`MALICIOUS_PACKAGE` / `MALWARE_HASH`), `confidence` (`CONFIRMED` / `LIKELY` / `INVESTIGATE`), `source`, `matchedOn` (purl / hash), `iocFirstSeen` / `iocLastSeen` / `iocConfidence`, links to the affected `Asset` / `SBOM` / component. Severity defaults to `CRITICAL`.
+- **Funnel**: third promotion path — an item is actionable if `KEV` **OR** `EPSS > threshold` **OR** it has a `CompromiseFinding`. Compromise findings sort above everything.
+- **API**: `GET /compromise` paged + filter; `CompromiseFinding` also appears inline in `GET /actionable` (typed union) so the primary screen shows both.
+- **UI**: Actionable Items view renders compromise findings with a distinct **Malicious** badge and a red row treatment; detail drawer shows the IOC, its source, freshness, and the matched component. Dashboard gains a "compromise findings" tile.
+- **IOC aging**: a nightly job re-checks `iocLastSeen` / confidence; findings whose IOC has decayed below a threshold move to `INVESTIGATE` rather than disappearing.
+- **Tests**: malicious-package match on a crafted SBOM; hash match; funnel-promotion test; aging-transition test.
+
+### Phase 7 — Triage workflow
+- **State machine** on every alert / compromise finding: `OPEN → ACKNOWLEDGED → SNOOZED(until) → RESOLVED | FALSE_POSITIVE`, plus `assignee` and free-text `notes` / comment thread with an append-only history table.
 - **API**: `PATCH /actionable/{id}` (state, assignee), `POST /actionable/{id}/comments`, bulk `PATCH /actionable` for multi-select.
 - Default Actionable Items query hides `SNOOZED` (until expiry) and `RESOLVED` / `FALSE_POSITIVE`; a state filter shows them.
 - **UI**: row multi-select + bulk actions; detail drawer shows state, assignee, history, comment box.
 
-### Phase 7 — Scheduled ingestion, notifications, reporting
-- **Scheduler**: cron-triggered feed refresh for all feeds — NVD, KEV, EPSS, OSV, CVE-5.1/Vulnrichment, exploit index (`SECY_INGEST_SCHEDULE_*`, default daily) via the job queue; disabled by default with a clear opt-in.
+### Phase 8 — Scheduled ingestion, notifications, reporting
+- **Scheduler**: cron-triggered feed refresh for all feeds — NVD, KEV, EPSS, OSV, CVE-5.1/Vulnrichment, exploit index, malicious-packages, malware hashes (`SECY_INGEST_SCHEDULE_*`, default daily) via the job queue; disabled by default with a clear opt-in.
 - **NVD incremental**: use `lastModStartDate` / `lastModEndDate` windows instead of full re-pull; store the high-water mark.
 - **Notifications**: `notification/` module — on a new actionable item for a subscribed product/asset, deliver via SMTP email (`SECY_SMTP_*`) and/or a generic JSON webhook (`POST` with an HMAC signature header). Per-user + per-product subscriptions, managed in Settings.
 - **Reporting**: server-generated **CSV** and **PDF** (posture summary + actionable list) scoped to a product / asset / whole org. `GET /reports/actionable.{csv,pdf}`; UI download button on the Actionable and Product views.
 
-### Phase 8 — Packaging & release (the OSS deliverable)
+### Phase 9 — Packaging & release (the OSS deliverable)
 - **Images**: multi-stage `api/Dockerfile` (slim JRE 17) and `ui/Dockerfile` (build → nginx serving static + proxying `/api`).
 - **Top-level `docker-compose.yml`**: `postgres` + `api` + `ui`, single `docker compose up`, `.env.example` with every knob, healthchecks, named volume.
 - **First-run UX**: registration open until the first admin exists, then auto-locked unless `SECY_AUTH_REGISTRATION_ENABLED=true`; documented.
@@ -142,10 +158,11 @@ Each phase is independently shippable and leaves `master` green
 - **Docs**: `docs/` — install & upgrade guide, full config reference, architecture overview, "how the funnel works", `CONTRIBUTING.md`, `SECURITY.md`.
 - **README**: update screenshots + quickstart to the compose flow.
 
-### Phase 9 — Stretch: cloud & agent discovery
+### Phase 10 — Stretch: cloud & agent discovery
 *May ship as a fast-follow after the MVP tag.*
 - Lightweight inventory sync from a cloud provider API (start with one: AWS) and/or a minimal agent that reports installed packages.
 - Populates `Asset`s and their components; everything downstream already works.
+- The agent can also do host-level IOC checks (file-hash / path / YARA) — the local half of vNext IOC validation.
 
 ---
 
@@ -157,17 +174,19 @@ Phase 2  ──────▶        (right after 1; correctness gate)
 Phase 3  ──▶            (can overlap tail of 2)
 Phase 4  ──▶            (needs 3's normalized model)
 Phase 5  ──▶            (independent of 3/4; slot when convenient)
-Phase 6  ──▶            (needs 1; independent of 2–5)
-Phase 7  ──▶            (needs 1; email/report need 4–5 for full value)
-Phase 8  ─────────────▶ (start compose/CI early, finish last)
-Phase 9  ──▶            (stretch)
+Phase 6  ──▶            (needs 2's OSV ingester + 3's normalized model)
+Phase 7  ──▶            (needs 1 + 6; independent of 2–5)
+Phase 8  ──▶            (needs 1; email/report need 4–6 for full value)
+Phase 9  ─────────────▶ (start compose/CI early, finish last)
+Phase 10 ──▶            (stretch)
 ```
 
-Recommended path: **1 → 2 → 8a (compose + CI skeleton) → 3 → 4 → 5 → 6 → 7 → 8b (polish + docs) → tag MVP → 9**.
+Recommended path: **1 → 2 → 9a (compose + CI skeleton) → 3 → 4 → 5 → 6 → 7 → 8 → 9b (polish + docs) → tag MVP → 10**.
 
-The **feed ingesters** (OSV and CVE-5.1/Vulnrichment in Phase 2, the exploit index in Phase 1)
-have no dependency on the alert model and can be built first or in parallel — only the logic that
-*consumes* them (OSV-primary correlation, `exploitMaturity` derivation) needs Phase 1's schema.
+The **feed ingesters** (OSV and CVE-5.1/Vulnrichment in Phase 2, the exploit index in Phase 1,
+malicious-packages + malware hashes in Phase 6) have no dependency on the alert model and can be
+built first or in parallel — only the logic that *consumes* them (OSV-primary correlation,
+`exploitMaturity` derivation, `CompromiseFinding` matching) needs the Phase 1–3 schema.
 
 ---
 
@@ -175,11 +194,12 @@ have no dependency on the alert model and can be built first or in parallel — 
 
 - [ ] `docker compose up` from a clean checkout yields a working Secy (UI + API + DB).
 - [ ] First user registers as admin; subsequent registration locked by default.
-- [ ] All six feeds (NVD / KEV / EPSS / OSV / CVE-5.1+Vulnrichment / exploit index) ingest (manually and on schedule) and refresh incrementally.
+- [ ] All eight feeds (NVD / KEV / EPSS / OSV / CVE-5.1+Vulnrichment / exploit index / malicious-packages / malware hashes) ingest (manually and on schedule) and refresh incrementally.
 - [ ] Upload a CycloneDX **and** an SPDX SBOM → components correlated (OSV-primary) → actionable items appear with fix versions where known.
 - [ ] Ingest a Trivy/Grype scan → asset appears with its actionable items and scanner-reported fix versions.
 - [ ] Ingest a Docker CIS report → Compliance view shows controls + alerts.
-- [ ] Actionable Items view: filter (incl. "only with a fix", "only with a known exploit"), sort by EPSS, Fix + Exploit badges on every row, open a detail drawer, ack/snooze/resolve, bulk-action.
+- [ ] An SBOM containing a known-malicious package produces a `CompromiseFinding` that surfaces above vuln alerts.
+- [ ] Actionable Items view: filter (incl. "only with a fix", "only with a known exploit"), sort by EPSS, Fix + Exploit + Malicious badges on rows, open a detail drawer, ack/snooze/resolve, bulk-action.
 - [ ] `REJECTED` / `DISPUTED` CVEs are kept out of the actionable funnel.
 - [ ] New actionable item on a watched product fires an email + webhook.
 - [ ] Export the actionable list as CSV and PDF.
@@ -197,7 +217,8 @@ alert-decision dimensions: *is it exploited*, *how bad*, *can I fix it*, *does i
 | Feed | Decision dimension | What it adds | Effort | Suggested slot |
 |---|---|---|---|---|
 | **Distro security trackers** — Debian, Ubuntu (USN), **Red Hat CSAF/VEX**, SUSE, Alpine secdb | Can I fix it? | Distro-specific fixed package versions **and** lifecycle states OSV lacks: `will-not-fix`, `deferred`, `out-of-support`, `affected-no-fix-planned`. Essential to de-noise container base images. | Medium (one ingester per distro; OVAL/CSAF/JSON) | Alongside Phase 4 (asset/container correlation) |
-| **VEX ingestion + suppression** — OpenVEX / CSAF-VEX / CycloneDX-VEX | Does it apply to me? | Vendor/internal "not affected" statements → auto-suppress or downgrade alerts. Biggest noise reducer. Pairs with the triage model. | Medium (parser + suppression rules + provenance) | Extends Phase 6 |
+| **VEX ingestion + suppression** — OpenVEX / CSAF-VEX / CycloneDX-VEX | Does it apply to me? | Vendor/internal "not affected" statements → auto-suppress or downgrade alerts. Biggest noise reducer. Pairs with the triage model. | Medium (parser + suppression rules + provenance) | Extends Phase 7 |
+| **CVE→IOC enrichment + hunt-pack export** — AlienVault OTX pulses, MISP feeds, CISA/vendor advisories | Am I already hit? | For an actionable KEV item, list the IOCs seen when that CVE is exploited (webshell hashes, post-exploitation tooling, C2 infra) and export a **STIX 2.1 / Sigma / CSV** bundle for the user's own SIEM/EDR. Surfacing, not validation. | Medium (OTX/MISP ingester + STIX export) | vNext precursor — extends Phase 6 |
 | **GreyNoise** (community API) | Is it exploited *now*? | Tags CVEs with observed internet-wide mass-scanning / exploitation attempts — leads KEV/EPSS on fresh activity. | Low (API, rate-limited, needs key) | Enrichment polish |
 | **endoflife.date** | How bad / can I fix it? | Runtime/component EOL dates — past EOL ⇒ no fix will ever come ⇒ raise priority instead of leaving it `UNKNOWN`. | Low (one JSON API) | Enrichment polish |
 | **VulnCheck KEV** (community) | Is it exploited? | Superset of CISA KEV — exploited CVEs CISA hasn't catalogued, plus initial-access / ransomware tags and exploit refs. | Low (API + key) | Enrichment polish |
@@ -207,6 +228,26 @@ alert-decision dimensions: *is it exploited*, *how bad*, *can I fix it*, *does i
 
 **Commercial threat-intel** (Mandiant, Recorded Future, Flashpoint, etc.) is deliberately out
 of scope — closed feeds don't fit an OSS core, and would belong in the open-core commercial layer if ever.
+
+---
+
+## vNext direction — automatic IOC validation
+
+Post-MVP, and possibly its own initiative. The MVP does **supply-chain** compromise detection
+(Phase 6) because that's the data Secy holds. True "is this CVE being exploited against *my*
+environment right now" validation needs telemetry Secy is not a source of. Sketch:
+
+1. **Enrich** actionable KEV items with linked IOCs (the "CVE→IOC enrichment" backlog row) and
+   expose them as an exportable hunt pack (STIX / Sigma / CSV).
+2. **Optional connectors** — the user connects Secy to a system that *does* have telemetry:
+   **Wazuh** (open-source, natural first target), Elastic, Splunk, or a **VirusTotal** API key.
+   Secy runs the linked IOCs as queries over a lookback window and reports hits.
+3. **Graded results** — `IOC_MATCH_INVESTIGATE` vs `CONFIRMED`; never auto-remediate; always
+   account for IOC aging (sinkholed domains, shared-hosting IPs, decayed confidence).
+4. **Host-level half** — the Phase 10 agent checks the local filesystem for IOC hashes / paths /
+   YARA matches, for environments with no SIEM.
+
+Kept out of the MVP so "compromise detection" doesn't balloon into building half a SIEM.
 
 ---
 
