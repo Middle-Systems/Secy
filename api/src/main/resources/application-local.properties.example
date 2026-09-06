@@ -11,7 +11,14 @@ nvd.apikey=
 # Turn registration off once the accounts you need exist (the first account is ADMIN).
 #secy.auth.registration-enabled=true
 
-# Point at your own database if not using the bundled compose.yaml
+# Database. The app never starts Postgres for you — run one yourself and point at it.
+#   - native install / hosted DB: set the URL below (or the SECY_DB_URL env var)
+#   - on a machine with Docker:    docker compose -f api/compose.yaml up -d   (data persists)
+#   - from the devcontainer:       host Postgres is reachable at host.docker.internal:5433
+#                                  (SECY_DB_URL is already set to this in devcontainer.json)
 #spring.datasource.url=jdbc:postgresql://localhost:5433/secy
 #spring.datasource.username=secy
 #spring.datasource.password=secy
+
+# Opt back into the automatic Docker Compose Postgres (needs Docker on this machine):
+#spring.docker.compose.enabled=true

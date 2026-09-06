@@ -43,9 +43,11 @@ cd api && ./gradlew bootRun
 ./gradlew test
 ```
 
-The devcontainer image is Node 20 + JDK 17. Docker is NOT available inside it, so
-`spring-boot-docker-compose` (auto-Postgres) won't work in-container — run the DB on the host,
-or run the backend on the host entirely.
+The devcontainer image is Node 20 + JDK 17, no Docker. The backend never starts a database
+itself (`spring.docker.compose.enabled=false`). Run PostgreSQL on the host
+(`docker compose -f api/compose.yaml up -d`, persistent volume) and `./gradlew bootRun` in the
+devcontainer reaches it via `host.docker.internal:5433` — `SECY_DB_URL` is preset to that in
+`.devcontainer/devcontainer.json`. Tests never need a DB (H2, `src/test/resources`).
 
 ## Conventions
 

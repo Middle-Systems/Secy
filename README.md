@@ -27,22 +27,40 @@ The backend was previously the standalone `secy-api` repository; its history is 
 ## 🚀 Development
 Both services expect to run together. The frontend proxies `/api/*` to the backend (`ui/vite.config.ts`).
 
+### 1. PostgreSQL
+The app **does not** start a database for you — run one and point the backend at it. It holds the
+ingested NVD/EPSS/KEV feeds, so you want it persistent, not per-run.
+
 ```bash
-# Backend — starts PostgreSQL via Docker Compose automatically (spring-boot-docker-compose)
+# Anywhere with Docker (data persists in a named volume across `down`):
+docker compose -f api/compose.yaml up -d        # Postgres on :5433
+```
+
+Or use a native install / a hosted database and set `SECY_DB_URL` accordingly.
+
+### 2. Backend
+```bash
 cd api
 cp src/main/resources/application-local.properties.example src/main/resources/application-local.properties
 #   ...then put your NVD API key in that (git-ignored) file
-./gradlew bootRun                    # http://localhost:8080
+./gradlew bootRun                                # http://localhost:8080
+```
+It connects to `SECY_DB_URL` (default `jdbc:postgresql://localhost:5433/secy`). **Inside the
+devcontainer** that env var is preset to `host.docker.internal:5433`, so run Postgres on your host
+(the command above) and `bootRun` reaches it with no extra config. First boot with a live NVD key,
+trigger the ingests (`POST /nvd/ingest`, `/kev/ingest`, `/epss/ingest`) once to populate the DB.
 
-# Frontend
-cd ui && npm install && npm run dev  # http://localhost:4200
+### 3. Frontend
+```bash
+cd ui && npm install && npm run dev              # http://localhost:4200
 ```
 
-API configuration is environment-variable driven (`NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`,
-`SECY_DB_PASSWORD`); `application-local.properties` is the local-only override for those. Get an NVD
-API key at <https://nvd.nist.gov/developers/request-an-api-key>.
+API config is env-var driven (`NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`, `SECY_DB_PASSWORD`,
+`SECY_AUTH_JWT_SECRET`); `application-local.properties` is the local-only override. NVD key:
+<https://nvd.nist.gov/developers/request-an-api-key>.
 
-When the frontend runs inside the devcontainer and the backend runs on the host, the proxy targets `host.docker.internal:8080` automatically. Override with `API_TARGET=http://host:port`.
+When the frontend runs in the devcontainer and the backend on the host, the proxy targets
+`host.docker.internal:8080` automatically (`API_TARGET` overrides).
 
 ## 📄 License
 Secy is licensed under the **GNU Affero General Public License v3.0** ([`LICENSE`](LICENSE)). You can run it, modify it, and self-host it freely; if you offer it as a network service, the AGPL requires you to make your modified source available to its users.
