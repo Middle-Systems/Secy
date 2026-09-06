@@ -1,4 +1,4 @@
-import type { JobStatus, JobType } from '@/api/types';
+import type { JobStatus } from '@/api/types';
 
 /**
  * Job statuses a job never leaves. Mirrors `JobStatus.isTerminal()` on the
@@ -23,11 +23,4 @@ export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   SUCCEEDED: 'Succeeded',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
-};
-
-/** Feed names as they read in prose. */
-export const JOB_TYPE_LABELS: Record<JobType, string> = {
-  NVD: 'NVD',
-  EPSS: 'EPSS',
-  KEV: 'KEV',
 };

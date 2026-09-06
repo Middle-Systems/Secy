@@ -6,10 +6,12 @@
  * `vite.config.ts`). In production the same prefix is expected to be routed to
  * the backend by whatever serves the built assets.
  *
- * Several endpoints (`/kev/ingest`, `/epss/ingest`, `/nvd/ingest`, DELETE
- * `/products/:id`) return `void`, and `/sbom/:id/vulnerabilities` returns a bare
- * 204 when there is nothing to report — so an empty body is a valid success and
- * is surfaced as `undefined` rather than a JSON parse error.
+ * The feed ingest endpoints (`/kev/ingest`, `/epss/ingest`, `/nvd/ingest`) are
+ * `POST` and answer 202 with a `Job` to poll — they no longer block for the
+ * download. `DELETE /products/:id` returns `void`, and
+ * `/sbom/:id/vulnerabilities` returns a bare 204 when there is nothing to
+ * report — so an empty body is a valid success and is surfaced as `undefined`
+ * rather than a JSON parse error.
  */
 
 export const API_BASE = '/api';
