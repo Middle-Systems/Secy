@@ -7,7 +7,7 @@ import {
   Flame,
   Percent,
   Server,
-  ShieldCheck,
+  Target,
 } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 
@@ -27,15 +27,15 @@ interface NavGroup {
 /**
  * Sidenav contents, ported from the Angular `sidenav.component.html`.
  *
- * "Threat Intelligence" and "Security Posture" both point at /dashboard until
- * those two views are split apart.
+ * "Actionable Items" (`/`) is the funnel output and the home screen; the
+ * Dashboard keeps its own entry at `/dashboard`.
  */
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Monitoring',
     items: [
-      { label: 'Threat Intelligence', to: '/dashboard', icon: ChartLine },
-      { label: 'Security Posture', to: '/dashboard', icon: ShieldCheck },
+      { label: 'Actionable Items', to: '/', icon: Target },
+      { label: 'Dashboard', to: '/dashboard', icon: ChartLine },
     ],
   },
   {
@@ -76,6 +76,7 @@ export function Sidenav() {
               <Link
                 key={`${group.label}-${item.label}`}
                 to={item.to}
+                activeOptions={{ exact: item.to === '/' }}
                 className="flex items-center gap-3 border-l-4 border-transparent px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
                 activeProps={{
                   className: cn(

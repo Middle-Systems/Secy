@@ -1,5 +1,18 @@
 import { useEffect, useMemo } from 'react';
-import { Loader2, RefreshCw, ShieldAlert, Skull, TrendingUp, Unlock, Zap } from 'lucide-react';
+import {
+  Ban,
+  CalendarClock,
+  Flame,
+  Loader2,
+  RefreshCw,
+  ShieldAlert,
+  Skull,
+  Target,
+  TrendingUp,
+  Unlock,
+  Wrench,
+  Zap,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useDashboardStats, useKevPage } from '@/api/queries';
@@ -13,11 +26,7 @@ import { ExploitFeed } from './ExploitFeed';
 import { RansomwareTargets } from './RansomwareTargets';
 import { SeverityDonut } from './SeverityDonut';
 import { VendorExposureChart } from './VendorExposureChart';
-import {
-  recentlyAddedKev,
-  topRansomwareTargets,
-  topVendorsByExposure,
-} from './dashboard.helpers';
+import { recentlyAddedKev, topRansomwareTargets, topVendorsByExposure } from './dashboard.helpers';
 
 /** Everything past the KPI/severity numbers is derived from this KEV pull. */
 const KEV_PULL_SIZE = 2000;
@@ -83,9 +92,7 @@ export function DashboardView() {
     return (
       <div className="flex min-h-[70vh] flex-col items-center justify-center text-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden="true" />
-        <p className="mt-4 font-bold text-foreground">
-          Synchronizing Global Threat Intelligence…
-        </p>
+        <p className="mt-4 font-bold text-foreground">Synchronizing Global Threat Intelligence…</p>
         <p className="mt-1 text-sm italic text-muted-foreground">
           Querying NVD, CISA KEV, and FIRST.org feeds
         </p>
@@ -118,6 +125,89 @@ export function DashboardView() {
           Threat intelligence and security posture at a glance.
         </p>
       </div>
+
+      {/* 0 — Actionable roll-up: the headline data now lives on top */}
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-foreground">Actionable</h2>
+          <p className="text-sm text-muted-foreground">
+            Funnel output — KEV-listed or high-EPSS items to work now.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Open Actionable"
+            value={
+              <span className="flex items-baseline gap-2">
+                {formatInteger(s.openActionableCount)}
+                {s.actionableCreatedLast7d > 0 && (
+                  <span className="text-xs font-semibold text-severity-high">
+                    +{formatInteger(s.actionableCreatedLast7d)} / 7d
+                  </span>
+                )}
+              </span>
+            }
+            icon={Target}
+            accent="red"
+          />
+          <StatCard
+            label="KEV-listed"
+            value={formatInteger(s.actionableKevCount)}
+            icon={Flame}
+            accent="red"
+          />
+          <StatCard
+            label="High EPSS"
+            value={formatInteger(s.actionableEpssCount)}
+            icon={TrendingUp}
+            accent="amber"
+          />
+          <StatCard
+            label="Past KEV Due Date"
+            value={formatInteger(s.pastKevDueCount)}
+            icon={CalendarClock}
+            accent={s.pastKevDueCount > 0 ? 'red' : 'blue'}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <StatCard
+            label="With a Fix"
+            value={formatInteger(s.actionableWithFixCount)}
+            icon={Wrench}
+            accent="cyan"
+          />
+          <StatCard
+            label="No Fix"
+            value={formatInteger(s.actionableNoFixCount)}
+            icon={Ban}
+            accent="blue"
+          />
+          <Card className="lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold">By exploit maturity</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-4 gap-2 text-center">
+              {(
+                [
+                  ['None', s.actionableExploitNone],
+                  ['PoC', s.actionableExploitPoc],
+                  ['Weaponized', s.actionableExploitWeaponized],
+                  ['In the wild', s.actionableExploitInTheWild],
+                ] as const
+              ).map(([label, count]) => (
+                <div key={label}>
+                  <div className="text-xl font-bold text-foreground">{formatInteger(count)}</div>
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {label}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       {/* 1 — KPI row */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -1,12 +1,13 @@
-import { createRoute, redirect } from '@tanstack/react-router';
+import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
 
 import { appLayoutRoute } from '@/routes/_app';
 
-/** `/` has no view of its own — send it to the dashboard. */
+/** `/` is the Actionable Items view — the funnel output is the first screen. */
 export const indexRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/',
-  beforeLoad: () => {
-    throw redirect({ to: '/dashboard' });
-  },
+  component: lazyRouteComponent(
+    () => import('@/components/actionable/ActionableView'),
+    'ActionableView',
+  ),
 });

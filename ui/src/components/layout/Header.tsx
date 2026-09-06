@@ -31,7 +31,7 @@ export function Header() {
     <header className="fixed inset-x-0 top-0 z-30 flex h-header items-center border-b border-border bg-card">
       {/* Brand — width matches the sidenav so the border lines up. */}
       <div className="flex h-header w-sidenav shrink-0 items-center justify-center border-r border-border">
-        <Link to="/dashboard" className="flex items-center gap-2">
+        <Link to="/" className="flex items-center gap-2">
           <img src={secyLogo} alt="Secy" className="h-8 w-8" />
           <span className="text-xl font-bold tracking-tight text-foreground">Secy</span>
         </Link>

@@ -26,6 +26,9 @@ import { isTerminalJobStatus } from '@/lib/jobs';
 
 import { api } from './client';
 import type {
+  ActionableDetail,
+  ActionableFilters,
+  ActionableItem,
   CreateProductPayload,
   DashboardStats,
   EPSS,
@@ -61,6 +64,11 @@ export const queryKeys = {
   nvd: {
     all: ['nvd'] as const,
     search: (params: PageParams) => [...queryKeys.nvd.all, 'search', params] as const,
+  },
+  actionable: {
+    all: ['actionable'] as const,
+    page: (params: ActionablePageParams) => [...queryKeys.actionable.all, 'page', params] as const,
+    detail: (id: string) => [...queryKeys.actionable.all, 'detail', id] as const,
   },
   products: {
     all: ['products'] as const,
@@ -109,6 +117,9 @@ const FEED_KEYS: Record<JobType, readonly unknown[]> = {
   KEV: queryKeys.kev.all,
   EPSS: queryKeys.epss.all,
   NVD: queryKeys.nvd.all,
+  // The exploit index has no browser view of its own; a finished pull only
+  // matters because it re-derives every alert's exploitMaturity.
+  EXPLOIT: queryKeys.actionable.all,
 };
 
 /**
@@ -292,6 +303,57 @@ export function useIngestNvd(options?: MutationOverrides<Job, void>) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       options?.onSuccess?.(...args);
     },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Actionable Items                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** Query params for `GET /api/actionable` — paging plus the filter contract. */
+export interface ActionablePageParams extends ActionableFilters {
+  page: number;
+  size: number;
+}
+
+/**
+ * GET /api/actionable — the funnel output, paged.
+ *
+ * Sort is fixed server-side (EPSS score desc, then `createdAt` desc), so there
+ * is no `sort` param. Filters (`productId` / `reason` / `minCvss` / `fixState`
+ * / `minExploitMaturity`) are passed straight through; `undefined` entries are
+ * dropped by the client. Keeps the previous page visible while the next loads.
+ */
+export function useActionablePage(
+  { page = 0, size = DEFAULT_PAGE_SIZE, ...filters }: Partial<ActionablePageParams> = {},
+  options?: QueryOverrides<Page<ActionableItem>>,
+) {
+  const params: ActionablePageParams = { page, size, ...filters };
+  return useQuery({
+    queryKey: queryKeys.actionable.page(params),
+    queryFn: () =>
+      api.get<Page<ActionableItem>>('/actionable', { query: { page, size, ...filters } }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+/**
+ * GET /api/actionable/:id — full detail for one alert.
+ *
+ * Disabled until `id` is truthy, so a component can call it before a row has
+ * been selected. Resolves for non-actionable alerts too (deep links must not
+ * 404).
+ */
+export function useActionableDetail(
+  id: string | undefined,
+  options?: QueryOverrides<ActionableDetail>,
+) {
+  return useQuery({
+    queryKey: queryKeys.actionable.detail(id ?? ''),
+    queryFn: () => api.get<ActionableDetail>(`/actionable/${id}`),
+    enabled: Boolean(id),
+    ...options,
   });
 }
 

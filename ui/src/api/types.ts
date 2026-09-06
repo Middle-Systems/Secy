@@ -61,8 +61,12 @@ export interface PageParams {
 /* Ingestion jobs — POST /api/{feed}/ingest, GET /api/jobs                    */
 /* -------------------------------------------------------------------------- */
 
-/** The feed an ingestion job pulls. One job per value may be active at a time. */
-export type JobType = 'NVD' | 'EPSS' | 'KEV';
+/**
+ * The feed an ingestion job pulls. One job per value may be active at a time.
+ * `EXPLOIT` is the merged public-exploit index (Nuclei + Metasploit +
+ * PoC-in-GitHub) that feeds each alert's `exploitMaturity`.
+ */
+export type JobType = 'NVD' | 'EPSS' | 'KEV' | 'EXPLOIT';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
@@ -112,6 +116,176 @@ export interface DashboardStats {
   globalHigh: number;
   globalMed: number;
   globalLow: number;
+
+  /* ---------------------------------------------------------------------- */
+  /* Actionable roll-up (Phase 1). All `long`, all scoped to actionable=true. */
+  /* ---------------------------------------------------------------------- */
+
+  /** Total actionable alerts — the headline number. */
+  openActionableCount: number;
+  /** reason in (KEV, KEV_AND_EPSS_HIGH). Overlaps `actionableEpssCount`. */
+  actionableKevCount: number;
+  /** reason in (EPSS_HIGH, KEV_AND_EPSS_HIGH). Overlaps `actionableKevCount`. */
+  actionableEpssCount: number;
+  /** CVE baseSeverity = CRITICAL. The four sev counts exclude unscored CVEs. */
+  actionableCrit: number;
+  actionableHigh: number;
+  actionableMed: number;
+  actionableLow: number;
+  /** fixState = FIXED. */
+  actionableWithFixCount: number;
+  /** fixState in (NO_FIX, UNKNOWN). */
+  actionableNoFixCount: number;
+  /** The four exploit-maturity counts DO partition `openActionableCount`. */
+  actionableExploitNone: number;
+  actionableExploitPoc: number;
+  actionableExploitWeaponized: number;
+  actionableExploitInTheWild: number;
+  /** kevDueDate < today. */
+  pastKevDueCount: number;
+  /** createdAt within 7 days — the trend arrow. */
+  actionableCreatedLast7d: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Actionable Items — GET /api/actionable, GET /api/actionable/:id            */
+/* -------------------------------------------------------------------------- */
+
+/** Why an alert made it through the funnel. `KEV_AND_EPSS_HIGH` is its own value. */
+export type ActionableReason = 'KEV' | 'EPSS_HIGH' | 'KEV_AND_EPSS_HIGH';
+
+/** Whether a patch exists for an actionable item. */
+export type FixState = 'FIXED' | 'NO_FIX' | 'UNKNOWN';
+
+/** Where the fix version came from. */
+export type FixSource = 'OSV' | 'SCANNER' | 'CPE_RANGE';
+
+/** Public-exploit availability. Declaration order is the ordering (NONE < … < IN_THE_WILD). */
+export type ExploitMaturity = 'NONE' | 'POC' | 'WEAPONIZED' | 'IN_THE_WILD';
+
+/**
+ * One row of `GET /api/actionable` — a `Page<ActionableItem>`. Sort is fixed
+ * server-side (EPSS desc, then createdAt desc). `description` is truncated at
+ * 280 chars with a trailing `…`. `kev` is a convenience boolean. Nulls arrive
+ * as `null`, not omitted.
+ */
+export interface ActionableItem {
+  /** Alert UUID — the id for `GET /api/actionable/:id`. */
+  id: string;
+  cveId: string;
+  description: string;
+  baseSeverity: BaseSeverity;
+  cvssScore: number | null;
+  epssScore: number | null;
+  epssPercentile: number | null;
+  kev: boolean;
+  /** Date string, e.g. "2021-12-24". Null when the CVE is not KEV-listed. */
+  kevDueDate: string | null;
+  /** Mirrors KEV's field verbatim: "Known" / "Unknown" / null. */
+  knownRansomwareUse: string | null;
+  exploitMaturity: ExploitMaturity;
+  fixState: FixState;
+  fixedVersions: string | null;
+  fixSource: FixSource | null;
+  actionableReason: ActionableReason;
+  productId: string | null;
+  productName: string | null;
+  componentId: string | null;
+  componentName: string | null;
+  componentVersion: string | null;
+  componentPurl: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+}
+
+/** The CVE block nested in an `ActionableDetail`. */
+export interface ActionableDetailCve {
+  id: string;
+  sourceIdentifier: string | null;
+  /** ISO-8601 date-time string. */
+  published: string | null;
+  /** ISO-8601 date-time string. */
+  lastModified: string | null;
+  vulnStatus: string | null;
+  description: string | null;
+  baseSeverity: BaseSeverity | null;
+  cvssScore: number | null;
+  exploitabilityScore: number | null;
+  impactScore: number | null;
+  cwe: string | null;
+  accessVector: string | null;
+  accessComplexity: string | null;
+  authenticationRequired: string | null;
+  confidentialityImpact: string | null;
+  integrityImpact: string | null;
+  availabilityImpact: string | null;
+  userInteractionRequired: boolean | null;
+}
+
+/** One entry of `ActionableDetail.affectedComponents` — every alert for the same CVE. */
+export interface ActionableAffectedComponent {
+  alertId: string;
+  componentId: string | null;
+  name: string;
+  version: string | null;
+  purl: string | null;
+  sbomId: string | null;
+  productId: string | null;
+  productName: string | null;
+  /** Always null until Phase 4. */
+  assetId: string | null;
+}
+
+/** One entry of `ActionableDetail.references`. `tags` is a comma-joined string. */
+export interface ActionableReference {
+  url: string;
+  source: string | null;
+  tags: string | null;
+}
+
+/**
+ * `GET /api/actionable/:id`. Resolves for non-actionable alerts too (a deep
+ * link must not 404), so `actionableReason` can be null. `kev` / `epss` are
+ * null when the CVE has no such row.
+ */
+export interface ActionableDetail {
+  id: string;
+  actionable: boolean;
+  actionableReason: ActionableReason | null;
+  cvssScore: number | null;
+  epssScore: number | null;
+  epssPercentile: number | null;
+  exploitMaturity: ExploitMaturity;
+  fixState: FixState;
+  fixedVersions: string | null;
+  fixSource: FixSource | null;
+  /** Date string, e.g. "2021-12-24". */
+  kevDueDate: string | null;
+  knownRansomwareUse: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+  cve: ActionableDetailCve;
+  affectedComponents: ActionableAffectedComponent[];
+  kev: KEV | null;
+  epss: EPSS | null;
+  references: ActionableReference[];
+}
+
+/**
+ * Query params for `GET /api/actionable` beyond `page` / `size`. `assetId` and
+ * `state` are deliberately omitted — the backend accepts and ignores them.
+ */
+export interface ActionableFilters {
+  /** Alerts on SBOMs belonging to this product. */
+  productId?: string;
+  /** Exact match — `reason=KEV` does NOT include `KEV_AND_EPSS_HIGH`. */
+  reason?: ActionableReason;
+  /** `cvssScore >= minCvss`; unscored CVEs are excluded. */
+  minCvss?: number;
+  /** Exact match. */
+  fixState?: FixState;
+  /** At or above, by declaration order. `NONE` is a no-op. */
+  minExploitMaturity?: ExploitMaturity;
 }
 
 /* -------------------------------------------------------------------------- */

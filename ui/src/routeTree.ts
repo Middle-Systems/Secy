@@ -18,7 +18,7 @@ import { productCatalogRoute } from '@/routes/product-catalog';
  *   root
  *   ├── /login          bare screen — no shell, no session required
  *   └── _app            pathless layout: renders the AppShell behind the auth
- *       ├── /               guard, and contributes no path segment of its own
+ *       ├── /               Actionable Items — the funnel output, the home screen
  *       ├── /dashboard
  *       └── …
  *

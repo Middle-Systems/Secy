@@ -76,16 +76,25 @@ export function formatDateTime(iso: string | null | undefined): string {
  * Format a 0–1 probability as a percent string — `formatPercent(0.123)` → "12.3%".
  * `digits` controls fraction digits (default 1). Nullish / non-finite → em dash.
  */
-export function formatPercent(
-  fraction: number | null | undefined,
-  digits = 1,
-): string {
+export function formatPercent(fraction: number | null | undefined, digits = 1): string {
   if (fraction == null || !Number.isFinite(fraction)) return EM_DASH;
   return new Intl.NumberFormat('en-US', {
     style: 'percent',
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(fraction);
+}
+
+/**
+ * Format a 0–1 EPSS percentile as a compact rank label — `formatPercentile(0.999)`
+ * → "p99.9", `formatPercentile(0.5)` → "p50". One fraction digit above the 99th
+ * percentile (where the interesting spread lives), none below. Nullish /
+ * non-finite → em dash.
+ */
+export function formatPercentile(fraction: number | null | undefined): string {
+  if (fraction == null || !Number.isFinite(fraction)) return EM_DASH;
+  const pct = fraction * 100;
+  return `p${pct.toFixed(pct >= 99 && pct < 100 ? 1 : 0)}`;
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;

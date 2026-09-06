@@ -26,21 +26,21 @@ describe('app shell', () => {
     // Routed view — once the lazily code-split chunk resolves the dashboard
     // mounts and shows its global-sync loader while the stats query is in flight.
     expect(
-      await screen.findByText(
-        'Synchronizing Global Threat Intelligence…',
-        {},
-        { timeout: 45000 },
-      ),
+      await screen.findByText('Synchronizing Global Threat Intelligence…', {}, { timeout: 45000 }),
     ).toBeInTheDocument();
   }, 60000);
 
-  it('redirects / to /dashboard', async () => {
+  it('renders Actionable Items at /', async () => {
     const { router } = renderApp('/');
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe('/dashboard');
+      expect(router.state.location.pathname).toBe('/');
     });
-  });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Actionable Items' }, { timeout: 45000 }),
+    ).toBeInTheDocument();
+  }, 60000);
 
   it('renders the 404 page for an unknown route', async () => {
     renderApp('/nope');
