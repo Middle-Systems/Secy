@@ -2,7 +2,7 @@ import { createRoute } from '@tanstack/react-router';
 import { ClipboardCheck } from 'lucide-react';
 
 import { PlaceholderPage } from '@/components/common/PlaceholderPage';
-import { rootRoute } from '@/routes/__root';
+import { appLayoutRoute } from '@/routes/_app';
 
 function CompliancePage() {
   return (
@@ -15,7 +15,7 @@ function CompliancePage() {
 }
 
 export const complianceRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appLayoutRoute,
   path: '/compliance',
   component: CompliancePage,
 });

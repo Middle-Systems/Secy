@@ -22,6 +22,9 @@ items: KEV-listed OR EPSS > 0.1.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
   `/products`, `/sbom/{id}/vulnerabilities`, `/stats/dashboard`, plus CIS/docker controllers.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
+- Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
+  `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via
+  `POST /auth/register` becomes `ADMIN`.
 
 ## Commands
 
@@ -51,7 +54,9 @@ or run the backend on the host entirely.
   under `src/routes/` and assembled in `src/routeTree.ts`, shared types live in `src/api/types.ts`,
   and `@/` aliases `ui/src/`. Style with Tailwind + the shadcn primitives in `src/components/ui/`.
 - API: `net.jdesive.secy` package; `controller` / `service` / `persistence` (repo + `entity`) / `model`.
-- API config is env-var driven: `NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`, `SECY_DB_PASSWORD`
+- API config is env-var driven: `NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`, `SECY_DB_PASSWORD`,
+  `SECY_AUTH_JWT_SECRET` (HS256 signing key, ≥32 chars; blank generates a throwaway one per process
+  and logs a WARN), `SECY_AUTH_REGISTRATION_ENABLED`
   (see `application.properties` for defaults). For local dev, copy
   `application-local.properties.example` → `application-local.properties` (git-ignored) and fill in
   the NVD key. Never put a real secret in a tracked file.

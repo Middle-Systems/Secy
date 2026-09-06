@@ -1,9 +1,9 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
 
-import { rootRoute } from '@/routes/__root';
+import { appLayoutRoute } from '@/routes/_app';
 
 export const epssDatabaseRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appLayoutRoute,
   path: '/epss-database',
   component: lazyRouteComponent(
     () => import('@/components/epss-database/EpssDatabaseView'),

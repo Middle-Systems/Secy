@@ -2,7 +2,7 @@ import { createRoute } from '@tanstack/react-router';
 import { Server } from 'lucide-react';
 
 import { PlaceholderPage } from '@/components/common/PlaceholderPage';
-import { rootRoute } from '@/routes/__root';
+import { appLayoutRoute } from '@/routes/_app';
 
 function InfrastructurePage() {
   return (
@@ -15,7 +15,7 @@ function InfrastructurePage() {
 }
 
 export const infrastructureRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appLayoutRoute,
   path: '/infrastructure',
   component: InfrastructurePage,
 });

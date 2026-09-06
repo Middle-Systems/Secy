@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Outlet } from '@tanstack/react-router';
 
 import { Footer } from '@/components/layout/Footer';
@@ -14,8 +15,12 @@ import { Toaster } from '@/components/ui/sonner';
  * in `styles/index.css`), so a view must never add its own full-page scroller.
  * Views get a `container` with `py-4` padding for free; render your own
  * page heading inside it.
+ *
+ * `children` overrides the `<Outlet />` for the one case that needs it: the
+ * layout route's `pendingComponent` renders the same chrome around a spinner,
+ * and an `<Outlet />` is only legal inside a route's `component`.
  */
-export function AppShell() {
+export function AppShell({ children }: { children?: ReactNode }) {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Header />
@@ -24,9 +29,7 @@ export function AppShell() {
         <Sidenav />
 
         <main className="app-content ml-sidenav flex flex-1 flex-col overflow-y-auto overflow-x-hidden bg-background">
-          <div className="w-full px-4 py-4">
-            <Outlet />
-          </div>
+          <div className="w-full px-4 py-4">{children ?? <Outlet />}</div>
         </main>
 
         <Footer />

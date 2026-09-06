@@ -47,14 +47,18 @@ sonner · lucide-react · Vitest + React Testing Library.
 
 ```
 src/
-  main.tsx              app entry: QueryClientProvider + RouterProvider
+  main.tsx              app entry: AuthProvider + QueryClientProvider + AppRouter
+  AppRouter.tsx         holds the router back until the session resolves
   router.ts             createRouter + the Register type declaration
   routeTree.ts          assembles the route tree (add new routes here)
   routes/               one file per route
-    __root.tsx          root route: renders AppShell, owns the 404
+    __root.tsx          root route: bare <Outlet/>, owns the fallback 404
+    _app.tsx            pathless layout: AppShell + the auth guard
+    login.tsx           '/login' — the one route outside the shell
     index.tsx           '/' -> redirects to /dashboard
     dashboard.tsx …     one placeholder per view
     not-found.tsx       the 404 component
+  auth/                 session state (see "Auth" below)
   components/
     ui/                 shadcn primitives (generated; edit in place)
     layout/             AppShell, Header, Sidenav, Footer
@@ -102,25 +106,63 @@ screen that triggered the action.
 
    ```tsx
    import { createRoute } from '@tanstack/react-router';
-   import { rootRoute } from '@/routes/__root';
+   import { appLayoutRoute } from '@/routes/_app';
 
    function MyPage() {
      return <div>…</div>;
    }
 
    export const myRoute = createRoute({
-     getParentRoute: () => rootRoute,
+     getParentRoute: () => appLayoutRoute,
      path: '/my-path',
      component: MyPage,
    });
    ```
 
-2. Import it in `src/routeTree.ts` and add it to `rootRoute.addChildren([...])`.
+2. Import it in `src/routeTree.ts` and add it to `appLayoutRoute.addChildren([...])`.
 3. Add a nav entry in `src/components/layout/Sidenav.tsx` if it needs one.
 
-Route files must import `rootRoute` from `__root` — never the other way around,
-or the tree cycles. Paths are literal-typed off the tree, so `<Link to="...">`
-won't compile for a route that doesn't exist.
+The tree has two branches off the root: `/login`, which renders bare, and the
+pathless `_app` layout route, which renders the `AppShell` behind the auth
+guard. **Parent new routes to `appLayoutRoute`** — anything parented straight to
+`rootRoute` renders without the shell *and without the guard*.
+
+Route files must import their parent route — never the other way around, or the
+tree cycles. Paths are literal-typed off the tree, so `<Link to="...">` won't
+compile for a route that doesn't exist.
+
+## Auth
+
+Local email + password, stateless JWT. `src/auth/`:
+
+| File | Role |
+|------|------|
+| `AuthProvider.tsx` | owns the session; mounted outside the router in `main.tsx` |
+| `useAuth.ts` | `{ status, user, token, isAuthenticated, login, register, logout }` |
+| `auth.api.ts` | the `/auth/**` calls, through `api` from `client.ts` |
+| `storage.ts` | the token in `localStorage`, every access try/caught |
+| `auth-store.ts` | synchronous mirror of the state, for the router's `beforeLoad` |
+
+`status` is `'loading' | 'authenticated' | 'unauthenticated'`. On mount the
+provider restores a stored token and validates it with `GET /auth/me`, clearing
+it if the server says no; `AppRouter` renders a spinner rather than the router
+until that settles.
+
+`client.ts` injects `Authorization: Bearer` from a module-level token that only
+the provider writes (`setAuthToken`), and calls the provider's
+`setUnauthorizedHandler` callback on a 401 from any non-`/auth` endpoint — which
+signs out and bounces to `/login`, preserving the intended path in
+`?redirect=`.
+
+**Auth is the exception to the "server state goes through `queries.ts`" rule.**
+It is bootstrap state — it decides whether the query client may fetch at all —
+so it lives in a context provider. Everything else still belongs in
+`queries.ts`.
+
+Tests get a pre-authenticated session for free: `renderApp()` and
+`renderWithProviders()` seed `AuthProvider` with `TEST_USER` / `TEST_TOKEN`, so
+nothing hits `/auth/me`. Pass `renderApp(path, { authenticated: false })` to
+exercise the signed-out path.
 
 ### Adding a shadcn component
 

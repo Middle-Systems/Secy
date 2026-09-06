@@ -1,10 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { RouterProvider } from '@tanstack/react-router';
 
+import { AppRouter } from '@/AppRouter';
+import { AuthProvider } from '@/auth/AuthProvider';
 import { queryClient } from '@/lib/query-client';
-import { router } from '@/router';
 import '@/styles/index.css';
 
 const container = document.getElementById('root');
@@ -14,8 +14,12 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    {/* AuthProvider sits outside the router: the route guard depends on the
+        session, not the other way round. */}
+    <AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <AppRouter />
+      </QueryClientProvider>
+    </AuthProvider>
   </StrictMode>,
 );

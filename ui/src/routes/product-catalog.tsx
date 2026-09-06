@@ -1,9 +1,9 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
 
-import { rootRoute } from '@/routes/__root';
+import { appLayoutRoute } from '@/routes/_app';
 
 export const productCatalogRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appLayoutRoute,
   path: '/product-catalog',
   component: lazyRouteComponent(
     () => import('@/components/product-catalog/ProductCatalogView'),

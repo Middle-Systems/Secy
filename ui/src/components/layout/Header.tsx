@@ -1,7 +1,9 @@
-import { Bell, Search } from 'lucide-react';
+import { Bell, LogOut, Search } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 
 import secyLogo from '@/assets/img/secy-logo.svg';
+import { displayNameOf, initialsOf } from '@/auth/initials';
+import { useAuth } from '@/auth/useAuth';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -16,11 +18,15 @@ import {
 /**
  * Fixed 58px application header.
  *
- * Everything here is a visual placeholder: the search box does not query, the
- * notification count is hard-coded and the user menu is not wired to any auth.
- * Replace the placeholders when the corresponding features land.
+ * The user menu is real — it reflects the signed-in account and signs out.
+ * The search box and the notification count are still visual placeholders;
+ * replace them when the corresponding features land.
  */
 export function Header() {
+  const { user, logout } = useAuth();
+  const name = displayNameOf(user);
+  const initials = initialsOf(user);
+
   return (
     <header className="fixed inset-x-0 top-0 z-30 flex h-header items-center border-b border-border bg-card">
       {/* Brand — width matches the sidenav so the border lines up. */}
@@ -59,19 +65,30 @@ export function Header() {
           <Separator orientation="vertical" className="mx-3 h-5" />
 
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-1 py-1 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+            <DropdownMenuTrigger
+              aria-label={`Account menu for ${name}`}
+              className="flex items-center gap-2 rounded-md px-1 py-1 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                JD
+                {initials}
               </span>
-              <span className="text-sm font-semibold">jdesive</span>
+              <span className="text-sm font-semibold">{name}</span>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel>My account</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <span className="block text-sm font-semibold text-foreground">{name}</span>
+                <span className="block truncate text-xs font-normal text-muted-foreground">
+                  {user?.email}
+                </span>
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled>Profile</DropdownMenuItem>
               <DropdownMenuItem disabled>Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>Sign out</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => logout()}>
+                <LogOut className="mr-2 h-4 w-4" aria-hidden="true" />
+                Sign out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
