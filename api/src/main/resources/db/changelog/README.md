@@ -35,6 +35,7 @@ Claimed prefixes:
 | `002`  | auth |
 | `003`  | ingestion queue |
 | `004`  | actionable enrichment on `vulnerability_alert` (Phase 1) |
+| `005`  | `cve_exploit` — merged public exploit index (Phase 1) |
 
 Pick the next free number if yours isn't listed.
 

@@ -9,6 +9,7 @@ import net.jdesive.secy.persistence.entity.Job;
 import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.service.EPSSService;
+import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +55,8 @@ public class JobRunner {
 
     private final NVDService nvdService;
 
+    private final ExploitIndexService exploitIndexService;
+
     private final Executor executor;
 
     private final IngestionJobProperties properties;
@@ -72,6 +75,7 @@ public class JobRunner {
                      KEVService kevService,
                      EPSSService epssService,
                      NVDService nvdService,
+                     ExploitIndexService exploitIndexService,
                      @Qualifier(AsyncConfig.INGESTION_EXECUTOR) Executor executor,
                      IngestionJobProperties properties,
                      ApplicationEventPublisher events) {
@@ -79,6 +83,7 @@ public class JobRunner {
         this.kevService = kevService;
         this.epssService = epssService;
         this.nvdService = nvdService;
+        this.exploitIndexService = exploitIndexService;
         this.executor = executor;
         this.properties = properties;
         this.events = events;
@@ -162,6 +167,7 @@ public class JobRunner {
             case KEV -> kevService.ingest(progress);
             case EPSS -> epssService.ingestEPSSData(progress);
             case NVD -> nvdService.ingestData(progress);
+            case EXPLOIT -> exploitIndexService.ingest(progress);
         };
     }
 

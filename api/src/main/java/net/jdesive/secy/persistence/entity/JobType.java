@@ -10,6 +10,9 @@ public enum JobType {
     EPSS,
 
     /** CISA Known Exploited Vulnerabilities catalog. */
-    KEV
+    KEV,
+
+    /** Merged public exploit index — Nuclei templates, Metasploit modules, PoC-in-GitHub. */
+    EXPLOIT
 
 }

@@ -7,12 +7,11 @@ import net.jdesive.secy.persistence.EPSSRepository;
 import net.jdesive.secy.persistence.KEVRepository;
 import net.jdesive.secy.persistence.VulnerabilityRepository;
 import net.jdesive.secy.persistence.entity.*;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -21,6 +20,9 @@ import java.time.ZoneId;
 import java.util.Date;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 /**
  * The funnel itself: <em>KEV-listed OR EPSS strictly above the threshold</em>, and the denormalized
@@ -56,17 +58,18 @@ class EnrichmentServiceTest {
     private EntityManager entityManager;
 
     /**
-     * Stands in for the exploit-index feed that has not been built yet, and proves the
-     * {@link ExploitMaturityResolver} seam is actually consulted: a {@code @Primary} bean out-ranks
-     * {@link KevOnlyExploitMaturityResolver} without {@code EnrichmentService} changing.
+     * The real {@link CveExploitMaturityResolver} is {@code @Primary} and DB-backed; here it is
+     * mocked to stand in for the exploit-index feed. This still proves the seam is consulted — the
+     * {@code @Primary} bean out-ranks {@link KevOnlyExploitMaturityResolver} and
+     * {@code EnrichmentService} picks it up with no change of its own.
      */
-    @TestConfiguration
-    static class StubExploitIndex {
-        @Bean
-        @Primary
-        ExploitMaturityResolver stubResolver() {
-            return cveId -> CVE_WITH_PUBLIC_POC.equals(cveId) ? ExploitMaturity.POC : ExploitMaturity.NONE;
-        }
+    @MockBean
+    private CveExploitMaturityResolver exploitMaturityResolver;
+
+    @BeforeEach
+    void stubResolver() {
+        lenient().when(exploitMaturityResolver.resolve(any())).thenReturn(ExploitMaturity.NONE);
+        lenient().when(exploitMaturityResolver.resolve(CVE_WITH_PUBLIC_POC)).thenReturn(ExploitMaturity.POC);
     }
 
     /* ------------------------------------------------------------------ */

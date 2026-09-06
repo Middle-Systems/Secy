@@ -7,6 +7,7 @@ import net.jdesive.secy.persistence.entity.Job;
 import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.service.EPSSService;
+import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +56,9 @@ class IngestionJobFlowTest {
 
     @MockBean
     private NVDService nvdService;
+
+    @MockBean
+    private ExploitIndexService exploitIndexService;
 
     @Autowired
     private JobService jobService;
@@ -134,6 +138,21 @@ class IngestionJobFlowTest {
         assertThat(finished.getMessage()).isEqualTo("42 KEV entries ingested");
         assertThat(finished.getStartedAt()).isNotNull();
         assertThat(finished.getFinishedAt()).isNotNull();
+    }
+
+    @Test
+    void theRunnerDispatchesAnExploitIndexJobToItsService() {
+        when(exploitIndexService.ingest(any(JobProgress.class)))
+                .thenReturn(new IngestResult(7, "7 CVEs with a public exploit (metasploit source unavailable)"));
+
+        Job queued = jobService.enqueue(JobType.EXPLOIT, "alice@example.com");
+        jobRunner.poll();
+
+        Job finished = awaitTerminal(queued.getId());
+        assertThat(finished.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(finished.getType()).isEqualTo(JobType.EXPLOIT);
+        assertThat(finished.getItemsProcessed()).isEqualTo(7);
+        assertThat(finished.getMessage()).contains("metasploit source unavailable");
     }
 
     @Test
