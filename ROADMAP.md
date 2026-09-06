@@ -74,8 +74,20 @@ non-Docker CIS benchmarks, SIEM/EDR-backed IOC validation (vNext).
 Each phase is independently shippable and leaves `master` green
 (`cd api && ./gradlew build`; `cd ui && npm run build && npm test`).
 
-### Phase 1 — The actionable core
+### Phase 1 — The actionable core  ✅ shipped 2026-09-06
 *Goal: the funnel exists end to end and is the first thing you see.*
+
+> **Landed** on `feat/phase-1-actionable-core` (commits `40f1c67`, `f083d91`, `6441558`):
+> all 12 enrichment columns + Liquibase `004`; `EnrichmentService` funnel wired into SBOM
+> alert generation + `reEnrichAll()` on a `FeedIngestedEvent`; `SECY_ACTIONABLE_EPSS_THRESHOLD`
+> (strict `>`); `GET /actionable` + `/actionable/{id}`; 15 new `DashboardStats` counters;
+> exploit-index feed (`JobType.EXPLOIT`, `cve_exploit`, Liquibase `005`, `@Primary` resolver);
+> Actionable Items UI at `/` with Fix/Exploit/KEV badges, detail sheet, localStorage filter
+> toggles; dashboard → `/dashboard`. Backend 80 tests green; UI typecheck/lint/build green.
+> **Deferred:** Docker/CIS alerts stay outside the funnel (no CVE join — moved to Phase 5);
+> `fixState` is always `UNKNOWN` until Phase 2/4 supplies versions; `assetId`/`state`
+> `/actionable` params are accepted no-ops (Phases 4/7); Liquibase `004`/`005` not yet run
+> against a real PostgreSQL. Not merged to `master`.
 
 - **Data model**: enrichment join `VulnerabilityAlert → Vulnerability (CVE) → EPSS score + KEV membership`. Add a computed/persisted `actionable` flag + `actionableReason` (`KEV` / `EPSS_HIGH` / both) and denormalized `epssScore` / `epssPercentile` / `cvssScore` on the alert for sorting. Also add `fixState` (`FIXED` / `NO_FIX` / `UNKNOWN`), `fixedVersions` (text), `fixSource` (`OSV` / `SCANNER` / `CPE_RANGE`), `exploitMaturity` (`NONE` / `POC` / `WEAPONIZED` / `IN_THE_WILD`), `kevDueDate`, `knownRansomwareUse`. Liquibase changeset.
 - **Exploit index feed**: one ingester that merges Nuclei templates (`projectdiscovery/nuclei-templates`, `cves.json`), Metasploit modules (`rapid7/metasploit-framework`, `db/modules_metadata_base.json`) and PoC-in-GitHub (`nomi-sec/PoC-in-GitHub`) into a `cve_exploit` table (CVE → highest maturity + source links). `POST /exploits/ingest` + scheduled refresh. `exploitMaturity` = max(KEV ⇒ `IN_THE_WILD`, Metasploit/Nuclei ⇒ `WEAPONIZED`, PoC-in-GitHub ⇒ `POC`, else `NONE`).
