@@ -149,7 +149,24 @@ Each phase is independently shippable and leaves `master` green
 - SBOM upload goes through the job queue (consistent with feeds) with progress + failure surfacing in the UI.
 - Component de-dup within a product across SBOM versions so history diffs are meaningful.
 
-### Phase 4 — Infrastructure / asset inventory
+### Phase 4 — Infrastructure / asset inventory  ✅ shipped 2026-09-11
+
+> **Landed** on `feat/phase-1-actionable-core` (commits `c87ce81` backend, `db3c8bb` UI):
+> `VulnerabilityAlert` widened via two nullable FKs (`component_id` / `asset_component_id`) with
+> a DB-level XOR check and a shared `CorrelatableComponent` interface — not a parallel alert table
+> (`DockerVulnerabilityAlert` is the standing example of why that path was rejected). `Asset` +
+> `AssetComponent` (CONTAINER_IMAGE/HOST/SERVICE), Trivy + Grype JSON ingest via the Phase-3
+> job-queue-upload pattern (`POST /assets/scan/{trivy,grype}`, `JobType.ASSET_SCAN`), same
+> version-less-PURL identity scheme as SBOM components but scoped *within* the asset, not its
+> optional product. Scanner fixes route through `EnrichmentService`'s existing
+> OSV→SCANNER→CPE_RANGE precedence unchanged. `GET/DELETE /assets`, `/assets/{id}`. Real
+> Infrastructure UI (list, drilldown, scan upload, delete with cascade confirmation).
+> **Breaking:** `GET /actionable?assetId=` is upgraded from Phase 1's no-op to a real filter.
+> Backend 254 tests green (+30); UI green.
+> **Deferred:** a scanner-reported CVE with no NVD row yet is dropped (run `POST /nvd/ingest`
+> first on a fresh install); no dedicated `declaredCpe` write endpoint; a scan reports only
+> vulnerable packages, not full inventory; Liquibase `009` (like `004`-`008`) not yet run against
+> a real PostgreSQL. Docker/CIS alerts remain outside the funnel — Phase 5. Not merged to `master`.
 - **Domain**: `Asset` (type: `CONTAINER_IMAGE` / `HOST` / `SERVICE`), optional link to `Product`, holds `NormalizedComponent`s and/or declared CPEs, `lastScannedAt`.
 - **Ingest**: `POST /assets/scan/trivy` and `.../grype` — parse scanner JSON (image + filesystem), create/update the asset, import its components, and capture each finding's `FixedVersion` → alert `fixState`/`fixedVersions` (`fixSource = SCANNER`).
 - **Correlation**: scanner-reported CVEs become alerts immediately; Secy also re-correlates (OSV + KEV/EPSS) so scanner output flows through the same funnel and picks up an OSV fix version when the scanner didn't supply one.
