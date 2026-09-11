@@ -1,0 +1,21 @@
+# Build context is `ui/` (see docker-compose.yml `ui.build.context`). The build stage runs
+# `npm ci` itself, so a host node_modules (different platform/arch than the build image) and
+# any previous local dist/ must never be sent to the Docker daemon or copied into the image.
+
+node_modules/
+dist/
+coverage/
+.vite/
+*.log
+npm-debug.log*
+
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+.git/
+.gitignore
+README.md

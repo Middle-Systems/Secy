@@ -10,3 +10,6 @@ Thumbs.db
 # Local scratch
 /tmp/
 /scratch/
+
+# Local secrets for the top-level docker-compose.yml — never commit, see .env.example
+/.env

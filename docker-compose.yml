@@ -1,0 +1,89 @@
+# One-command self-host stack: postgres + api + ui.
+#
+#   cp .env.example .env   # fill in NVD_API_KEY / SECY_AUTH_JWT_SECRET etc.
+#   docker compose up --build
+#
+# Then open http://localhost:4200 and register — see the "First run" note in .env.example,
+# the FIRST account you register becomes ADMIN.
+#
+# This is the *production-shaped* stack (built images, nginx-served UI). For local dev
+# against the Gradle/Vite dev servers, keep using `api/compose.yaml` (Postgres only) per
+# the README/CLAUDE.md dev workflow — this file does not replace that.
+
+services:
+  postgres:
+    # Same image pin, env shape and healthcheck as api/compose.yaml (the existing dev-only
+    # compose) so the two never drift on what "a working Postgres for Secy" looks like.
+    image: 'postgres:16'
+    container_name: secy-postgres
+    restart: unless-stopped
+    environment:
+      - 'POSTGRES_DB=secy'
+      - 'POSTGRES_USER=${SECY_DB_USERNAME:-secy}'
+      - 'POSTGRES_PASSWORD=${SECY_DB_PASSWORD:-secy}'
+    # No host port published here (unlike api/compose.yaml's 5433:5432): nothing outside
+    # this compose network needs to reach Postgres directly. Need host access for
+    # debugging? Either add `ports: ["5433:5432"]` back locally, or run
+    # `docker compose exec postgres psql -U secy` / `api/compose.yaml` separately.
+    volumes:
+      - 'secy-pgdata:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${SECY_DB_USERNAME:-secy} -d secy']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: secy-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Internal compose DNS name + port (Postgres's *container* port stays 5432 even
+      # though it isn't published to the host — see the postgres service above).
+      SECY_DB_URL: ${SECY_DB_URL:-jdbc:postgresql://postgres:5432/secy}
+      SECY_DB_USERNAME: ${SECY_DB_USERNAME:-secy}
+      SECY_DB_PASSWORD: ${SECY_DB_PASSWORD:-secy}
+      SECY_AUTH_JWT_SECRET: ${SECY_AUTH_JWT_SECRET:-}
+      SECY_AUTH_REGISTRATION_ENABLED: ${SECY_AUTH_REGISTRATION_ENABLED:-true}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      SECY_ACTIONABLE_EPSS_THRESHOLD: ${SECY_ACTIONABLE_EPSS_THRESHOLD:-0.1}
+      SECY_OSV_ECOSYSTEMS: ${SECY_OSV_ECOSYSTEMS:-npm,Maven,PyPI,Go,NuGet,RubyGems,crates.io,Packagist,Hex,Pub}
+      SECY_CVE_LIST_RELEASES_API_URL: ${SECY_CVE_LIST_RELEASES_API_URL:-https://api.github.com/repos/CVEProject/cvelistV5/releases/latest}
+    # Published so Swagger UI / a direct curl / `POST /auth/register` are reachable
+    # without going through the ui container's nginx proxy — handy for first-run setup
+    # and debugging. Drop this if you want the API reachable only via the ui proxy.
+    ports:
+      - '8080:8080'
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:8080/actuator/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      # Cold JVM start + Liquibase migration on first boot; give it real headroom before
+      # the first failure counts.
+      start_period: 45s
+      retries: 5
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: secy-ui
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    # 4200 to match the dev server port (CLAUDE.md: "npm run dev -> Vite on 0.0.0.0:4200")
+    # so muscle memory / bookmarks carry over between `npm run dev` and the compose stack.
+    ports:
+      - '4200:80'
+
+volumes:
+  # Same name as api/compose.yaml's volume. Not the same physical volume (different
+  # compose project name -> Docker prefixes volume names per-project) but the intent is
+  # identical: ingested feed data survives `docker compose down`.
+  secy-pgdata:

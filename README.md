@@ -62,6 +62,24 @@ API config is env-var driven (`NVD_API_KEY`, `SECY_DB_URL`, `SECY_DB_USERNAME`, 
 When the frontend runs in the devcontainer and the backend on the host, the proxy targets
 `host.docker.internal:8080` automatically (`API_TARGET` overrides).
 
+### 4. Or: one-command Docker Compose
+On any machine with Docker (this repo's devcontainer does not have Docker itself — use a
+host machine or CI), the whole stack — Postgres + built API + built UI behind nginx — comes
+up with:
+
+```bash
+cp .env.example .env       # fill in NVD_API_KEY, SECY_AUTH_JWT_SECRET, etc.
+docker compose up --build  # http://localhost:4200
+```
+
+**First run:** registration is open until an admin exists — the *first* account you
+register (UI register screen or `POST /auth/register`) becomes `ADMIN`. Register it right
+after startup, then set `SECY_AUTH_REGISTRATION_ENABLED=false` in `.env` and restart the
+`api` service to lock further self-registration. See `.env.example` for every knob. This
+compose file is the production-shaped stack (built images); for day-to-day development
+against the Gradle/Vite dev servers, keep using `api/compose.yaml` (Postgres only) and
+steps 1–3 above.
+
 ## 📄 License
 Secy is licensed under the **GNU Affero General Public License v3.0** ([`LICENSE`](LICENSE)). You can run it, modify it, and self-host it freely; if you offer it as a network service, the AGPL requires you to make your modified source available to its users.
 

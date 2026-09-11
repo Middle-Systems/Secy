@@ -1,0 +1,68 @@
+name: CI
+
+# Build + test gate. Skeleton only — no Docker image build/push here (that's the 9b
+# release workflow, added later). Runs on every push to master and on every pull request
+# (regardless of target branch), so a PR from a feature branch always gets a signal even
+# before it's pointed at master.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  api:
+    name: api (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # `build` compiles and runs the full test suite against H2 (see api/README /
+      # CLAUDE.md — tests never need a real Postgres). Fails the job on any test failure.
+      - name: Build and test
+        working-directory: api
+        run: ./gradlew build --no-daemon
+
+  ui:
+    name: ui (typecheck + lint + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+
+      # Separate steps so a failure names exactly which check broke.
+      - name: Typecheck
+        working-directory: ui
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: ui
+        run: npm run lint
+
+      - name: Build
+        working-directory: ui
+        run: npm run build
+
+      # Not a blocking gate: vitest is known to OOM in the devcontainer (V8 heap /
+      # tinypool IPC — see ROADMAP.md "Cross-cutting / carried-over"). That instability
+      # hasn't yet been proven absent on GitHub-hosted runners either, so run the suite
+      # for visibility without letting a flaky exit code block every PR. Revisit once
+      # it's been observed green here consistently.
+      - name: Test (non-blocking)
+        working-directory: ui
+        run: npm test
+        continue-on-error: true

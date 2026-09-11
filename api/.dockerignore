@@ -1,0 +1,21 @@
+# Build context is `api/` (see docker-compose.yml `api.build.context`). Keep the context
+# small and avoid ever baking local secrets or IDE state into an image layer.
+
+build/
+.gradle/
+*.log
+out/
+bin/
+
+# Local secrets / IDE — never sent to the Docker daemon.
+src/main/resources/application-local.properties
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+.git/
+.gitignore
+README.md
