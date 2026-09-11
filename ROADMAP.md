@@ -128,7 +128,21 @@ Each phase is independently shippable and leaves `master` green
 - **Confidence**: each alert carries `matchConfidence` (`EXACT` / `RANGE` / `HEURISTIC`) and `fixSource`; both surfaced in the UI.
 - **Golden set**: `api/src/test/resources/correlation/` — 4–6 real SBOMs with hand-verified expected CVEs *and* expected fix versions; a test asserts precision/recall stays above a documented bar.
 
-### Phase 3 — SBOM breadth (SPDX) + ingest hardening
+### Phase 3 — SBOM breadth (SPDX) + ingest hardening  ✅ shipped 2026-09-11
+
+> **Landed** on `feat/phase-1-actionable-core` (commits `d5bb772` core, `7378307` job queue,
+> `e859c05` UI): `NormalizedComponent` as the shared CycloneDX/SPDX parse target; a version-less
+> PURL `identityKey` on `SBOMComponent` so a component's identity survives a re-upload — this
+> also fixed a real bug where Phase 2's auto-resolve/revive lifecycle only ever worked within
+> one SBOM's own re-correlation, never across a genuine new upload; SPDX 2.2/2.3 JSON parsing
+> (flat `packages[]`, no relationship-graph traversal); format sniffed from the raw body with a
+> 400 on an unrecognized shape; `POST /sbom/{id}/sboms` now returns 202 + a `SBOM_UPLOAD` Job
+> (breaking response-shape change) instead of blocking on ingest, with UI progress polling.
+> Backend 224 tests green (+28 across three commits); UI green.
+> **Deferred:** SPDX relationship graph / files / snippets not read; a pre-existing quirk where
+> `SBOM.components` includes the CycloneDX root/metadata component alongside real dependencies
+> (documented, not introduced by this phase); Liquibase `007`/`008` (like `004`-`006`) not yet
+> run against a real PostgreSQL. Not merged to `master`.
 - Introduce `model/component/NormalizedComponent` (name, version, purl, ecosystem, licenses, scope).
 - Refactor CycloneDX parsing → `NormalizedComponent`; scan pipeline consumes only the normalized model.
 - Add SPDX (JSON, 2.2 + 2.3) parser → `NormalizedComponent`. Detect format on upload; reject unknown with a clear 400.
