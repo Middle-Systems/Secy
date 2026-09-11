@@ -164,6 +164,15 @@ export type FixSource = 'OSV' | 'SCANNER' | 'CPE_RANGE';
 export type ExploitMaturity = 'NONE' | 'POC' | 'WEAPONIZED' | 'IN_THE_WILD';
 
 /**
+ * How confident the correlator is that an alert's component is really the
+ * vulnerable one. Answers a different question than `FixSource` — this is
+ * "is this really my component?", not "how good is this fix version?".
+ * `EXACT` and `RANGE` are both normal, trustworthy outcomes; `HEURISTIC` is a
+ * name-guess and should be called out in the UI.
+ */
+export type MatchConfidence = 'EXACT' | 'RANGE' | 'HEURISTIC';
+
+/**
  * One row of `GET /api/actionable` — a `Page<ActionableItem>`. Sort is fixed
  * server-side (EPSS desc, then createdAt desc). `description` is truncated at
  * 280 chars with a trailing `…`. `kev` is a convenience boolean. Nulls arrive
@@ -187,6 +196,7 @@ export interface ActionableItem {
   fixState: FixState;
   fixedVersions: string | null;
   fixSource: FixSource | null;
+  matchConfidence: MatchConfidence | null;
   actionableReason: ActionableReason;
   productId: string | null;
   productName: string | null;
@@ -259,6 +269,13 @@ export interface ActionableDetail {
   fixState: FixState;
   fixedVersions: string | null;
   fixSource: FixSource | null;
+  matchConfidence: MatchConfidence | null;
+  /**
+   * `ACTIVE` on every list row (the list endpoint filters to `ACTIVE` only).
+   * A deep link can resolve an `AUTO_RESOLVED` alert — one that no longer
+   * matches the current scan — since this endpoint resolves any alert.
+   */
+  lifecycleState: 'ACTIVE' | 'AUTO_RESOLVED';
   /** Date string, e.g. "2021-12-24". */
   kevDueDate: string | null;
   knownRansomwareUse: string | null;
@@ -286,6 +303,8 @@ export interface ActionableFilters {
   fixState?: FixState;
   /** At or above, by declaration order. `NONE` is a no-op. */
   minExploitMaturity?: ExploitMaturity;
+  /** Exact match — no "at or above" form. */
+  matchConfidence?: MatchConfidence;
 }
 
 /* -------------------------------------------------------------------------- */

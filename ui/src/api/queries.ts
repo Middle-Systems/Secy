@@ -321,8 +321,9 @@ export interface ActionablePageParams extends ActionableFilters {
  *
  * Sort is fixed server-side (EPSS score desc, then `createdAt` desc), so there
  * is no `sort` param. Filters (`productId` / `reason` / `minCvss` / `fixState`
- * / `minExploitMaturity`) are passed straight through; `undefined` entries are
- * dropped by the client. Keeps the previous page visible while the next loads.
+ * / `minExploitMaturity` / `matchConfidence`) are passed straight through;
+ * `undefined` entries are dropped by the client. Keeps the previous page
+ * visible while the next loads.
  */
 export function useActionablePage(
   { page = 0, size = DEFAULT_PAGE_SIZE, ...filters }: Partial<ActionablePageParams> = {},

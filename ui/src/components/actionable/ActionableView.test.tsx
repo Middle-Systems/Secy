@@ -31,6 +31,7 @@ function item(overrides: Partial<ActionableItem> = {}): ActionableItem {
     fixState: 'FIXED',
     fixedVersions: '2.17.1',
     fixSource: 'SCANNER',
+    matchConfidence: 'EXACT',
     actionableReason: 'KEV_AND_EPSS_HIGH',
     productId: 'prod-1',
     productName: 'Acme Web',
@@ -57,10 +58,32 @@ const row2 = item({
   fixState: 'NO_FIX',
   fixedVersions: null,
   fixSource: null,
+  matchConfidence: 'RANGE',
   actionableReason: 'EPSS_HIGH',
   productName: 'Acme API',
   componentName: 'left-pad',
   componentVersion: '1.0.0',
+});
+
+const row3 = item({
+  id: 'alert-3',
+  cveId: 'CVE-2023-9999',
+  baseSeverity: 'HIGH',
+  cvssScore: 7.5,
+  epssScore: 0.15,
+  epssPercentile: 0.4,
+  kev: false,
+  kevDueDate: null,
+  knownRansomwareUse: null,
+  exploitMaturity: 'NONE',
+  fixState: 'FIXED',
+  fixedVersions: '3.2.0',
+  fixSource: 'CPE_RANGE',
+  matchConfidence: 'HEURISTIC',
+  actionableReason: 'EPSS_HIGH',
+  productName: 'Acme CLI',
+  componentName: 'some-lib',
+  componentVersion: '3.0.0',
 });
 
 function page(content: ActionableItem[]): Page<ActionableItem> {
@@ -88,6 +111,8 @@ const detail: ActionableDetail = {
   fixState: 'FIXED',
   fixedVersions: '2.17.1',
   fixSource: 'SCANNER',
+  matchConfidence: 'EXACT',
+  lifecycleState: 'ACTIVE',
   kevDueDate: '2021-12-24',
   knownRansomwareUse: 'Known',
   createdAt: '2026-09-05T14:22:31.118',
@@ -210,5 +235,26 @@ describe('ActionableView', () => {
       await screen.findByText('Why this made the funnel, and what to do about it.'),
     ).toBeInTheDocument();
     expect(screen.getByText('Affected components (1)')).toBeInTheDocument();
+  });
+
+  it('renders HEURISTIC match confidence distinctly from EXACT/RANGE', () => {
+    mockPage({ data: page([item(), row2, row3]) });
+    useActionableDetail.mockReturnValue({ data: undefined, isPending: true, isError: false });
+    renderWithProviders(<ActionableView />);
+
+    expect(screen.getByText('Exact match')).toBeInTheDocument();
+    expect(screen.getByText('Range match')).toBeInTheDocument();
+
+    const heuristic = screen.getByText('Heuristic match');
+    expect(heuristic).toBeInTheDocument();
+    expect(heuristic.closest('span')?.className).toMatch(/amber/);
+  });
+
+  it('marks a CPE_RANGE fix as approximate on the Fix badge', () => {
+    mockPage({ data: page([row3]) });
+    useActionableDetail.mockReturnValue({ data: undefined, isPending: true, isError: false });
+    renderWithProviders(<ActionableView />);
+
+    expect(screen.getByText('~3.2.0')).toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { componentLabel, isKevOverdue } from './actionable.helpers';
 import { ExploitBadge } from './ExploitBadge';
 import { FixBadge } from './FixBadge';
+import { MatchConfidenceBadge } from './MatchConfidenceBadge';
 
 const DASH = <span className="text-xs text-muted-foreground">—</span>;
 
@@ -94,8 +95,22 @@ export function actionableColumns(): ColumnDef<ActionableItem, unknown>[] {
       id: 'fix',
       header: 'Fix',
       cell: ({ row }) => (
-        <FixBadge state={row.original.fixState} fixedVersions={row.original.fixedVersions} />
+        <FixBadge
+          state={row.original.fixState}
+          fixedVersions={row.original.fixedVersions}
+          fixSource={row.original.fixSource}
+        />
       ),
+    },
+    {
+      id: 'match',
+      header: 'Match',
+      cell: ({ row }) =>
+        row.original.matchConfidence ? (
+          <MatchConfidenceBadge confidence={row.original.matchConfidence} />
+        ) : (
+          DASH
+        ),
     },
     {
       id: 'affected',

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ExternalLink, Loader2, ShieldAlert } from 'lucide-react';
+import { ExternalLink, Info, Loader2, ShieldAlert } from 'lucide-react';
 
 import { useActionableDetail } from '@/api/queries';
 import type { ActionableDetail } from '@/api/types';
@@ -22,6 +22,7 @@ import {
 } from './actionable.helpers';
 import { ExploitBadge } from './ExploitBadge';
 import { FixBadge } from './FixBadge';
+import { MatchConfidenceBadge } from './MatchConfidenceBadge';
 
 interface ActionableDetailPanelProps {
   /** Alert id to load, or `null` when the panel is closed. */
@@ -59,6 +60,13 @@ function Body({ detail }: { detail: ActionableDetail }) {
 
   return (
     <div className="mt-4 flex flex-col gap-6 text-sm">
+      {detail.lifecycleState === 'AUTO_RESOLVED' && (
+        <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Auto-resolved — no longer matches your current scan.
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <SeverityBadge severity={cve.baseSeverity} score={cvss ?? undefined} />
         {cvss != null && (
@@ -99,9 +107,25 @@ function Body({ detail }: { detail: ActionableDetail }) {
           />
           <Row
             label="Fix"
-            value={<FixBadge state={detail.fixState} fixedVersions={detail.fixedVersions} />}
+            value={
+              <FixBadge
+                state={detail.fixState}
+                fixedVersions={detail.fixedVersions}
+                fixSource={detail.fixSource}
+              />
+            }
           />
           {detail.fixSource && <Row label="Fix source" value={detail.fixSource} />}
+          <Row
+            label="Match confidence"
+            value={
+              detail.matchConfidence ? (
+                <MatchConfidenceBadge confidence={detail.matchConfidence} />
+              ) : (
+                EM_DASH
+              )
+            }
+          />
         </Section>
 
         <Section title="CVE">
