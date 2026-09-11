@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -7,10 +7,18 @@ import { renderWithProviders } from '@/test/render';
 
 const useActionablePage = vi.fn();
 const useActionableDetail = vi.fn();
+const useAssets = vi.fn();
 
 vi.mock('@/api/queries', () => ({
   useActionablePage: (...args: unknown[]) => useActionablePage(...args),
   useActionableDetail: (...args: unknown[]) => useActionableDetail(...args),
+  useAssets: (...args: unknown[]) => useAssets(...args),
+}));
+
+// The asset drilldown panel is exercised by its own component tests; stub it
+// here so this file stays focused on the Actionable list/filter behaviour.
+vi.mock('@/components/infrastructure/AssetDetailPanel', () => ({
+  AssetDetailPanel: () => null,
 }));
 
 import { ActionableView } from './ActionableView';
@@ -35,6 +43,8 @@ function item(overrides: Partial<ActionableItem> = {}): ActionableItem {
     actionableReason: 'KEV_AND_EPSS_HIGH',
     productId: 'prod-1',
     productName: 'Acme Web',
+    assetId: null,
+    assetName: null,
     componentId: 'comp-1',
     componentName: 'log4j-core',
     componentVersion: '2.14.1',
@@ -147,6 +157,7 @@ const detail: ActionableDetail = {
       productId: 'prod-1',
       productName: 'Acme Web',
       assetId: null,
+      assetName: null,
     },
   ],
   kev: null,
@@ -164,6 +175,10 @@ function mockPage(over: Record<string, unknown> = {}) {
     ...over,
   });
 }
+
+beforeEach(() => {
+  useAssets.mockReturnValue({ data: { content: [] }, isPending: false, isError: false });
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -256,5 +271,24 @@ describe('ActionableView', () => {
     renderWithProviders(<ActionableView />);
 
     expect(screen.getByText('~3.2.0')).toBeInTheDocument();
+  });
+
+  it('renders the asset name in the Affected column for an asset-derived row (assetId set, productId null)', () => {
+    const assetRow = item({
+      id: 'alert-4',
+      cveId: 'CVE-2025-1111',
+      productId: null,
+      productName: null,
+      assetId: 'asset-1',
+      assetName: 'acme/api:1.4.2',
+      componentName: 'openssl',
+      componentVersion: '3.1.3-r0',
+    });
+    mockPage({ data: page([assetRow]) });
+    useActionableDetail.mockReturnValue({ data: undefined, isPending: true, isError: false });
+    renderWithProviders(<ActionableView />);
+
+    expect(screen.getByText('acme/api:1.4.2')).toBeInTheDocument();
+    expect(screen.queryByText('Acme Web')).not.toBeInTheDocument();
   });
 });

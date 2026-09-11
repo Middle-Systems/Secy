@@ -68,7 +68,8 @@ export interface PageParams {
  * alert's `exploitMaturity`. `SBOM_UPLOAD` is different: one job per uploaded
  * document, so many may be active at once (see `useUploadSbom`).
  */
-export type JobType = 'NVD' | 'EPSS' | 'KEV' | 'EXPLOIT' | 'OSV' | 'CVE_LIST' | 'SBOM_UPLOAD';
+export type JobType =
+  'NVD' | 'EPSS' | 'KEV' | 'EXPLOIT' | 'OSV' | 'CVE_LIST' | 'SBOM_UPLOAD' | 'ASSET_SCAN';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
@@ -202,6 +203,10 @@ export interface ActionableItem {
   actionableReason: ActionableReason;
   productId: string | null;
   productName: string | null;
+  /** Set on an asset-derived row instead of `productId`/`productName` (Phase 4) — never both. */
+  assetId: string | null;
+  /** e.g. "acme/api:1.4.2". Null on a product-derived row. */
+  assetName: string | null;
   componentId: string | null;
   componentName: string | null;
   componentVersion: string | null;
@@ -244,8 +249,9 @@ export interface ActionableAffectedComponent {
   sbomId: string | null;
   productId: string | null;
   productName: string | null;
-  /** Always null until Phase 4. */
   assetId: string | null;
+  /** Set alongside `assetId` on an asset entry; null on an SBOM entry. */
+  assetName: string | null;
 }
 
 /** One entry of `ActionableDetail.references`. `tags` is a comma-joined string. */
@@ -291,12 +297,16 @@ export interface ActionableDetail {
 }
 
 /**
- * Query params for `GET /api/actionable` beyond `page` / `size`. `assetId` and
- * `state` are deliberately omitted — the backend accepts and ignores them.
+ * Query params for `GET /api/actionable` beyond `page` / `size`. `state` is
+ * deliberately omitted — the backend still accepts and ignores it (Phase 7).
+ * `assetId` **is** a real filter as of Phase 4 — passing an arbitrary id now
+ * returns an empty page rather than the unfiltered list.
  */
 export interface ActionableFilters {
   /** Alerts on SBOMs belonging to this product. */
   productId?: string;
+  /** Alerts on this asset. Now a real filter (Phase 4) — no longer accepted-and-ignored. */
+  assetId?: string;
   /** Exact match — `reason=KEV` does NOT include `KEV_AND_EPSS_HIGH`. */
   reason?: ActionableReason;
   /** `cvssScore >= minCvss`; unscored CVEs are excluded. */
@@ -472,3 +482,56 @@ export interface VulnerabilityAlert {
 
 /** Payload accepted by POST /api/products. */
 export type CreateProductPayload = Pick<Product, 'name' | 'description'> & Partial<Product>;
+
+/* -------------------------------------------------------------------------- */
+/* Infrastructure / asset inventory — /api/assets (Phase 4)                   */
+/* -------------------------------------------------------------------------- */
+
+/** The kind of thing a scanned asset represents. */
+export type AssetType = 'CONTAINER_IMAGE' | 'HOST' | 'SERVICE';
+
+/** Asset scan lifecycle, mirrors `asset.status` on the backend. */
+export type AssetStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+/** Which scanner's report last populated the asset. */
+export type AssetScanner = 'Trivy' | 'Grype';
+
+/**
+ * One row of `GET /api/assets` — a `Page<AssetSummary>`. `componentCount`
+ * counts only components present in the last successful scan;
+ * `actionableCount` uses the exact same predicate as `/actionable`
+ * (`actionable = true AND lifecycleState = ACTIVE`), so this badge and the
+ * drill-down list can never disagree.
+ */
+export interface AssetSummary {
+  id: string;
+  type: AssetType;
+  name: string;
+  productId: string | null;
+  productName: string | null;
+  status: AssetStatus | null;
+  scanner: AssetScanner | null;
+  /** ISO-8601 date-time string. Null before the first scan completes. */
+  lastScannedAt: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+  componentCount: number;
+  actionableCount: number;
+}
+
+/**
+ * `GET /api/assets/:id` — the summary plus declared CPEs and its actionable
+ * items (a nested `Page`, `size` defaulting to 25 server-side).
+ */
+export interface AssetDetail extends AssetSummary {
+  declaredCpes: string[];
+  actionableItems: Page<ActionableItem>;
+}
+
+/** `DELETE /api/assets/:id` response — the cascade counts, since the delete is destructive. */
+export interface AssetDeletionSummary {
+  id: string;
+  name: string;
+  componentsRemoved: number;
+  alertsRemoved: number;
+}

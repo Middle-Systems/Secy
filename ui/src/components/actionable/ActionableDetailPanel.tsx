@@ -28,6 +28,13 @@ interface ActionableDetailPanelProps {
   /** Alert id to load, or `null` when the panel is closed. */
   id: string | null;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Called when the user activates an asset reference in "Affected
+   * components" (Phase 4). Renders those references as plain text when
+   * omitted — used by `ActionableView` (which also owns an `AssetDetailPanel`)
+   * but not required by every caller.
+   */
+  onOpenAsset?: (assetId: string) => void;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -54,7 +61,13 @@ function orDash(value: string | null | undefined): string {
   return value && value.trim() ? value : EM_DASH;
 }
 
-function Body({ detail }: { detail: ActionableDetail }) {
+function Body({
+  detail,
+  onOpenAsset,
+}: {
+  detail: ActionableDetail;
+  onOpenAsset?: (assetId: string) => void;
+}) {
   const { cve, kev, epss } = detail;
   const cvss = detail.cvssScore ?? cve.cvssScore;
 
@@ -189,8 +202,22 @@ function Body({ detail }: { detail: ActionableDetail }) {
                 <div className="font-mono text-xs text-foreground" title={c.purl ?? undefined}>
                   {componentLabel(c.name, c.version)}
                 </div>
-                {c.productName && (
-                  <div className="text-xs text-muted-foreground">{c.productName}</div>
+                {c.assetName ? (
+                  onOpenAsset ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAsset(c.assetId!)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      {c.assetName} (asset)
+                    </button>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">{c.assetName} (asset)</div>
+                  )
+                ) : (
+                  c.productName && (
+                    <div className="text-xs text-muted-foreground">{c.productName}</div>
+                  )
                 )}
               </li>
             ))}
@@ -229,7 +256,11 @@ function Body({ detail }: { detail: ActionableDetail }) {
  * Right-hand detail sheet for one actionable item, driven by
  * {@link useActionableDetail}. Open state is derived from `id != null`.
  */
-export function ActionableDetailPanel({ id, onOpenChange }: ActionableDetailPanelProps) {
+export function ActionableDetailPanel({
+  id,
+  onOpenChange,
+  onOpenAsset,
+}: ActionableDetailPanelProps) {
   const query = useActionableDetail(id ?? undefined);
 
   return (
@@ -253,7 +284,7 @@ export function ActionableDetailPanel({ id, onOpenChange }: ActionableDetailPane
             </p>
           </div>
         ) : (
-          <Body detail={query.data} />
+          <Body detail={query.data} onOpenAsset={onOpenAsset} />
         )}
       </SheetContent>
     </Sheet>

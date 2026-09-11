@@ -29,6 +29,10 @@ import type {
   ActionableDetail,
   ActionableFilters,
   ActionableItem,
+  AssetDeletionSummary,
+  AssetDetail,
+  AssetSummary,
+  AssetType,
   CreateProductPayload,
   DashboardStats,
   EPSS,
@@ -84,6 +88,11 @@ export const queryKeys = {
     detail: (jobId: string) => [...queryKeys.jobs.all, 'detail', jobId] as const,
     list: (params: JobListParams) => [...queryKeys.jobs.all, 'list', params] as const,
   },
+  assets: {
+    all: ['assets'] as const,
+    list: (params: AssetListParams) => [...queryKeys.assets.all, 'list', params] as const,
+    detail: (id: string) => [...queryKeys.assets.all, 'detail', id] as const,
+  },
 } as const;
 
 /** Options a caller may override on any of the query hooks below. */
@@ -131,6 +140,9 @@ const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
   // An upload's components/alerts only exist once its SBOM_UPLOAD job succeeds — see
   // useUploadSbom, which (like useIngestKev et al.) only invalidates the job list immediately.
   SBOM_UPLOAD: [queryKeys.products.all, queryKeys.sbom.all, queryKeys.stats.all],
+  // Same shape as SBOM_UPLOAD (Phase 4): the asset's components/alerts only exist once its
+  // ASSET_SCAN job succeeds. `stats.all` is invalidated unconditionally below regardless.
+  ASSET_SCAN: [queryKeys.assets.all, queryKeys.actionable.all],
 };
 
 /**
@@ -464,6 +476,120 @@ export function useUploadSbom(options?: MutationOverrides<Job, UploadSbomVariabl
   return useMutation({
     mutationFn: ({ productId, sbom, productVersion = 'Unknown' }: UploadSbomVariables) =>
       api.post<Job>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion } }),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Infrastructure / asset inventory (Phase 4)                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Filters accepted by `GET /api/assets`. */
+export interface AssetListParams {
+  page: number;
+  size: number;
+  type?: AssetType;
+  productId?: string;
+}
+
+/**
+ * GET /api/assets?page&size&type&productId — the asset inventory, paged.
+ * Ordered by name server-side. Keeps the previous page visible while the next
+ * loads, same as {@link useKevPage} / {@link useActionablePage}.
+ */
+export function useAssets(
+  { page = 0, size = DEFAULT_PAGE_SIZE, type, productId }: Partial<AssetListParams> = {},
+  options?: QueryOverrides<Page<AssetSummary>>,
+) {
+  const params: AssetListParams = { page, size, type, productId };
+  return useQuery({
+    queryKey: queryKeys.assets.list(params),
+    queryFn: () =>
+      api.get<Page<AssetSummary>>('/assets', { query: { page, size, type, productId } }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+/**
+ * GET /api/assets/:id — full detail for one asset, including its declared
+ * CPEs and a page of its actionable items. Disabled until `id` is truthy.
+ */
+export function useAssetDetail(id: string | undefined, options?: QueryOverrides<AssetDetail>) {
+  return useQuery({
+    queryKey: queryKeys.assets.detail(id ?? ''),
+    queryFn: () => api.get<AssetDetail>(`/assets/${id}`),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+/**
+ * DELETE /api/assets/:id — cascades to the asset's components and alerts
+ * (deliberate; see PHASE4-CONTRACT §5). Resolves with the `AssetDeletionSummary`
+ * so the caller can show the counts in a toast. Invalidates the asset list, the
+ * dashboard roll-up and the actionable list (the asset's alerts are gone too).
+ */
+export function useDeleteAsset(options?: MutationOverrides<AssetDeletionSummary, string>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<AssetDeletionSummary>(`/assets/${id}`),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assets.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.actionable.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+export interface ScanAssetVariables {
+  /** Raw `trivy image -f json` (or `grype -o json`) report body, sent verbatim. */
+  report: unknown;
+  /** Defaults to the report's own artifact name on the backend when omitted. */
+  name?: string;
+  /** Default `CONTAINER_IMAGE` on the backend when omitted. */
+  type?: AssetType;
+  productId?: string;
+}
+
+/**
+ * POST /api/assets/scan/trivy — queues a Trivy image/filesystem scan.
+ *
+ * Format validation happens synchronously (a document that isn't a Trivy
+ * vulnerability report — including one posted to the wrong endpoint — is a
+ * plain `400` from this call, before anything is queued); ingesting
+ * components and correlating alerts happens in a background `ASSET_SCAN` job.
+ * Resolves with that `Job` — poll it with {@link useJob} — same enqueue → poll
+ * → settle shape as {@link useUploadSbom}.
+ */
+export function useScanAssetTrivy(options?: MutationOverrides<Job, ScanAssetVariables>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ report, name, type, productId }: ScanAssetVariables) =>
+      api.post<Job>('/assets/scan/trivy', report, { query: { name, type, productId } }),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * POST /api/assets/scan/grype — queues a Grype scan. Same contract as
+ * {@link useScanAssetTrivy}, against the Grype-shaped endpoint.
+ */
+export function useScanAssetGrype(options?: MutationOverrides<Job, ScanAssetVariables>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ report, name, type, productId }: ScanAssetVariables) =>
+      api.post<Job>('/assets/scan/grype', report, { query: { name, type, productId } }),
     ...options,
     onSuccess: (...args) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });

@@ -119,7 +119,7 @@ export function actionableColumns(): ColumnDef<ActionableItem, unknown>[] {
       cell: ({ row }) => (
         <div className="min-w-0 max-w-[240px]">
           <div className="truncate text-sm font-medium text-foreground">
-            {row.original.productName ?? '—'}
+            {row.original.assetName ?? row.original.productName ?? '—'}
           </div>
           <div
             className="truncate font-mono text-xs text-muted-foreground"

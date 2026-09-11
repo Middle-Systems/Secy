@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { useActionablePage } from '@/api/queries';
+import { useActionablePage, useAssets } from '@/api/queries';
 import type { ActionableFilters, ActionableReason, MatchConfidence } from '@/api/types';
 import { DataTable } from '@/components/common/DataTable';
 import { ListPageHeader } from '@/components/common/ListPageHeader';
 import { Pagination } from '@/components/common/Pagination';
+import { AssetDetailPanel } from '@/components/infrastructure/AssetDetailPanel';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -59,15 +60,22 @@ export function ActionableView() {
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(15);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
 
   const [prefs, setPrefs] = useState<ActionableTogglePrefs>(() => readTogglePrefs());
   const [reason, setReason] = useState<ActionableReason | 'ALL'>('ALL');
   const [minCvss, setMinCvss] = useState<string>('ALL');
   const [matchConfidence, setMatchConfidence] = useState<MatchConfidence | 'ALL'>('ALL');
+  const [assetId, setAssetId] = useState<string>('ALL');
 
   useEffect(() => {
     writeTogglePrefs(prefs);
   }, [prefs]);
+
+  // Populates the asset filter select. A flat list is enough at MVP scale — this
+  // mirrors the other filter selects' static option lists, just sourced from the API.
+  const assetsQuery = useAssets({ size: 100 });
+  const assetOptions = assetsQuery.data?.content ?? [];
 
   const filters: ActionableFilters = useMemo(
     () => ({
@@ -76,8 +84,9 @@ export function ActionableView() {
       reason: reason === 'ALL' ? undefined : reason,
       minCvss: minCvss === 'ALL' ? undefined : Number(minCvss),
       matchConfidence: matchConfidence === 'ALL' ? undefined : matchConfidence,
+      assetId: assetId === 'ALL' ? undefined : assetId,
     }),
-    [prefs, reason, minCvss, matchConfidence],
+    [prefs, reason, minCvss, matchConfidence, assetId],
   );
 
   const query = useActionablePage({ page, size, ...filters });
@@ -195,6 +204,26 @@ export function ActionableView() {
                 ))}
               </SelectContent>
             </Select>
+
+            <Select
+              value={assetId}
+              onValueChange={(v) => {
+                setAssetId(v);
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="h-9 w-[180px]" aria-label="Filter by asset">
+                <SelectValue placeholder="Any asset" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Any asset</SelectItem>
+                {assetOptions.map((asset) => (
+                  <SelectItem key={asset.id} value={asset.id}>
+                    {asset.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -242,6 +271,14 @@ export function ActionableView() {
           id={selectedId}
           onOpenChange={(open) => {
             if (!open) setSelectedId(null);
+          }}
+          onOpenAsset={(id) => setSelectedAssetId(id)}
+        />
+
+        <AssetDetailPanel
+          id={selectedAssetId}
+          onOpenChange={(open) => {
+            if (!open) setSelectedAssetId(null);
           }}
         />
       </div>
