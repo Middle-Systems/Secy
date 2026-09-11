@@ -98,8 +98,22 @@ Each phase is independently shippable and leaves `master` green
 - **UI**: new **Actionable Items** view becomes `/` (index). Table with severity, EPSS (score + percentile), KEV badge, **Exploit badge** (PoC / Weaponized / In-the-wild), **Fix badge** (version / "none yet" / "unknown"), affected product/asset, age; row → detail drawer reusing `CveDetailPanel`. Opt-in toggles for "only with a fix" and "only with a known exploit", persisted per-user (localStorage). Dashboard stays at `/dashboard`.
 - **Tests**: service-level funnel tests; `/actionable` filter/sort contract tests (incl. `fixState`, `minExploitMaturity`); exploit-index merge tests; a UI view test.
 
-### Phase 2 — Correlation engine rework (OSV-primary)
+### Phase 2 — Correlation engine rework (OSV-primary)  ✅ shipped 2026-09-10
 *Goal: the actionable list is trustworthy, and it knows whether a fix exists.*
+
+> **Landed** on `feat/phase-1-actionable-core` (commits `63f6094` correlation core,
+> `882639a` UI, `efcdfb0` OSV feed, `5d6f09a` CVE-List-v5/Vulnrichment feed): `CorrelationService`
+> runs OSV-primary with real range evaluation, CPE fallback only for OSV-uncovered packages
+> (a clean OSV verdict short-circuits CPE), proper CPE 2.3 parsing, `VersionScheme` per ecosystem
+> (SemVer/PEP440/Maven/Go/Generic), `matchConfidence` + alert lifecycle (auto-resolve, no dupes),
+> `osv_advisory`/`osv_ecosystem_cursor` mirror, `POST /osv/ingest`, `POST /cve-list/ingest`
+> (`cveStatus`/`cvssSource`/SSVC), REJECTED/DISPUTED funnel veto, a 6-fixture golden set at
+> precision/recall ≥ 1.0, `matchConfidence` + approximate-fix caveat in the UI. Backend 194+
+> tests green (81 new across the four commits); UI typecheck/lint/build green.
+> **Deferred:** GHSA-only advisories with no CVE alias are skipped (funnel is CVE-keyed);
+> CPE AND/OR nesting not evaluated; CVE List is a full re-pull with no incremental delta;
+> existing `cpe_match` rows need a fresh `POST /nvd/ingest` to pick up version ranges; `006`/`007`
+> (`004`/`005` from Phase 1 too) not yet run against a real PostgreSQL. Not merged to `master`.
 
 - **OSV feed** (feed #4): mirror OSV's per-ecosystem exports (`gs://osv-vulnerabilities/<ecosystem>/all.zip`) into Postgres via the job queue, same pattern as NVD/KEV/EPSS. New `osv_advisory` table: ecosystem, package, aliases (CVE/GHSA), affected `introduced`/`fixed`/`last_affected` ranges, severity/CVSS vector, references. `POST /osv/ingest` + scheduled refresh. Store a per-ecosystem high-water mark.
 - **CVE List v5 + Vulnrichment feed** (feed #5): ingest CVE JSON 5.1 records (bulk from `CVEProject/cvelistV5`, hourly deltas) including the CISA-ADP **Vulnrichment** container. Populate on `Vulnerability`: `cveStatus` (`PUBLISHED` / `REJECTED` / `DISPUTED`), best-available CVSS + `cvssSource` (NVD → CNA → ADP precedence), CWE, and SSVC decision points (`ssvcExploitation`, `ssvcAutomatable`, `ssvcTechnicalImpact`). `POST /cve/ingest` + scheduled refresh. `REJECTED` / `DISPUTED` CVEs are excluded from the actionable funnel (still visible in the CVE browser, flagged).
