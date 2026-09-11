@@ -1,0 +1,83 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "acme-web-2.1.0",
+  "documentNamespace": "https://acme.example/spdx/acme-web-2.1.0",
+  "creationInfo": {
+    "created": "2026-09-10T10:00:00Z",
+    "creators": [ "Tool: syft-0.98.0", "Organization: Acme" ]
+  },
+  "documentDescribes": [ "SPDXRef-Package-root" ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-root",
+      "name": "acme-web",
+      "versionInfo": "2.1.0",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-lodash",
+      "name": "lodash",
+      "versionInfo": "4.17.20",
+      "description": "Lodash modular utilities.",
+      "downloadLocation": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "primaryPackagePurpose": "LIBRARY",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/lodash@4.17.20"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "website",
+          "referenceLocator": "https://lodash.com/"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-log4j-core",
+      "name": "log4j-core",
+      "versionInfo": "2.14.1",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "MIT",
+      "primaryPackagePurpose": "LIBRARY",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openssl",
+      "name": "OpenSSL",
+      "versionInfo": "1.1.1g",
+      "summary": "Cryptography and SSL/TLS toolkit",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NONE",
+      "primaryPackagePurpose": "LIBRARY"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-root"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-root",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-lodash"
+    }
+  ]
+}

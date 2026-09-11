@@ -1,0 +1,54 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
+  "version": 3,
+  "metadata": {
+    "timestamp": "2026-09-10T10:00:00Z",
+    "tools": {
+      "components": [
+        { "type": "application", "name": "syft", "version": "0.98.0", "group": "anchore" }
+      ]
+    },
+    "component": {
+      "type": "application",
+      "bom-ref": "root",
+      "name": "acme-web",
+      "version": "2.1.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/lodash@4.17.20",
+      "name": "lodash",
+      "version": "4.17.20",
+      "description": "Lodash modular utilities.",
+      "purl": "pkg:npm/lodash@4.17.20",
+      "licenses": [ { "license": { "id": "MIT" } } ],
+      "externalReferences": [
+        { "type": "website", "url": "https://lodash.com/" },
+        { "type": "vcs", "url": "https://github.com/lodash/lodash" }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "name": "log4j-core",
+      "group": "org.apache.logging.log4j",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "licenses": [
+        { "license": { "id": "Apache-2.0" } },
+        { "license": { "id": "MIT" } }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "openssl-no-purl",
+      "name": "OpenSSL",
+      "version": "1.1.1g",
+      "description": "Cryptography and SSL/TLS toolkit"
+    }
+  ]
+}

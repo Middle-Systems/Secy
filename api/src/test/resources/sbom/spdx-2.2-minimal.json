@@ -1,0 +1,46 @@
+{
+  "spdxVersion": "SPDX-2.2",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "acme-batch-1.0.0",
+  "creationInfo": {
+    "created": "2026-09-10T10:00:00Z",
+    "creators": [ "Tool: cyclonedx-gomod", "Person: jane" ]
+  },
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-root"
+    }
+  ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-root",
+      "name": "acme-batch",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-mux",
+      "name": "github.com/gorilla/mux",
+      "versionInfo": "v1.7.3",
+      "downloadLocation": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE_MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/github.com/gorilla/mux@v1.7.3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zlib",
+      "name": "zlib",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "Zlib"
+    }
+  ]
+}
