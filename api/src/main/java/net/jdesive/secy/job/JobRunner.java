@@ -14,6 +14,7 @@ import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
 import net.jdesive.secy.service.OsvIngestService;
+import net.jdesive.secy.service.SbomIngestJobService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
@@ -69,6 +70,8 @@ public class JobRunner {
 
     private final CveListIngestService cveListIngestService;
 
+    private final SbomIngestJobService sbomIngestJobService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -86,7 +89,8 @@ public class JobRunner {
                      IngestionJobProperties properties,
                      ApplicationEventPublisher events,
                      OsvIngestService osvIngestService,
-                     CveListIngestService cveListIngestService) {
+                     CveListIngestService cveListIngestService,
+                     SbomIngestJobService sbomIngestJobService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -97,6 +101,7 @@ public class JobRunner {
         this.events = events;
         this.osvIngestService = osvIngestService;
         this.cveListIngestService = cveListIngestService;
+        this.sbomIngestJobService = sbomIngestJobService;
     }
 
     /**
@@ -155,7 +160,7 @@ public class JobRunner {
         log.info("Running {} ingestion job {}", type, id);
         DatabaseJobProgress progress = new DatabaseJobProgress(id);
         try {
-            IngestResult result = dispatch(type, progress);
+            IngestResult result = dispatch(id, type, progress);
             jobService.finish(id, JobStatus.SUCCEEDED, result.itemsProcessed(), result.message());
             log.info("{} ingestion job {} succeeded: {}", type, id, result.message());
             // Downstream consequences of a feed changing (re-running the actionable funnel over
@@ -172,7 +177,7 @@ public class JobRunner {
         }
     }
 
-    private IngestResult dispatch(JobType type, JobProgress progress) {
+    private IngestResult dispatch(UUID id, JobType type, JobProgress progress) {
         return switch (type) {
             case KEV -> kevService.ingest(progress);
             case EPSS -> epssService.ingestEPSSData(progress);
@@ -180,6 +185,9 @@ public class JobRunner {
             case EXPLOIT -> exploitIndexService.ingest(progress);
             case OSV -> osvIngestService.ingest(progress);
             case CVE_LIST -> cveListIngestService.ingest(progress);
+            // The only type carrying per-invocation data — dispatch needs the job's own id to look
+            // up which SBOM it is for. See SBOMService.ingestUploadJob / SBOM.jobId.
+            case SBOM_UPLOAD -> sbomIngestJobService.ingest(id, progress);
         };
     }
 

@@ -4,6 +4,7 @@ import net.jdesive.secy.persistence.ProductRepository;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.Product;
+import net.jdesive.secy.persistence.entity.SBOM;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,8 +18,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -32,13 +35,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * message that names what was wrong. That last part is the bit worth pinning: the previous
  * behaviour for an SPDX upload was a silently empty CycloneDX bind, i.e. a {@code 201} for an SBOM
  * with zero components, which is the worst possible answer.
+ *
+ * <p>Phase 3 also moved persistence + scan onto the {@code SBOM_UPLOAD} job queue, so a valid
+ * document no longer answers {@code 201} with the full {@code SBOM} — it answers {@code 202} with a
+ * {@code QUEUED} {@code Job} instead (see {@code SbomUploadJobFlowTest} for the job actually running
+ * to completion). What this class still owns is the synchronous half: detection/format validation,
+ * the placeholder row's immediate fields, and the 400 path storing nothing.
  */
 /*
- * @Transactional is load-bearing here, not hygiene: the upload publishes an SbomUploadedEvent whose
- * listener is @TransactionalEventListener(AFTER_COMMIT) + @Async. Running the request inside the
- * test's transaction means it never commits, so no background scan thread is started to race the
- * next test's cleanup. What this class asserts — detection, storage and the 400 — is all decided
- * before that event would fire.
+ * @Transactional is load-bearing here, not hygiene: even the placeholder-creation path leaves a
+ * SbomUploadedEvent-publishing job for a background poller to eventually pick up in a live app;
+ * running the request inside the test's transaction means it never commits, so nothing outside this
+ * test observes the row. What this class asserts — detection, the placeholder's fields and the 400 —
+ * is all decided before any of that would matter.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -73,33 +82,44 @@ class SbomUploadFormatTest {
     }
 
     @Test
-    void cycloneDxIsDetectedAndStoredAsCycloneDx() throws Exception {
-        upload("cyclonedx-mixed.json")
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.format").value("CycloneDX"))
-                .andExpect(jsonPath("$.specVersion").value("1.5"))
-                .andExpect(jsonPath("$.version").value(3))
-                .andExpect(jsonPath("$.components.length()").value(3));
+    void cycloneDxIsDetectedAndQueuedAsAPlaceholderSbom() throws Exception {
+        String body = upload("cyclonedx-mixed.json")
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.type").value("SBOM_UPLOAD"))
+                .andExpect(jsonPath("$.status").value("QUEUED"))
+                .andReturn().getResponse().getContentAsString();
+
+        SBOM placeholder = onlySbom();
+        assertThat(placeholder.getFormat()).isEqualTo("CycloneDX");
+        assertThat(placeholder.getSpecVersion()).isEqualTo("1.5");
+        assertThat(placeholder.getVersion()).isEqualTo(3);
+        assertThat(placeholder.getStatus()).isEqualTo("QUEUED");
+        assertThat(placeholder.isActive()).isTrue();
+        assertThat(placeholder.getComponents()).as("not ingested yet — that's the job's work").isEmpty();
+        assertThat(placeholder.getJobId()).isNotNull();
+        assertThat(body).contains(placeholder.getJobId().toString());
     }
 
     @Test
-    void spdx22IsDetectedAndStoredAsSpdx() throws Exception {
-        upload("spdx-2.2-minimal.json")
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.format").value("SPDX"))
-                // The SPDX revision goes in specVersion verbatim: SPDX states format and revision in
-                // one field where CycloneDX uses two.
-                .andExpect(jsonPath("$.specVersion").value("SPDX-2.2"))
-                .andExpect(jsonPath("$.components.length()").value(2));
+    void spdx22IsDetectedAndQueuedAsAPlaceholderSbom() throws Exception {
+        upload("spdx-2.2-minimal.json").andExpect(status().isAccepted());
+
+        SBOM placeholder = onlySbom();
+        assertThat(placeholder.getFormat()).isEqualTo("SPDX");
+        // The SPDX revision goes in specVersion verbatim: SPDX states format and revision in one
+        // field where CycloneDX uses two.
+        assertThat(placeholder.getSpecVersion()).isEqualTo("SPDX-2.2");
+        assertThat(placeholder.getComponents()).isEmpty();
     }
 
     @Test
-    void spdx23IsDetectedAndStoredAsSpdx() throws Exception {
-        upload("spdx-2.3-mixed.json")
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.format").value("SPDX"))
-                .andExpect(jsonPath("$.specVersion").value("SPDX-2.3"))
-                .andExpect(jsonPath("$.components.length()").value(3));
+    void spdx23IsDetectedAndQueuedAsAPlaceholderSbom() throws Exception {
+        upload("spdx-2.3-mixed.json").andExpect(status().isAccepted());
+
+        SBOM placeholder = onlySbom();
+        assertThat(placeholder.getFormat()).isEqualTo("SPDX");
+        assertThat(placeholder.getSpecVersion()).isEqualTo("SPDX-2.3");
+        assertThat(placeholder.getComponents()).isEmpty();
     }
 
     @Test
@@ -123,9 +143,15 @@ class SbomUploadFormatTest {
     void aRejectedUploadStoresNothing() throws Exception {
         upload("not-an-sbom.json").andExpect(status().isBadRequest());
 
-        org.assertj.core.api.Assertions.assertThat(sbomRepository.findAll())
+        assertThat(sbomRepository.findAll())
                 .as("a 400 must not leave a half-ingested SBOM behind")
                 .isEmpty();
+    }
+
+    private SBOM onlySbom() {
+        List<SBOM> all = sbomRepository.findAll();
+        assertThat(all).hasSize(1);
+        return all.get(0);
     }
 
     private org.springframework.test.web.servlet.ResultActions upload(String fixture) throws Exception {

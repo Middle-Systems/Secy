@@ -87,6 +87,29 @@ public class JobService {
         return enqueue(type, principal == null ? null : principal.getName());
     }
 
+    /**
+     * Insert a new job unconditionally, skipping the "one active job per type" dedup check.
+     *
+     * <p>{@link #enqueue} treats a type as a singleton: at most one {@code QUEUED}/{@code RUNNING}
+     * job per type, and concurrent callers collapse onto the same row. That is right for a feed pull
+     * (KEV/EPSS/NVD/...) but wrong for a job type where each invocation is its own unit of work with
+     * its own payload — today, only {@link JobType#SBOM_UPLOAD} (one job per uploaded document).
+     * Reusing {@code enqueue} here would silently hand a second product's upload the first
+     * product's in-flight job. Migration {@code 008b} narrows {@code uq_ingestion_job_active_type} so
+     * the database does not reject the resulting concurrent inserts either.
+     *
+     * @param triggeredBy principal name, or null/blank for {@code "system"}
+     */
+    @Transactional
+    public Job create(JobType type, String triggeredBy) {
+        return insertQueued(type, triggeredBy);
+    }
+
+    /** Convenience for controllers: derive {@code triggeredBy} from the request principal. */
+    public Job create(JobType type, Principal principal) {
+        return create(type, principal == null ? null : principal.getName());
+    }
+
     /** A single job, or empty if the id is unknown. */
     @Transactional(readOnly = true)
     public Optional<Job> get(UUID id) {
@@ -224,6 +247,10 @@ public class JobService {
             log.debug("{} ingestion already {}; reusing job {}", type, active.get().getStatus(), active.get().getId());
             return active.get();
         }
+        return insertQueued(type, triggeredBy);
+    }
+
+    private Job insertQueued(JobType type, String triggeredBy) {
         Job job = new Job();
         job.setType(type);
         job.setStatus(JobStatus.QUEUED);
@@ -231,8 +258,8 @@ public class JobService {
         job.setItemsProcessed(0);
         job.setMessage("Queued");
         job.setTriggeredBy(triggeredBy == null || triggeredBy.isBlank() ? SYSTEM : triggeredBy);
-        // saveAndFlush so the unique-index violation happens here, inside execute(), rather than at
-        // commit time where the catch below could not see it.
+        // saveAndFlush so a unique-index violation happens here, inside the caller's try, rather
+        // than at commit time where it could not be caught.
         return jobRepository.saveAndFlush(job);
     }
 

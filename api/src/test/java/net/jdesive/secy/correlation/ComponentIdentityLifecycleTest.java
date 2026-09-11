@@ -276,6 +276,12 @@ class ComponentIdentityLifecycleTest {
     /* Helpers                                                            */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * Drives the same two phases {@code SBOMController} / the {@code SBOM_UPLOAD} job do (Phase 3
+     * moved the persistence half off the request thread and onto the job queue), just without going
+     * through {@code JobRunner} — there is no real job row here, only a stand-in id for
+     * {@link SBOMService#ingestUploadJob} to key its {@code findByJobId} lookup on.
+     */
     private UUID upload(String json, String productVersion) {
         NormalizedSbom document;
         try {
@@ -283,7 +289,9 @@ class ComponentIdentityLifecycleTest {
         } catch (Exception e) {
             throw new IllegalStateException("fixture is not valid JSON", e);
         }
-        UUID id = sbomService.ingestAndPrepare(product, document, productVersion).getId();
+        UUID jobId = UUID.randomUUID();
+        UUID id = sbomService.createPlaceholder(product, document, productVersion, json, jobId).getId();
+        sbomService.ingestUploadJob(jobId, net.jdesive.secy.model.ingest.JobProgress.NOOP);
         entityManager.flush();
         entityManager.clear();
         return id;

@@ -27,4 +27,7 @@ public interface SBOMRepository extends JpaRepository<SBOM, UUID> {
     @Query("SELECT s FROM SBOM s LEFT JOIN FETCH s.components WHERE s.id = :id")
     Optional<SBOM> findByIdWithComponents(@Param("id") UUID id);
 
+    /** The placeholder row a {@code SBOM_UPLOAD} job was enqueued for — see {@code SBOM.jobId}. */
+    Optional<SBOM> findByJobId(UUID jobId);
+
 }

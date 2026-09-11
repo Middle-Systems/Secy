@@ -38,6 +38,7 @@ Claimed prefixes:
 | `005`  | `cve_exploit` — merged public exploit index (Phase 1) |
 | `006`  | OSV mirror + CPE version ranges + CVE-5.1 fields + alert confidence/lifecycle (Phase 2) |
 | `007`  | `sbom_component.identity_key` — product-stable component identity + widened `purl` (Phase 3) |
+| `008`  | `sbom.pending_raw_body` / `sbom.job_id` for the SBOM_UPLOAD job queue + narrowed `uq_ingestion_job_active_type` (Phase 3) |
 
 Pick the next free number if yours isn't listed.
 

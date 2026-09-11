@@ -1,5 +1,6 @@
 package net.jdesive.secy.persistence.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonIncludeProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -41,6 +42,24 @@ public class SBOM {
     private LocalDateTime lastScannedAt;
 
     private LocalDateTime uploadDate = LocalDateTime.now();
+
+    /**
+     * Raw JSON body of the upload, held only until the {@code SBOM_UPLOAD} job that owns this row
+     * (see {@link #jobId}) consumes it — {@code SBOMService.ingestUploadJob} re-parses it and then
+     * clears the column. Null once ingested (or for any SBOM predating Phase 3's job queue). Never
+     * serialized: a multi-MB SBOM would otherwise ride along on every {@code GET /products}.
+     */
+    @Column(columnDefinition = "text")
+    @JsonIgnore
+    private String pendingRawBody;
+
+    /**
+     * The {@code SBOM_UPLOAD} job ingesting this row, set when the placeholder is created. A
+     * generic {@link Job} row carries no payload of its own (every other job type is a stateless
+     * singleton feed pull), so this is the pointer the job uses to find "which SBOM am I for" —
+     * see {@code SBOMRepository#findByJobId}.
+     */
+    private UUID jobId;
 
     @OneToMany(mappedBy = "sbom", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
