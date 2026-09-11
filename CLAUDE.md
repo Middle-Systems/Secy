@@ -20,8 +20,8 @@ items: KEV-listed OR EPSS > 0.1.
   - `host.docker.internal:8080` when `DEVCONTAINER=true` (frontend in container, backend on host), else
   - `localhost:8080`.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
-  `/osv`, `/osv/ingest`, `/products`, `/sbom/{id}/vulnerabilities`, `/actionable`, `/actionable/{id}`,
-  `/stats/dashboard`, plus CIS/docker controllers.
+  `/osv`, `/osv/ingest`, `/cve-list/ingest`, `/products`, `/sbom/{id}/vulnerabilities`,
+  `/actionable`, `/actionable/{id}`, `/stats/dashboard`, plus CIS/docker controllers.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

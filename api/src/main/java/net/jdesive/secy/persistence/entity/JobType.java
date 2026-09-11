@@ -16,6 +16,9 @@ public enum JobType {
     EXPLOIT,
 
     /** OSV per-ecosystem advisory mirror. */
-    OSV
+    OSV,
+
+    /** CVE List v5.1 + CISA-ADP Vulnrichment bulk snapshot. */
+    CVE_LIST
 
 }

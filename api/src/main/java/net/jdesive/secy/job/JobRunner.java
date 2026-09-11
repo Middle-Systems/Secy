@@ -8,6 +8,7 @@ import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.Job;
 import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
+import net.jdesive.secy.service.CveListIngestService;
 import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
@@ -66,6 +67,8 @@ public class JobRunner {
 
     private final OsvIngestService osvIngestService;
 
+    private final CveListIngestService cveListIngestService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -82,7 +85,8 @@ public class JobRunner {
                      @Qualifier(AsyncConfig.INGESTION_EXECUTOR) Executor executor,
                      IngestionJobProperties properties,
                      ApplicationEventPublisher events,
-                     OsvIngestService osvIngestService) {
+                     OsvIngestService osvIngestService,
+                     CveListIngestService cveListIngestService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -92,6 +96,7 @@ public class JobRunner {
         this.properties = properties;
         this.events = events;
         this.osvIngestService = osvIngestService;
+        this.cveListIngestService = cveListIngestService;
     }
 
     /**
@@ -174,6 +179,7 @@ public class JobRunner {
             case NVD -> nvdService.ingestData(progress);
             case EXPLOIT -> exploitIndexService.ingest(progress);
             case OSV -> osvIngestService.ingest(progress);
+            case CVE_LIST -> cveListIngestService.ingest(progress);
         };
     }
 
