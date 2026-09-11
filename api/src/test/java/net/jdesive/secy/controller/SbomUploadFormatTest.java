@@ -67,12 +67,20 @@ class SbomUploadFormatTest {
     @Autowired
     private VulnerabilityAlertRepository alertRepository;
 
+    /**
+     * Cleared, not seeded: a leftover asset from another test class in the shared H2 database would
+     * otherwise hold a FK on a product this seed deletes.
+     */
+    @Autowired
+    private net.jdesive.secy.persistence.AssetRepository assetRepository;
+
     private UUID productId;
 
     @BeforeEach
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
         alertRepository.deleteAll();
+        assetRepository.deleteAll();
         sbomRepository.deleteAll();
         productRepository.deleteAll();
 

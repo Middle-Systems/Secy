@@ -63,6 +63,13 @@ class SbomUploadJobFlowTest {
     @Autowired
     private ProductRepository productRepository;
 
+    /**
+     * Cleared, not seeded: a leftover asset from another test class in the shared H2 database would
+     * otherwise hold a FK on a product this seed deletes.
+     */
+    @Autowired
+    private net.jdesive.secy.persistence.AssetRepository assetRepository;
+
     @Autowired
     private SBOMRepository sbomRepository;
 
@@ -78,6 +85,7 @@ class SbomUploadJobFlowTest {
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
         alertRepository.deleteAll();
+        assetRepository.deleteAll();
         sbomRepository.deleteAll();
         jobRepository.deleteAll();
         productRepository.deleteAll();

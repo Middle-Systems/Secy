@@ -75,8 +75,12 @@ public record ActionableDetailResponse(
     }
 
     /**
-     * One (alert, component) pair the CVE affects. Phase 4 adds assets alongside SBOM components;
-     * the shape is already asset-shaped ({@code assetId} stays null until then).
+     * One (alert, component) pair the CVE affects, from either estate.
+     *
+     * <p>An SBOM-derived entry carries {@code sbomId}/{@code productId}/{@code productName} and no
+     * asset; an asset-derived one (Phase 4) carries {@code assetId}/{@code assetName} and none of the
+     * three. That is what makes this list answer the question it exists for — "everything this CVE
+     * affects" — across what is shipped and what is running, in one place.
      */
     public record AffectedComponent(
             UUID alertId,
@@ -87,7 +91,8 @@ public record ActionableDetailResponse(
             UUID sbomId,
             UUID productId,
             String productName,
-            UUID assetId) {
+            UUID assetId,
+            String assetName) {
     }
 
     /** The CISA KEV catalog entry, verbatim. */

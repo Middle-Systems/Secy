@@ -8,6 +8,7 @@ import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.Job;
 import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
+import net.jdesive.secy.service.AssetScanIngestJobService;
 import net.jdesive.secy.service.CveListIngestService;
 import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
@@ -72,6 +73,8 @@ public class JobRunner {
 
     private final SbomIngestJobService sbomIngestJobService;
 
+    private final AssetScanIngestJobService assetScanIngestJobService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -90,7 +93,8 @@ public class JobRunner {
                      ApplicationEventPublisher events,
                      OsvIngestService osvIngestService,
                      CveListIngestService cveListIngestService,
-                     SbomIngestJobService sbomIngestJobService) {
+                     SbomIngestJobService sbomIngestJobService,
+                     AssetScanIngestJobService assetScanIngestJobService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -102,6 +106,7 @@ public class JobRunner {
         this.osvIngestService = osvIngestService;
         this.cveListIngestService = cveListIngestService;
         this.sbomIngestJobService = sbomIngestJobService;
+        this.assetScanIngestJobService = assetScanIngestJobService;
     }
 
     /**
@@ -185,9 +190,11 @@ public class JobRunner {
             case EXPLOIT -> exploitIndexService.ingest(progress);
             case OSV -> osvIngestService.ingest(progress);
             case CVE_LIST -> cveListIngestService.ingest(progress);
-            // The only type carrying per-invocation data — dispatch needs the job's own id to look
-            // up which SBOM it is for. See SBOMService.ingestUploadJob / SBOM.jobId.
+            // The two types carrying per-invocation data — dispatch needs the job's own id to look
+            // up which SBOM or asset it is for. See SBOMService.ingestUploadJob / SBOM.jobId and
+            // AssetService.ingestScanJob / Asset.jobId.
             case SBOM_UPLOAD -> sbomIngestJobService.ingest(id, progress);
+            case ASSET_SCAN -> assetScanIngestJobService.ingest(id, progress);
         };
     }
 

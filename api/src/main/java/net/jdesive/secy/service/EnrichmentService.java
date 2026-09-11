@@ -7,6 +7,7 @@ import net.jdesive.secy.config.ActionableProperties;
 import net.jdesive.secy.correlation.ComponentCoordinate;
 import net.jdesive.secy.correlation.FixResolution;
 import net.jdesive.secy.correlation.OsvMatcher;
+import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,10 +45,12 @@ import java.util.Optional;
  * <ul>
  *   <li>{@code CorrelationService.correlate(SBOM)} — once per matched alert, with the fix data the
  *       match established.</li>
+ *   <li>{@code CorrelationService.correlate(Asset, findings)} — the same call, additionally passing
+ *       the scanner's own fixed version into {@code scannerFixedVersions}. Asset alerts route through
+ *       this class identically to SBOM alerts; there is no second funnel.</li>
  *   <li>{@link #reEnrichAll()} — after a KEV/EPSS/exploit-index ingest succeeds, so alerts raised
  *       before the feed knew about a CVE get promoted, and so {@code fixState} picks up whatever OSV
  *       has learned since. See {@code ReEnrichmentListener}.</li>
- *   <li>The Phase 4 scanner path, through {@link #enrich(VulnerabilityAlert, String)}.</li>
  * </ul>
  *
  * <p>Enrichment is deliberately <em>idempotent and total</em>: every call recomputes every field it
@@ -230,7 +233,9 @@ public class EnrichmentService {
         if (alert.getFixSource() != null && alert.getFixSource() != FixSource.OSV) {
             return null;
         }
-        SBOMComponent component = alert.getComponent();
+        // Whichever component the alert cites — SBOM- or asset-derived. An asset's lodash gets the
+        // same OSV re-enrichment a product's does; that is the whole point of the shared interface.
+        CorrelatableComponent component = alert.getCorrelatableComponent();
         Vulnerability cve = alert.getVulnerability();
         if (component == null || cve == null || cve.getId() == null) {
             return null;

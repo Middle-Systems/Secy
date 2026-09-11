@@ -39,6 +39,7 @@ Claimed prefixes:
 | `006`  | OSV mirror + CPE version ranges + CVE-5.1 fields + alert confidence/lifecycle (Phase 2) |
 | `007`  | `sbom_component.identity_key` — product-stable component identity + widened `purl` (Phase 3) |
 | `008`  | `sbom.pending_raw_body` / `sbom.job_id` for the SBOM_UPLOAD job queue + narrowed `uq_ingestion_job_active_type` (Phase 3) |
+| `009`  | `asset` / `asset_component` / `asset_declared_cpe` + `vulnerability_alert.asset_component_id` with its XOR check + ASSET_SCAN excluded from `uq_ingestion_job_active_type` (Phase 4) |
 
 Pick the next free number if yours isn't listed.
 

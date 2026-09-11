@@ -30,6 +30,17 @@ public enum JobType {
      * {@code JobService.create()}, not {@code enqueue()}; see that method's Javadoc and migration
      * {@code 008b}, which narrows {@code uq_ingestion_job_active_type} to exclude this type.
      */
-    SBOM_UPLOAD
+    SBOM_UPLOAD,
+
+    /**
+     * One uploaded infrastructure scan (Trivy or Grype) being parsed, persisted and correlated
+     * (Phase 4).
+     *
+     * <p>Per-invocation like {@link #SBOM_UPLOAD} and for the same reason — each scan is its own unit
+     * of work with its own payload (which {@code asset} row to finish ingesting) — so it is enqueued
+     * via {@code JobService.create()} and excluded from {@code uq_ingestion_job_active_type} by
+     * migration {@code 009}.
+     */
+    ASSET_SCAN
 
 }

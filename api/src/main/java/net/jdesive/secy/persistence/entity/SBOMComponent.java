@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonIncludeProperties;
 import jakarta.persistence.*;
 import lombok.Getter;
 import net.jdesive.secy.model.component.ComponentIdentity;
+import net.jdesive.secy.model.component.CorrelatableComponent;
 import lombok.Setter;
 import lombok.ToString;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +21,7 @@ import java.util.UUID;
 @Transactional
 @Table(name = "sbom_component")
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-public class SBOMComponent {
+public class SBOMComponent implements CorrelatableComponent {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

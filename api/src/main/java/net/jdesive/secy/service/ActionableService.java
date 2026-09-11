@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.model.actionable.ActionableDetailResponse;
 import net.jdesive.secy.model.actionable.ActionableFilter;
 import net.jdesive.secy.model.actionable.ActionableItemResponse;
+import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.*;
 import org.springframework.data.domain.Page;
@@ -60,6 +61,20 @@ public class ActionableService {
         return alertRepository.findAll(specification(filter), pageable).map(ActionableService::toRow);
     }
 
+    /**
+     * The actionable items for one asset — {@code GET /assets/{id}}'s embedded list.
+     *
+     * <p>Deliberately {@link #findActionable} with an asset filter and nothing else: an asset's
+     * findings are rows of the same list the Actionable Items screen shows, with the same funnel, the
+     * same sort and the same shape. Giving assets their own query would be the first step towards
+     * giving them their own funnel, which is the trap {@code DockerVulnerabilityAlert} fell into.
+     */
+    @Transactional(readOnly = true)
+    public Page<ActionableItemResponse> findActionableForAsset(int page, int size, UUID assetId) {
+        return findActionable(page, size,
+                new ActionableFilter(null, assetId, null, null, null, null, null, null));
+    }
+
     /** Full detail for one alert, or empty when the id is unknown. */
     @Transactional(readOnly = true)
     public Optional<ActionableDetailResponse> findDetail(UUID id) {
@@ -98,12 +113,22 @@ public class ActionableService {
                 predicates.add(root.get("exploitMaturity").in(filter.minExploitMaturity().andAbove()));
             }
             if (filter.productId() != null) {
+                // INNER, so an asset-derived alert (whose `component` is null) is excluded by
+                // construction — a product filter asks about what the product declares it ships, not
+                // about what happens to be running on an asset someone linked to it.
                 Join<VulnerabilityAlert, SBOMComponent> component = root.join("component", JoinType.INNER);
                 Join<SBOMComponent, SBOM> sbom = component.join("sbom", JoinType.INNER);
                 predicates.add(cb.equal(sbom.get("product").get("id"), filter.productId()));
             }
-            // filter.assetId() and filter.state() are accepted for forward compatibility and have
-            // nothing to bind to yet — see ActionableFilter.
+            if (filter.assetId() != null) {
+                // The mirror image, and real from Phase 4 on — this was an accepted-and-ignored no-op
+                // in Phases 1-2. See ActionableFilter for the compatibility note.
+                Join<VulnerabilityAlert, AssetComponent> assetComponent =
+                        root.join("assetComponent", JoinType.INNER);
+                predicates.add(cb.equal(assetComponent.get("asset").get("id"), filter.assetId()));
+            }
+            // filter.state() is accepted for forward compatibility and has nothing to bind to yet —
+            // see ActionableFilter.
 
             // Spring Data only overwrites the ORDER BY when the Pageable carries a Sort, and the
             // service always passes an unsorted one; the count query must not get an ORDER BY at all.
@@ -126,10 +151,18 @@ public class ActionableService {
     /* Mapping                                                            */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * One row, from whichever kind of component the alert cites.
+     *
+     * <p>The component fields are filled from the SBOM component or the asset component — the table
+     * renders them identically because they mean the same thing — while {@code productId} and
+     * {@code assetId} say which estate the finding belongs to. Exactly one of the two is set.
+     */
     private static ActionableItemResponse toRow(VulnerabilityAlert alert) {
         Vulnerability cve = alert.getVulnerability();
-        SBOMComponent component = alert.getComponent();
-        Product product = productOf(component);
+        CorrelatableComponent component = alert.getCorrelatableComponent();
+        Product product = productOf(alert.getComponent());
+        Asset asset = assetOf(alert.getAssetComponent());
 
         return new ActionableItemResponse(
                 alert.getId(),
@@ -152,11 +185,21 @@ public class ActionableService {
                 alert.getActionableReason(),
                 product == null ? null : product.getId(),
                 product == null ? null : product.getName(),
-                component == null ? null : component.getId(),
+                asset == null ? null : asset.getId(),
+                asset == null ? null : asset.getName(),
+                componentIdOf(alert),
                 component == null ? null : component.getName(),
                 component == null ? null : component.getVersion(),
                 component == null ? null : component.getPurl(),
                 alert.getCreatedAt());
+    }
+
+    /** The id of whichever component row the alert cites. */
+    private static UUID componentIdOf(VulnerabilityAlert alert) {
+        if (alert.getComponent() != null) {
+            return alert.getComponent().getId();
+        }
+        return alert.getAssetComponent() == null ? null : alert.getAssetComponent().getId();
     }
 
     private ActionableDetailResponse toDetail(VulnerabilityAlert alert) {
@@ -221,19 +264,21 @@ public class ActionableService {
     }
 
     private static ActionableDetailResponse.AffectedComponent toAffected(VulnerabilityAlert alert) {
-        SBOMComponent component = alert.getComponent();
-        SBOM sbom = component == null ? null : component.getSbom();
-        Product product = productOf(component);
+        CorrelatableComponent component = alert.getCorrelatableComponent();
+        SBOM sbom = alert.getComponent() == null ? null : alert.getComponent().getSbom();
+        Product product = productOf(alert.getComponent());
+        Asset asset = assetOf(alert.getAssetComponent());
         return new ActionableDetailResponse.AffectedComponent(
                 alert.getId(),
-                component == null ? null : component.getId(),
+                componentIdOf(alert),
                 component == null ? null : component.getName(),
                 component == null ? null : component.getVersion(),
                 component == null ? null : component.getPurl(),
                 sbom == null ? null : sbom.getId(),
                 product == null ? null : product.getId(),
                 product == null ? null : product.getName(),
-                null); // assetId — Phase 4
+                asset == null ? null : asset.getId(),
+                asset == null ? null : asset.getName());
     }
 
     private static ActionableDetailResponse.KevEvidence toKevEvidence(KEV kev) {
@@ -278,6 +323,10 @@ public class ActionableService {
             return null;
         }
         return component.getSbom().getProduct();
+    }
+
+    private static Asset assetOf(AssetComponent component) {
+        return component == null ? null : component.getAsset();
     }
 
     private static String summarize(String description) {

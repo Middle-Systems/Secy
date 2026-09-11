@@ -93,10 +93,11 @@ public class JobService {
      * <p>{@link #enqueue} treats a type as a singleton: at most one {@code QUEUED}/{@code RUNNING}
      * job per type, and concurrent callers collapse onto the same row. That is right for a feed pull
      * (KEV/EPSS/NVD/...) but wrong for a job type where each invocation is its own unit of work with
-     * its own payload — today, only {@link JobType#SBOM_UPLOAD} (one job per uploaded document).
-     * Reusing {@code enqueue} here would silently hand a second product's upload the first
-     * product's in-flight job. Migration {@code 008b} narrows {@code uq_ingestion_job_active_type} so
-     * the database does not reject the resulting concurrent inserts either.
+     * its own payload — {@link JobType#SBOM_UPLOAD} (one job per uploaded document) and
+     * {@link JobType#ASSET_SCAN} (one per uploaded scan). Reusing {@code enqueue} here would silently
+     * hand a second product's upload the first product's in-flight job. Migrations {@code 008b} and
+     * {@code 009} narrow {@code uq_ingestion_job_active_type} so the database does not reject the
+     * resulting concurrent inserts either.
      *
      * @param triggeredBy principal name, or null/blank for {@code "system"}
      */

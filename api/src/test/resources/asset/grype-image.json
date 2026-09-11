@@ -1,0 +1,128 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2099-5001",
+        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2099-5001",
+        "namespace": "nvd:cpe",
+        "severity": "Critical",
+        "urls": [],
+        "fix": {
+          "versions": [
+            "2.17.1"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [],
+      "artifact": {
+        "id": "a1b2c3d4e5f60718",
+        "name": "org.apache.logging.log4j:log4j-core",
+        "version": "2.14.1",
+        "type": "java-archive",
+        "language": "java",
+        "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+        "locations": [
+          {
+            "path": "/opt/app/lib/log4j-core-2.14.1.jar",
+            "layerID": "sha256:9999cccc8888dddd7777eeee6666ffff5555aaaa4444bbbb3333cccc2222dddd"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-9999-wxyz-0000",
+        "dataSource": "https://github.com/advisories/GHSA-9999-wxyz-0000",
+        "namespace": "github:language:javascript",
+        "severity": "High",
+        "fix": {
+          "versions": [],
+          "state": "wont-fix"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2099-5002",
+          "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2099-5002",
+          "namespace": "nvd:cpe",
+          "severity": "High"
+        }
+      ],
+      "artifact": {
+        "id": "f0e1d2c3b4a59687",
+        "name": "minimist",
+        "version": "1.2.0",
+        "type": "npm",
+        "language": "javascript",
+        "purl": "pkg:npm/minimist@1.2.0",
+        "locations": [
+          {
+            "path": "/opt/app/node_modules/minimist/package.json",
+            "layerID": "sha256:9999cccc8888dddd7777eeee6666ffff5555aaaa4444bbbb3333cccc2222dddd"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2099-5003",
+        "dataSource": "https://security.alpinelinux.org/vuln/CVE-2099-5003",
+        "namespace": "alpine:distro:alpine:3.18",
+        "severity": "Medium",
+        "fix": {
+          "versions": [],
+          "state": "unknown"
+        }
+      },
+      "relatedVulnerabilities": [],
+      "artifact": {
+        "id": "1122334455667788",
+        "name": "zlib",
+        "version": "1.2.13-r1",
+        "type": "apk",
+        "purl": "pkg:apk/alpine/zlib@1.2.13-r1?arch=x86_64&distro=alpine-3.18.4",
+        "locations": [
+          {
+            "path": "/lib/apk/db/installed",
+            "layerID": "sha256:1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-0000-unresolvable-9999",
+        "dataSource": "https://github.com/advisories/GHSA-0000-unresolvable-9999",
+        "namespace": "github:language:python",
+        "severity": "Low",
+        "fix": {
+          "versions": [],
+          "state": "unknown"
+        }
+      },
+      "relatedVulnerabilities": [],
+      "artifact": {
+        "name": "orphan-pkg",
+        "version": "0.0.1",
+        "type": "python",
+        "purl": "pkg:pypi/orphan-pkg@0.0.1",
+        "locations": []
+      }
+    }
+  ],
+  "source": {
+    "type": "image",
+    "target": {
+      "userInput": "acme/worker:2.0.0",
+      "imageID": "sha256:beef0000cafe1111beef2222cafe3333beef4444cafe5555beef6666cafe7777",
+      "tags": [
+        "acme/worker:2.0.0"
+      ]
+    }
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "0.79.1"
+  }
+}

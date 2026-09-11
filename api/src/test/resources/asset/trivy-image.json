@@ -1,0 +1,85 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-09-11T09:14:02.114521Z",
+  "ArtifactName": "acme/api:1.4.2",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "OS": {
+      "Family": "alpine",
+      "Name": "3.18.4"
+    },
+    "ImageID": "sha256:0d2f2a4e5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f506",
+    "RepoTags": [
+      "acme/api:1.4.2"
+    ]
+  },
+  "Results": [
+    {
+      "Target": "acme/api:1.4.2 (alpine 3.18.4)",
+      "Class": "os-pkgs",
+      "Type": "alpine",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2099-4001",
+          "PkgID": "openssl@3.1.3-r0",
+          "PkgName": "openssl",
+          "InstalledVersion": "3.1.3-r0",
+          "FixedVersion": "3.1.4-r0",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+            "DiffID": "sha256:1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb"
+          },
+          "SeveritySource": "nvd",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2099-4001",
+          "Title": "openssl: seeded fixture vulnerability",
+          "Severity": "CRITICAL"
+        },
+        {
+          "VulnerabilityID": "CVE-2099-4002",
+          "PkgID": "busybox@1.36.1-r2",
+          "PkgName": "busybox",
+          "InstalledVersion": "1.36.1-r2",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+            "DiffID": "sha256:1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb"
+          },
+          "SeveritySource": "nvd",
+          "Title": "busybox: seeded fixture vulnerability with no vendor fix",
+          "Severity": "HIGH"
+        },
+        {
+          "VulnerabilityID": "DLA-9999-1",
+          "PkgID": "musl@1.2.4-r2",
+          "PkgName": "musl",
+          "InstalledVersion": "1.2.4-r2",
+          "Status": "affected",
+          "Title": "distro-only advisory with no CVE alias — must be skipped, not half-ingested",
+          "Severity": "LOW"
+        }
+      ]
+    },
+    {
+      "Target": "app/package-lock.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2099-4003",
+          "PkgName": "lodash",
+          "PkgPath": "app/package-lock.json",
+          "InstalledVersion": "4.17.20",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:cccc9999dddd8888eeee7777ffff6666aaaa5555bbbb4444cccc3333dddd2222",
+            "DiffID": "sha256:9999cccc8888dddd7777eeee6666ffff5555aaaa4444bbbb3333cccc2222dddd"
+          },
+          "SeveritySource": "ghsa",
+          "Title": "lodash: seeded fixture vulnerability the scanner knows no fix for",
+          "Severity": "HIGH"
+        }
+      ]
+    }
+  ]
+}

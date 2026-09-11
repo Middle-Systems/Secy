@@ -2,6 +2,7 @@ package net.jdesive.secy.correlation;
 
 import com.github.packageurl.MalformedPackageURLException;
 import com.github.packageurl.PackageURL;
+import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.entity.SBOMComponent;
 
 import java.util.Locale;
@@ -12,9 +13,9 @@ import java.util.Map;
  *
  * <p>This is the seam between the storage model and the correlation engine. Everything downstream —
  * the OSV matcher, the CPE bridge, the version schemes — takes a {@code ComponentCoordinate} and
- * never sees a {@link SBOMComponent}. When Phase 3 replaces {@code SBOMComponent} with
- * {@code NormalizedComponent}, {@link #of(SBOMComponent)} gains a sibling and nothing else in this
- * package changes.
+ * never sees a {@link SBOMComponent} or an {@code AssetComponent}. Phase 4 widened
+ * {@link #of(CorrelatableComponent)} to the shared interface rather than adding a second factory,
+ * and nothing else in this package changed.
  *
  * <h2>Naming</h2>
  *
@@ -61,21 +62,24 @@ public record ComponentCoordinate(String purl, String purlType, String ecosystem
             Map.entry("swift", "SwiftURL"));
 
     /**
-     * Read a coordinate off an SBOM component.
+     * Read a coordinate off a stored component — an {@code SBOMComponent} or (Phase 4) an
+     * {@code AssetComponent}. The correlation engine cannot tell the two apart and must not: a
+     * {@code lodash 4.17.20} found in an image is looked up exactly the way one declared in an SBOM
+     * is.
      *
      * <p>Never throws and never returns null: a malformed or absent PURL degrades to a coordinate
      * with the component's own name and version and no ecosystem, which still correlates through the
      * CPE fallback. Losing a component to a parse error would be a silent false negative, which is
      * the failure mode this whole phase exists to remove.
      */
-    public static ComponentCoordinate of(SBOMComponent component) {
+    public static ComponentCoordinate of(CorrelatableComponent component) {
         if (component == null) {
             return new ComponentCoordinate(null, null, null, null, null, null);
         }
         return of(component.getPurl(), component.getName(), component.getVersion());
     }
 
-    /** @see #of(SBOMComponent) */
+    /** @see #of(CorrelatableComponent) */
     public static ComponentCoordinate of(String purl, String fallbackName, String fallbackVersion) {
         if (purl == null || purl.isBlank()) {
             return new ComponentCoordinate(null, null, null, null, trimToNull(fallbackName), trimToNull(fallbackVersion));

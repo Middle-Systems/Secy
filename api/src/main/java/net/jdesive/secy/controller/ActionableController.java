@@ -50,7 +50,9 @@ public class ActionableController {
             @RequestParam(defaultValue = "15") int size,
             @Parameter(description = "Only alerts on SBOMs belonging to this product")
             @RequestParam(required = false) UUID productId,
-            @Parameter(description = "Accepted and ignored until the Asset model lands in Phase 4")
+            @Parameter(description = "Only alerts a scanner raised against this asset's components. "
+                    + "Real from Phase 4 on — it was documented as accepted-and-ignored in Phases 1-2, "
+                    + "so an unknown id now returns an empty page instead of the unfiltered list.")
             @RequestParam(required = false) UUID assetId,
             @Parameter(description = "Exact funnel reason; KEV_AND_EPSS_HIGH is its own value")
             @RequestParam(required = false) ActionableReason reason,

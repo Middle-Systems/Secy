@@ -35,12 +35,21 @@ import java.util.UUID;
  *                           row whose version field is an unbounded wildcard). Null only on rows
  *                           written before Phase 2.
  * @param actionableReason   which limb of the funnel promoted this row
- * @param productId          the product the affected SBOM belongs to, null for an orphan SBOM
+ * @param productId          the product the affected SBOM belongs to. Null on an asset row, and on a
+ *                           product row whose SBOM is orphaned.
  * @param productName        that product's name
- * @param componentId        the affected SBOM component
+ * @param assetId            the asset a scanner found this on (Phase 4). Null on an SBOM row.
+ *                           <b>Exactly one of {@code productId}/{@code assetId} is normally set</b> —
+ *                           an alert cites either an SBOM component or an asset component, never
+ *                           both. An asset that happens to be linked to a product still reports only
+ *                           {@code assetId} here: the finding is on the running artefact, not in the
+ *                           product's declared inventory.
+ * @param assetName          that asset's name — image {@code repo:tag}, hostname, service name
+ * @param componentId        the affected component — an {@code sbom_component} id on a product row,
+ *                           an {@code asset_component} id on an asset row
  * @param componentName      component name
- * @param componentVersion   component version as declared in the SBOM
- * @param componentPurl      component PURL
+ * @param componentVersion   the version observed: declared in the SBOM, or installed on the asset
+ * @param componentPurl      component PURL; null for an OS package, which has none by design
  * @param createdAt          when the alert was generated — the UI's "age" column
  */
 public record ActionableItemResponse(
@@ -62,6 +71,8 @@ public record ActionableItemResponse(
         ActionableReason actionableReason,
         UUID productId,
         String productName,
+        UUID assetId,
+        String assetName,
         UUID componentId,
         String componentName,
         String componentVersion,

@@ -1,0 +1,26 @@
+{
+  "ID": "docker-cis-1.6.0",
+  "Title": "CIS Docker Community Edition Benchmark",
+  "Version": "1.6.0",
+  "SummaryReport": {
+    "SchemaVersion": 0
+  },
+  "Results": [
+    {
+      "ID": "1.1.1",
+      "Name": "Ensure a separate partition for containers has been created",
+      "Severity": "LOW",
+      "Status": "FAIL",
+      "Results": [
+        {
+          "Target": "",
+          "Class": "config",
+          "MisconfSummary": {
+            "Successes": 0,
+            "Failures": 1
+          }
+        }
+      ]
+    }
+  ]
+}

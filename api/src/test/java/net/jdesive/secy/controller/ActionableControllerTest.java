@@ -54,6 +54,13 @@ class ActionableControllerTest {
     @Autowired
     private ProductRepository productRepository;
 
+    /**
+     * Not used to seed anything — cleared so a leftover asset from another test class in the shared
+     * H2 database cannot hold a FK on a product this one is about to delete.
+     */
+    @Autowired
+    private AssetRepository assetRepository;
+
     private UUID batchProductId;
     private UUID topAlertId;
     private UUID nonActionableAlertId;
@@ -66,6 +73,7 @@ class ActionableControllerTest {
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
         alertRepository.deleteAll();
+        assetRepository.deleteAll();
         sbomRepository.deleteAll();
         productRepository.deleteAll();
         cveRepository.deleteAll();
@@ -330,13 +338,34 @@ class ActionableControllerTest {
 
     @Test
     @WithMockUser
-    void theForwardCompatibleParametersAreAcceptedAndIgnored() throws Exception {
-        // assetId and state exist so the UI's filter contract survives Phases 4 and 7 unchanged.
-        mockMvc.perform(get("/actionable")
-                        .param("assetId", UUID.randomUUID().toString())
-                        .param("state", "OPEN"))
+    void stateIsStillAcceptedAndIgnored() throws Exception {
+        // `state` exists so the UI's filter contract survives Phase 7's triage state machine
+        // unchanged; there is no state column yet, so it must narrow nothing.
+        mockMvc.perform(get("/actionable").param("state", "OPEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(5));
+    }
+
+    @Test
+    @WithMockUser
+    void assetIdIsNoLongerANoOp() throws Exception {
+        // BREAKING vs Phases 1-2, which documented assetId as accepted-and-ignored because there was
+        // no Asset entity to match. There is one now (Phase 4), so an unknown asset id filters to
+        // nothing instead of returning the unfiltered list. Every alert in this fixture is
+        // SBOM-derived, so any asset id excludes all of them.
+        mockMvc.perform(get("/actionable").param("assetId", UUID.randomUUID().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    @WithMockUser
+    void anSbomDerivedRowCarriesNoAsset() throws Exception {
+        mockMvc.perform(get("/actionable").param("productId", batchProductId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].assetId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].assetName").doesNotExist())
+                .andExpect(jsonPath("$.content[0].productName").value("Acme Batch"));
     }
 
     /* ------------------------------------------------------------------ */
