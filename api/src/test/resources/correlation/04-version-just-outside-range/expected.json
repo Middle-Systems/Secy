@@ -1,0 +1,6 @@
+{
+  "description": "The regression this whole phase exists for. Every component sits exactly ONE release past the fix: log4j-core 2.17.1 against a range fixed at 2.15.0, lodash 4.17.21 against a range fixed at 4.17.21, requests 2.31.0 against a CPE versionEndExcluding of 2.31.0. The old engine read the criteria wildcard as a version and reported all three. Nothing may be reported.",
+  "precisionBar": 1.0,
+  "recallBar": 1.0,
+  "alerts": []
+}

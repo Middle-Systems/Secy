@@ -3,6 +3,7 @@ package net.jdesive.secy.model.actionable;
 import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.persistence.entity.MatchConfidence;
 
 import java.util.UUID;
 
@@ -25,6 +26,10 @@ import java.util.UUID;
  * @param fixState           exact {@link FixState}
  * @param minExploitMaturity {@link ExploitMaturity} at or above this, by the enum's declaration
  *                           order. {@code NONE} is a no-op since everything is at least NONE.
+ * @param matchConfidence    exact {@link MatchConfidence}, mirroring {@code fixState}. Filtering to
+ *                           {@code EXACT} is how an operator asks for "only what I am certain
+ *                           about"; there is deliberately no "at or above" form, because the useful
+ *                           question in practice is the exact band.
  */
 public record ActionableFilter(
         UUID productId,
@@ -33,5 +38,6 @@ public record ActionableFilter(
         Double minCvss,
         String state,
         FixState fixState,
-        ExploitMaturity minExploitMaturity) {
+        ExploitMaturity minExploitMaturity,
+        MatchConfidence matchConfidence) {
 }

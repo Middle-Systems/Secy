@@ -1,0 +1,17 @@
+{
+  "description": "Phase 3: the advisory is restored. The SAME row goes back to ACTIVE \u2014 the expected list has one entry and the assertion is on exact size, so a second row here would fail the case.",
+  "precisionBar": 1.0,
+  "recallBar": 1.0,
+  "alerts": [
+    {
+      "cveId": "CVE-2020-8203",
+      "component": "lodash",
+      "fixState": "FIXED",
+      "fixedVersions": "4.17.21",
+      "fixSource": "OSV",
+      "matchConfidence": "RANGE",
+      "actionable": true,
+      "lifecycleState": "ACTIVE"
+    }
+  ]
+}

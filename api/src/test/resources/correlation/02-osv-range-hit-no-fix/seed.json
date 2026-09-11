@@ -1,0 +1,31 @@
+{
+  "cves": [
+    {
+      "id": "CVE-2024-23342",
+      "baseSeverity": "HIGH",
+      "cvssScore": 7.4,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2024-23342",
+      "epss": 0.52,
+      "epssPercentile": 0.9
+    }
+  ],
+  "osv": [
+    {
+      "osvId": "GHSA-wj6h-64fc-37mp",
+      "ecosystem": "PyPI",
+      "packageName": "ecdsa",
+      "aliases": [
+        "CVE-2024-23342"
+      ],
+      "summary": "Golden-set fixture advisory GHSA-wj6h-64fc-37mp",
+      "ranges": [
+        {
+          "rangeType": "ECOSYSTEM",
+          "introduced": "0"
+        }
+      ]
+    }
+  ],
+  "cpe": []
+}

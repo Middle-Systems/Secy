@@ -11,6 +11,7 @@ import net.jdesive.secy.model.actionable.ActionableItemResponse;
 import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.persistence.entity.MatchConfidence;
 import net.jdesive.secy.service.ActionableService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -40,7 +41,9 @@ public class ActionableController {
             summary = "List actionable items, paged and filtered",
             description = "Spring `Page` shape (`content`, `totalElements`, `totalPages`, 0-indexed). "
                     + "Only alerts with `actionable = true` are returned. Sorted by EPSS score "
-                    + "descending with unscored CVEs last, then newest first — the sort is fixed.")
+                    + "descending with unscored CVEs last, then newest first — the sort is fixed. "
+                    + "Only alerts whose lifecycle state is ACTIVE are returned; a match a re-scan no "
+                    + "longer reproduces is auto-resolved and drops off this list without being deleted.")
     @GetMapping
     public Page<ActionableItemResponse> list(
             @RequestParam(defaultValue = "0") int page,
@@ -57,10 +60,14 @@ public class ActionableController {
             @RequestParam(required = false) String state,
             @RequestParam(required = false) FixState fixState,
             @Parameter(description = "Exploit maturity at or above this (NONE < POC < WEAPONIZED < IN_THE_WILD)")
-            @RequestParam(required = false) ExploitMaturity minExploitMaturity) {
+            @RequestParam(required = false) ExploitMaturity minExploitMaturity,
+            @Parameter(description = "Exact correlation confidence: EXACT (an advisory named this version), "
+                    + "RANGE (identified package, version inside a stated range) or HEURISTIC (name guess "
+                    + "or unbounded CPE wildcard)")
+            @RequestParam(required = false) MatchConfidence matchConfidence) {
 
         ActionableFilter filter = new ActionableFilter(
-                productId, assetId, reason, minCvss, state, fixState, minExploitMaturity);
+                productId, assetId, reason, minCvss, state, fixState, minExploitMaturity, matchConfidence);
         return actionableService.findActionable(page, size, filter);
     }
 

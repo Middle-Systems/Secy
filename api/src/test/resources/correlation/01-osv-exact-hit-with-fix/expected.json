@@ -1,0 +1,17 @@
+{
+  "description": "OSV names the exact version the SBOM declares -> EXACT, with the fix version straight from the advisory's fixed event. The second component is OSV-covered but unaffected, and the tempting wildcard CPE row for it must never be consulted.",
+  "precisionBar": 1.0,
+  "recallBar": 1.0,
+  "alerts": [
+    {
+      "cveId": "CVE-2020-8203",
+      "component": "lodash",
+      "fixState": "FIXED",
+      "fixedVersions": "4.17.21",
+      "fixSource": "OSV",
+      "matchConfidence": "EXACT",
+      "actionable": true,
+      "lifecycleState": "ACTIVE"
+    }
+  ]
+}

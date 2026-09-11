@@ -1,0 +1,23 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+  "version": 1,
+  "metadata": {},
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pyyaml@5.3",
+      "name": "pyyaml",
+      "version": "5.3",
+      "purl": "pkg:pypi/pyyaml@5.3"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/openssl@1.1.1f",
+      "name": "openssl",
+      "version": "1.1.1f",
+      "purl": "pkg:generic/openssl@1.1.1f"
+    }
+  ]
+}

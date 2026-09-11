@@ -1,0 +1,27 @@
+{
+  "description": "NVD CPE fallback with real range evaluation, and the two confidence bands it can reach. pyyaml is a PyPI package, so the bridge guesses vendor == product and that identity claim holds -> RANGE. openssl arrives as pkg:generic with no vendor convention to lean on, so only the product-only candidate applies -> HEURISTIC. Both derive an approximate fix from versionEndExcluding, flagged by fixSource = CPE_RANGE.",
+  "precisionBar": 1.0,
+  "recallBar": 1.0,
+  "alerts": [
+    {
+      "cveId": "CVE-2020-14343",
+      "component": "pyyaml",
+      "fixState": "FIXED",
+      "fixedVersions": "5.4",
+      "fixSource": "CPE_RANGE",
+      "matchConfidence": "RANGE",
+      "actionable": true,
+      "lifecycleState": "ACTIVE"
+    },
+    {
+      "cveId": "CVE-2021-3450",
+      "component": "openssl",
+      "fixState": "FIXED",
+      "fixedVersions": "1.1.1k",
+      "fixSource": "CPE_RANGE",
+      "matchConfidence": "HEURISTIC",
+      "actionable": true,
+      "lifecycleState": "ACTIVE"
+    }
+  ]
+}

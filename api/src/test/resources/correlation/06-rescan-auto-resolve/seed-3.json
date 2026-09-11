@@ -1,0 +1,32 @@
+{
+  "cves": [
+    {
+      "id": "CVE-2020-8203",
+      "baseSeverity": "HIGH",
+      "cvssScore": 7.4,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2020-8203",
+      "epss": 0.42,
+      "epssPercentile": 0.9
+    }
+  ],
+  "osv": [
+    {
+      "osvId": "GHSA-p6mc-m468-83gg",
+      "ecosystem": "npm",
+      "packageName": "lodash",
+      "aliases": [
+        "CVE-2020-8203"
+      ],
+      "summary": "Golden-set fixture advisory GHSA-p6mc-m468-83gg",
+      "ranges": [
+        {
+          "rangeType": "SEMVER",
+          "introduced": "0",
+          "fixed": "4.17.21"
+        }
+      ]
+    }
+  ],
+  "cpe": []
+}

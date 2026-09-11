@@ -1,0 +1,39 @@
+{
+  "cves": [
+    {
+      "id": "CVE-2020-14343",
+      "baseSeverity": "CRITICAL",
+      "cvssScore": 9.8,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2020-14343",
+      "epss": 0.22,
+      "epssPercentile": 0.9
+    },
+    {
+      "id": "CVE-2021-3450",
+      "baseSeverity": "HIGH",
+      "cvssScore": 7.4,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2021-3450",
+      "epss": 0.61,
+      "epssPercentile": 0.9
+    }
+  ],
+  "osv": [],
+  "cpe": [
+    {
+      "cveId": "CVE-2020-14343",
+      "criteria": "cpe:2.3:a:pyyaml:pyyaml:*:*:*:*:*:*:*:*",
+      "vulnerable": true,
+      "versionStartIncluding": "0",
+      "versionEndExcluding": "5.4"
+    },
+    {
+      "cveId": "CVE-2021-3450",
+      "criteria": "cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*",
+      "vulnerable": true,
+      "versionStartIncluding": "1.1.1",
+      "versionEndExcluding": "1.1.1k"
+    }
+  ]
+}

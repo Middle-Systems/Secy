@@ -1,0 +1,17 @@
+{
+  "description": "Phase 2: the advisory narrowed and the match no longer holds. The row is AUTO_RESOLVED, not deleted \u2014 the history and any triage done to it survive \u2014 and it drops off GET /actionable.",
+  "precisionBar": 1.0,
+  "recallBar": 1.0,
+  "alerts": [
+    {
+      "cveId": "CVE-2020-8203",
+      "component": "lodash",
+      "fixState": "FIXED",
+      "fixedVersions": "4.17.21",
+      "fixSource": "OSV",
+      "matchConfidence": "RANGE",
+      "actionable": true,
+      "lifecycleState": "AUTO_RESOLVED"
+    }
+  ]
+}

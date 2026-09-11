@@ -1,0 +1,76 @@
+{
+  "cves": [
+    {
+      "id": "CVE-2021-44228",
+      "baseSeverity": "CRITICAL",
+      "cvssScore": 10.0,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2021-44228",
+      "epss": 0.97,
+      "epssPercentile": 0.9,
+      "kevDueDate": "2021-12-24",
+      "knownRansomwareUse": "Known"
+    },
+    {
+      "id": "CVE-2020-8203",
+      "baseSeverity": "HIGH",
+      "cvssScore": 7.4,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2020-8203",
+      "epss": 0.42,
+      "epssPercentile": 0.9
+    },
+    {
+      "id": "CVE-2023-32681",
+      "baseSeverity": "MEDIUM",
+      "cvssScore": 6.1,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2023-32681",
+      "epss": 0.33,
+      "epssPercentile": 0.9
+    }
+  ],
+  "osv": [
+    {
+      "osvId": "GHSA-jfh8-c2jp-5v3q",
+      "ecosystem": "Maven",
+      "packageName": "org.apache.logging.log4j:log4j-core",
+      "aliases": [
+        "CVE-2021-44228"
+      ],
+      "summary": "Golden-set fixture advisory GHSA-jfh8-c2jp-5v3q",
+      "ranges": [
+        {
+          "rangeType": "ECOSYSTEM",
+          "introduced": "2.0-beta9",
+          "fixed": "2.15.0"
+        }
+      ]
+    },
+    {
+      "osvId": "GHSA-p6mc-m468-83gg",
+      "ecosystem": "npm",
+      "packageName": "lodash",
+      "aliases": [
+        "CVE-2020-8203"
+      ],
+      "summary": "Golden-set fixture advisory GHSA-p6mc-m468-83gg",
+      "ranges": [
+        {
+          "rangeType": "SEMVER",
+          "introduced": "0",
+          "fixed": "4.17.21"
+        }
+      ]
+    }
+  ],
+  "cpe": [
+    {
+      "cveId": "CVE-2023-32681",
+      "criteria": "cpe:2.3:a:requests:requests:*:*:*:*:*:*:*:*",
+      "vulnerable": true,
+      "versionStartIncluding": "2.0",
+      "versionEndExcluding": "2.31.0"
+    }
+  ]
+}

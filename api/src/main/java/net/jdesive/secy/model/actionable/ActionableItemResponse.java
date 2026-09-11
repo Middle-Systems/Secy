@@ -4,6 +4,7 @@ import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixSource;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.persistence.entity.MatchConfidence;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -27,6 +28,12 @@ import java.util.UUID;
  * @param fixState           FIXED / NO_FIX / UNKNOWN
  * @param fixedVersions      fixed version(s) when {@code fixState = FIXED}
  * @param fixSource          where {@code fixedVersions} came from
+ * @param matchConfidence    how firmly correlation identified the affected component —
+ *                           {@code EXACT} (an advisory named this exact version), {@code RANGE}
+ *                           (the package was identified and its version fell in a stated range) or
+ *                           {@code HEURISTIC} (the package was matched by a name guess, or by a CPE
+ *                           row whose version field is an unbounded wildcard). Null only on rows
+ *                           written before Phase 2.
  * @param actionableReason   which limb of the funnel promoted this row
  * @param productId          the product the affected SBOM belongs to, null for an orphan SBOM
  * @param productName        that product's name
@@ -51,6 +58,7 @@ public record ActionableItemResponse(
         FixState fixState,
         String fixedVersions,
         FixSource fixSource,
+        MatchConfidence matchConfidence,
         ActionableReason actionableReason,
         UUID productId,
         String productName,

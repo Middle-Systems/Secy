@@ -4,6 +4,8 @@ import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixSource;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.persistence.entity.AlertLifecycleState;
+import net.jdesive.secy.persistence.entity.MatchConfidence;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -29,6 +31,14 @@ public record ActionableDetailResponse(
         FixState fixState,
         String fixedVersions,
         FixSource fixSource,
+        /** How firmly correlation identified the affected component: EXACT / RANGE / HEURISTIC. */
+        MatchConfidence matchConfidence,
+        /**
+         * ACTIVE, or AUTO_RESOLVED when the last correlation of the owning SBOM no longer reproduced
+         * the match. The list endpoint returns only ACTIVE rows; this endpoint resolves both, so a
+         * deep link to a resolved alert still opens.
+         */
+        AlertLifecycleState lifecycleState,
         LocalDate kevDueDate,
         String knownRansomwareUse,
         LocalDateTime createdAt,

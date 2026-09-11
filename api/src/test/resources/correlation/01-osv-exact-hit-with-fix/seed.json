@@ -1,0 +1,67 @@
+{
+  "cves": [
+    {
+      "id": "CVE-2020-8203",
+      "baseSeverity": "HIGH",
+      "cvssScore": 7.4,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2020-8203",
+      "epss": 0.42,
+      "epssPercentile": 0.9
+    },
+    {
+      "id": "CVE-2022-24999",
+      "baseSeverity": "HIGH",
+      "cvssScore": 7.5,
+      "cveStatus": "PUBLISHED",
+      "description": "Golden-set fixture CVE CVE-2022-24999",
+      "epss": 0.31,
+      "epssPercentile": 0.9
+    }
+  ],
+  "osv": [
+    {
+      "osvId": "GHSA-p6mc-m468-83gg",
+      "ecosystem": "npm",
+      "packageName": "lodash",
+      "aliases": [
+        "CVE-2020-8203"
+      ],
+      "summary": "Golden-set fixture advisory GHSA-p6mc-m468-83gg",
+      "ranges": [
+        {
+          "rangeType": "SEMVER",
+          "introduced": "0",
+          "fixed": "4.17.21"
+        }
+      ],
+      "versions": [
+        "4.17.19",
+        "4.17.20"
+      ]
+    },
+    {
+      "osvId": "GHSA-hrpp-h998-j3pp",
+      "ecosystem": "npm",
+      "packageName": "express",
+      "aliases": [
+        "CVE-2022-24999"
+      ],
+      "summary": "Golden-set fixture advisory GHSA-hrpp-h998-j3pp",
+      "ranges": [
+        {
+          "rangeType": "SEMVER",
+          "introduced": "0",
+          "fixed": "4.17.3"
+        }
+      ]
+    }
+  ],
+  "cpe": [
+    {
+      "cveId": "CVE-2022-24999",
+      "criteria": "cpe:2.3:a:expressjs:express:*:*:*:*:*:*:*:*",
+      "vulnerable": true
+    }
+  ]
+}

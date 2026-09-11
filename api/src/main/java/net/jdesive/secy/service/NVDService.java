@@ -180,6 +180,13 @@ public class NVDService {
                             cpeMatch.setVulnerable(nvdCpeMatch.isVulnerable());
                             cpeMatch.setCriteria(nvdCpeMatch.getCriteria());
                             cpeMatch.setMatchCriteriaId(nvdCpeMatch.getMatchCriteriaId());
+                            // The affected range. Without these four the criteria string's version
+                            // field is a bare wildcard and correlation cannot tell an affected
+                            // version from a patched one — see CPEMatch.versionStartIncluding.
+                            cpeMatch.setVersionStartIncluding(nvdCpeMatch.getVersionStartIncluding());
+                            cpeMatch.setVersionStartExcluding(nvdCpeMatch.getVersionStartExcluding());
+                            cpeMatch.setVersionEndIncluding(nvdCpeMatch.getVersionEndIncluding());
+                            cpeMatch.setVersionEndExcluding(nvdCpeMatch.getVersionEndExcluding());
                             cpeMatch.setOperator(cpeOperator);
 
                             cpeOperator.getCpeMatches().add(cpeMatch);

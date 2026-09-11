@@ -1,0 +1,17 @@
+{
+  "description": "An OSV range hit with no fixed and no last_affected event. Confidence is RANGE (the advisory bounded the versions but did not enumerate them) and the fix state is NO_FIX, which is a claim, not an absence of data.",
+  "precisionBar": 1.0,
+  "recallBar": 1.0,
+  "alerts": [
+    {
+      "cveId": "CVE-2024-23342",
+      "component": "ecdsa",
+      "fixState": "NO_FIX",
+      "fixedVersions": null,
+      "fixSource": "OSV",
+      "matchConfidence": "RANGE",
+      "actionable": true,
+      "lifecycleState": "ACTIVE"
+    }
+  ]
+}

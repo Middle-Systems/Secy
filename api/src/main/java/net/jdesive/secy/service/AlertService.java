@@ -1,46 +1,49 @@
 package net.jdesive.secy.service;
 
-import com.github.packageurl.MalformedPackageURLException;
-import com.github.packageurl.PackageURL;
-import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
-import net.jdesive.secy.persistence.*;
-import net.jdesive.secy.persistence.entity.*;
-import net.jdesive.secy.util.Version;
+import net.jdesive.secy.correlation.CorrelationService;
+import net.jdesive.secy.persistence.DockerComplianceReportRepository;
+import net.jdesive.secy.persistence.DockerMisconfigurationAlertRepository;
+import net.jdesive.secy.persistence.DockerVulnerabilityAlertRepository;
+import net.jdesive.secy.persistence.entity.DockerComplianceReport;
+import net.jdesive.secy.persistence.entity.DockerMisconfigurationAlert;
+import net.jdesive.secy.persistence.entity.DockerVulnerabilityAlert;
+import net.jdesive.secy.persistence.entity.SBOM;
+import net.jdesive.secy.persistence.entity.Vulnerability;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Optional;
 
+/**
+ * Alert generation entry points.
+ *
+ * <p>The SBOM path is a one-line delegation to {@link CorrelationService}, which owns the OSV-primary
+ * / CPE-fallback engine. This class keeps the entry point so {@code VulnerabilityScanner} and the
+ * compliance path have one door, and so the Docker/CIS generator below — a different entity graph
+ * entirely — stays where callers expect it.
+ */
 @Slf4j
 @Service
 public class AlertService {
 
-    private final CPEMatchRepository cpeMatchRepository;
-    private final VulnerabilityAlertRepository vulnerabilityAlertRepository;
     private final DockerVulnerabilityAlertRepository dockerVulnerabilityAlertRepository;
     private final DockerMisconfigurationAlertRepository dockerMisconfigurationAlertRepository;
 
     private final DockerComplianceReportRepository dockerComplianceReportRepository;
 
-    private final EnrichmentService enrichmentService;
+    private final CorrelationService correlationService;
 
     @Autowired
-    public AlertService(CPEMatchRepository cpeMatchRepository, VulnerabilityAlertRepository vulnerabilityAlertRepository,
-                        DockerVulnerabilityAlertRepository dockerVulnerabilityAlertRepository,
+    public AlertService(DockerVulnerabilityAlertRepository dockerVulnerabilityAlertRepository,
                         DockerMisconfigurationAlertRepository dockerMisconfigurationAlertRepository,
                         DockerComplianceReportRepository dockerComplianceReportRepository,
-                        EnrichmentService enrichmentService) {
-        this.cpeMatchRepository = cpeMatchRepository;
-        this.vulnerabilityAlertRepository = vulnerabilityAlertRepository;
+                        CorrelationService correlationService) {
         this.dockerVulnerabilityAlertRepository = dockerVulnerabilityAlertRepository;
         this.dockerMisconfigurationAlertRepository = dockerMisconfigurationAlertRepository;
         this.dockerComplianceReportRepository = dockerComplianceReportRepository;
-        this.enrichmentService = enrichmentService;
+        this.correlationService = correlationService;
     }
 
     public void generateDockerComplianceAlerts(String reportId) {
@@ -77,68 +80,16 @@ public class AlertService {
             this.dockerMisconfigurationAlertRepository.save(alert);
         });
     }
-    
+
+    /**
+     * Correlate an SBOM and reconcile its alerts.
+     *
+     * <p>Delegates to {@link CorrelationService#correlate(SBOM)}. Safe to call repeatedly on the same
+     * SBOM: matches that still hold are updated in place, matches that no longer hold are
+     * auto-resolved, and no {@code (component, CVE)} pair is ever duplicated.
+     */
     public void generateAlerts(SBOM sbom) {
-        log.info("Starting optimized vulnerability scan for SBOM: {}", sbom.getId());
-
-        List<VulnerabilityAlert> newAlerts = new ArrayList<>();
-
-        // 1. Group components by name to reduce redundant DB hits
-        for (SBOMComponent component : sbom.getComponents()) {
-            try {
-                PackageURL purl = new PackageURL(component.getPurl());
-                String name = purl.getName();
-                String versionStr = purl.getVersion();
-
-                // 2. Query only for CPEs that match this specific package name
-                // You should add this method to your cpeMatchRepository
-                String pattern = "cpe:2.3:a:%:" + name + ":%";
-                List<CPEMatch> matches = cpeMatchRepository.findByCriteriaWithDetails(pattern);
-
-                for (CPEMatch match : matches) {
-                    // Criteria format: cpe:2.3:a:vendor:packageName:version:...
-                    String[] splitStr = match.getCriteria().split(":");
-                    if (splitStr.length < 6) continue;
-
-                    String vulnVersion = splitStr[5];
-
-                    if (isVulnerable(versionStr, vulnVersion)) {
-                        VulnerabilityAlert alert = new VulnerabilityAlert();
-                        alert.setVulnerability(match.getOperator().getCve());
-                        alert.setComponent(component);
-                        alert.setCreatedAt(LocalDateTime.now());
-                        // Run the funnel here, once, rather than joining KEV/EPSS per request.
-                        // Nothing in the SBOM path carries a scanner fix version yet (Phase 4).
-                        enrichmentService.enrich(alert);
-                        newAlerts.add(alert);
-                    }
-                }
-            } catch (MalformedPackageURLException e) {
-                log.error("Invalid PURL for component {}: {}", component.getId(), component.getPurl());
-            }
-        }
-
-        // 3. Batch save everything at the end
-        if (!newAlerts.isEmpty()) {
-            vulnerabilityAlertRepository.saveAll(newAlerts);
-            log.info("Scan complete. Generated {} alerts.", newAlerts.size());
-        }
-    }
-
-    // Helper to keep the logic clean
-    private boolean isVulnerable(String componentVersion, String cpeVersion) {
-        if ("*".equals(cpeVersion) || "-".equals(cpeVersion)) return true;
-
-        try {
-            // Only attempt rich version comparison if both look like numbers/dots
-            Version compV = new Version(componentVersion);
-            Version vulnV = new Version(cpeVersion);
-            return compV.compareTo(vulnV) <= 0;
-        } catch (Exception e) {
-            // Fallback: If we can't parse them, just do a direct match
-            log.warn("Could not parse versions for comparison: {} vs {}", componentVersion, cpeVersion);
-            return componentVersion.equals(cpeVersion);
-        }
+        correlationService.correlate(sbom);
     }
 
 }

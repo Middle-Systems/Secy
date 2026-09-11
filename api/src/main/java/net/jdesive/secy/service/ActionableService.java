@@ -74,8 +74,11 @@ public class ActionableService {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
-            // The one non-negotiable clause: this endpoint is the funnel's output.
+            // The two non-negotiable clauses: this endpoint is the funnel's output, and it shows
+            // what is still true. An alert a re-scan no longer reproduces is kept (history, and any
+            // triage done to it) but auto-resolved, and auto-resolved rows are not work.
             predicates.add(cb.isTrue(root.get("actionable")));
+            predicates.add(cb.equal(root.get("lifecycleState"), AlertLifecycleState.ACTIVE));
 
             if (filter.reason() != null) {
                 predicates.add(cb.equal(root.get("actionableReason"), filter.reason()));
@@ -85,6 +88,9 @@ public class ActionableService {
             }
             if (filter.fixState() != null) {
                 predicates.add(cb.equal(root.get("fixState"), filter.fixState()));
+            }
+            if (filter.matchConfidence() != null) {
+                predicates.add(cb.equal(root.get("matchConfidence"), filter.matchConfidence()));
             }
             if (filter.minExploitMaturity() != null && filter.minExploitMaturity() != ExploitMaturity.NONE) {
                 // The enum is persisted as a string, so "at or above" is an IN over the tail of the
@@ -142,6 +148,7 @@ public class ActionableService {
                 alert.getFixState(),
                 alert.getFixedVersions(),
                 alert.getFixSource(),
+                alert.getMatchConfidence(),
                 alert.getActionableReason(),
                 product == null ? null : product.getId(),
                 product == null ? null : product.getName(),
@@ -176,6 +183,8 @@ public class ActionableService {
                 alert.getFixState(),
                 alert.getFixedVersions(),
                 alert.getFixSource(),
+                alert.getMatchConfidence(),
+                alert.getLifecycleState(),
                 alert.getKevDueDate(),
                 alert.getKnownRansomwareUse(),
                 alert.getCreatedAt(),

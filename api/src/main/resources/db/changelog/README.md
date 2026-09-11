@@ -36,6 +36,7 @@ Claimed prefixes:
 | `003`  | ingestion queue |
 | `004`  | actionable enrichment on `vulnerability_alert` (Phase 1) |
 | `005`  | `cve_exploit` — merged public exploit index (Phase 1) |
+| `006`  | OSV mirror + CPE version ranges + CVE-5.1 fields + alert confidence/lifecycle (Phase 2) |
 
 Pick the next free number if yours isn't listed.
 

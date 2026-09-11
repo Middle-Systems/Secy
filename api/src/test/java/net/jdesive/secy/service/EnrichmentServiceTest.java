@@ -191,6 +191,63 @@ class EnrichmentServiceTest {
     }
 
     /* ------------------------------------------------------------------ */
+    /* The CVE-status veto                                                */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void aRejectedCveIsNotActionableEvenWhenKevListedWithNearCertainEpss() {
+        Vulnerability cve = seed("CVE-2099-1012", 0.95f, LocalDate.of(2026, 2, 1), "Known");
+        cve.setCveStatus(CveStatus.REJECTED);
+
+        VulnerabilityAlert alert = enrich(cve);
+
+        // Both limbs of the funnel fired and the record still does not describe anything to fix.
+        assertThat(alert.isActionable()).isFalse();
+        assertThat(alert.getActionableReason()).isNull();
+        // The snapshots are still taken: the row stays sortable and explainable, and it stays
+        // reachable through GET /actionable/{id} and the CVE browser. Hidden, not deleted.
+        assertThat(alert.getEpssScore()).isEqualTo(0.95d);
+        assertThat(alert.getKevDueDate()).isEqualTo(LocalDate.of(2026, 2, 1));
+        assertThat(alert.getExploitMaturity()).isEqualTo(ExploitMaturity.IN_THE_WILD);
+    }
+
+    @Test
+    void aDisputedCveIsNotActionableEither() {
+        Vulnerability cve = seed("CVE-2099-1013", 0.85f, null, null);
+        cve.setCveStatus(CveStatus.DISPUTED);
+
+        VulnerabilityAlert alert = enrich(cve);
+
+        assertThat(alert.isActionable()).isFalse();
+        assertThat(alert.getActionableReason()).isNull();
+    }
+
+    @Test
+    void thePublishedDefaultLeavesTheFunnelUntouched() {
+        // Existing rows and everything NVD ingests carry PUBLISHED; the veto must be inert for them.
+        Vulnerability cve = seed("CVE-2099-1014", 0.85f, null, null);
+
+        assertThat(cve.getCveStatus()).isEqualTo(CveStatus.PUBLISHED);
+        assertThat(cve.isExcludedFromFunnel()).isFalse();
+
+        VulnerabilityAlert alert = enrich(cve);
+
+        assertThat(alert.isActionable()).isTrue();
+        assertThat(alert.getActionableReason()).isEqualTo(ActionableReason.EPSS_HIGH);
+    }
+
+    @Test
+    void reinstatingARecordPromotesTheAlertAgain() {
+        // Enrichment is total, not additive: a CVE the CVE List later un-rejects must come back.
+        Vulnerability cve = seed("CVE-2099-1015", 0.85f, null, null);
+        cve.setCveStatus(CveStatus.REJECTED);
+        assertThat(enrich(cve).isActionable()).isFalse();
+
+        cve.setCveStatus(CveStatus.PUBLISHED);
+        assertThat(enrich(cve).isActionable()).isTrue();
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Fix state                                                          */
     /* ------------------------------------------------------------------ */
 
