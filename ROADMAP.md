@@ -175,6 +175,15 @@ Each phase is independently shippable and leaves `master` green
 - **Reporting**: server-generated **CSV** and **PDF** (posture summary + actionable list) scoped to a product / asset / whole org. `GET /reports/actionable.{csv,pdf}`; UI download button on the Actionable and Product views.
 
 ### Phase 9 — Packaging & release (the OSS deliverable)
+
+> **9a (compose + CI skeleton) shipped 2026-09-10**, commit `6cdaa5e` — done right after Phase 2
+> per the suggested order below, ahead of Phases 3-8. `api/Dockerfile` (JDK→JRE multi-stage),
+> `ui/Dockerfile` (Node→nginx, SPA fallback + `/api` reverse proxy), root `docker-compose.yml`
+> (postgres + api + ui, health-gated), `.env.example`, `.github/workflows/ci.yml` (parallel
+> api/ui build+test). **Not verified**: no Docker in the devcontainer, so `docker build` /
+> `docker compose up` actually succeeding, base-image tags resolving, and the health-gated
+> `depends_on` chain are all unverified — do a real pass before tagging MVP. 9b (first-run UX
+> polish, image publish on release, security pass, docs) is still ahead, later in the order.
 - **Images**: multi-stage `api/Dockerfile` (slim JRE 17) and `ui/Dockerfile` (build → nginx serving static + proxying `/api`).
 - **Top-level `docker-compose.yml`**: `postgres` + `api` + `ui`, single `docker compose up`, `.env.example` with every knob, healthchecks, named volume.
 - **First-run UX**: registration open until the first admin exists, then auto-locked unless `SECY_AUTH_REGISTRATION_ENABLED=true`; documented.
