@@ -12,6 +12,7 @@ import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
+import net.jdesive.secy.service.OsvIngestService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
@@ -63,6 +64,8 @@ public class JobRunner {
 
     private final ApplicationEventPublisher events;
 
+    private final OsvIngestService osvIngestService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -78,7 +81,8 @@ public class JobRunner {
                      ExploitIndexService exploitIndexService,
                      @Qualifier(AsyncConfig.INGESTION_EXECUTOR) Executor executor,
                      IngestionJobProperties properties,
-                     ApplicationEventPublisher events) {
+                     ApplicationEventPublisher events,
+                     OsvIngestService osvIngestService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -87,6 +91,7 @@ public class JobRunner {
         this.executor = executor;
         this.properties = properties;
         this.events = events;
+        this.osvIngestService = osvIngestService;
     }
 
     /**
@@ -168,6 +173,7 @@ public class JobRunner {
             case EPSS -> epssService.ingestEPSSData(progress);
             case NVD -> nvdService.ingestData(progress);
             case EXPLOIT -> exploitIndexService.ingest(progress);
+            case OSV -> osvIngestService.ingest(progress);
         };
     }
 

@@ -13,6 +13,9 @@ public enum JobType {
     KEV,
 
     /** Merged public exploit index — Nuclei templates, Metasploit modules, PoC-in-GitHub. */
-    EXPLOIT
+    EXPLOIT,
+
+    /** OSV per-ecosystem advisory mirror. */
+    OSV
 
 }

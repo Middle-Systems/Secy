@@ -1,6 +1,8 @@
 package net.jdesive.secy.persistence;
 
 import net.jdesive.secy.persistence.entity.OsvAdvisory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -75,5 +77,17 @@ public interface OsvAdvisoryRepository extends JpaRepository<OsvAdvisory, UUID> 
     @Modifying
     @Query("DELETE FROM OsvAdvisory a WHERE LOWER(a.ecosystem) = LOWER(:ecosystem)")
     int deleteByEcosystemIgnoreCase(@Param("ecosystem") String ecosystem);
+
+    /**
+     * Browse the mirror — a UI nice-to-have, not on the correlation hot path. No fetch join: a page
+     * of bare rows is all a browse view needs, and joining a collection into a paged/counted query
+     * is exactly the fetch-join-plus-{@code Page} combination Hibernate can't do in one query.
+     */
+    @Query("SELECT a FROM OsvAdvisory a "
+            + "WHERE (:ecosystem IS NULL OR LOWER(a.ecosystem) = LOWER(:ecosystem)) "
+            + "AND (:packageName IS NULL OR LOWER(a.packageName) LIKE LOWER(CONCAT('%', :packageName, '%')))")
+    Page<OsvAdvisory> search(@Param("ecosystem") String ecosystem,
+                             @Param("packageName") String packageName,
+                             Pageable pageable);
 
 }

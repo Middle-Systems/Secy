@@ -10,6 +10,7 @@ import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
+import net.jdesive.secy.service.OsvIngestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,6 +60,9 @@ class IngestionJobFlowTest {
 
     @MockBean
     private ExploitIndexService exploitIndexService;
+
+    @MockBean
+    private OsvIngestService osvIngestService;
 
     @Autowired
     private JobService jobService;
@@ -153,6 +157,21 @@ class IngestionJobFlowTest {
         assertThat(finished.getType()).isEqualTo(JobType.EXPLOIT);
         assertThat(finished.getItemsProcessed()).isEqualTo(7);
         assertThat(finished.getMessage()).contains("metasploit source unavailable");
+    }
+
+    @Test
+    void theRunnerDispatchesAnOsvJobToItsService() {
+        when(osvIngestService.ingest(any(JobProgress.class)))
+                .thenReturn(new IngestResult(123, "Ingested 123 OSV records across 1 ecosystem(s): npm (123)"));
+
+        Job queued = jobService.enqueue(JobType.OSV, "alice@example.com");
+        jobRunner.poll();
+
+        Job finished = awaitTerminal(queued.getId());
+        assertThat(finished.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(finished.getType()).isEqualTo(JobType.OSV);
+        assertThat(finished.getItemsProcessed()).isEqualTo(123);
+        assertThat(finished.getMessage()).contains("npm (123)");
     }
 
     @Test
@@ -289,6 +308,17 @@ class IngestionJobFlowTest {
         mockMvc.perform(get("/kev/ingest")).andExpect(status().isMethodNotAllowed());
         mockMvc.perform(get("/epss/ingest")).andExpect(status().isMethodNotAllowed());
         mockMvc.perform(get("/nvd/ingest")).andExpect(status().isMethodNotAllowed());
+        mockMvc.perform(get("/osv/ingest")).andExpect(status().isMethodNotAllowed());
+    }
+
+    @Test
+    @WithMockUser(username = "alice@example.com")
+    void postOsvIngestAnswers202WithAQueuedJob() throws Exception {
+        mockMvc.perform(post("/osv/ingest"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.type").value("OSV"))
+                .andExpect(jsonPath("$.status").value("QUEUED"))
+                .andExpect(jsonPath("$.triggeredBy").value("alice@example.com"));
     }
 
     @Test
