@@ -32,6 +32,8 @@ export interface IngestJobState {
   status: JobStatus | undefined;
   /** Live record count off the job row. */
   itemsProcessed: number;
+  /** Last progress line, or the failure message once the job has failed. */
+  message: string | null | undefined;
   jobId: string | undefined;
 }
 
@@ -110,6 +112,7 @@ export function useIngestJob({
     enqueuing,
     status,
     itemsProcessed: job.data?.itemsProcessed ?? 0,
+    message: job.data?.message,
     jobId,
   };
 }

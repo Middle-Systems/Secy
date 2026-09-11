@@ -62,11 +62,13 @@ export interface PageParams {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The feed an ingestion job pulls. One job per value may be active at a time.
- * `EXPLOIT` is the merged public-exploit index (Nuclei + Metasploit +
- * PoC-in-GitHub) that feeds each alert's `exploitMaturity`.
+ * The kind of background job. `NVD` / `EPSS` / `KEV` / `EXPLOIT` are singleton
+ * feed pulls — at most one of each active at a time. `EXPLOIT` is the merged
+ * public-exploit index (Nuclei + Metasploit + PoC-in-GitHub) that feeds each
+ * alert's `exploitMaturity`. `SBOM_UPLOAD` is different: one job per uploaded
+ * document, so many may be active at once (see `useUploadSbom`).
  */
-export type JobType = 'NVD' | 'EPSS' | 'KEV' | 'EXPLOIT';
+export type JobType = 'NVD' | 'EPSS' | 'KEV' | 'EXPLOIT' | 'OSV' | 'CVE_LIST' | 'SBOM_UPLOAD';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the

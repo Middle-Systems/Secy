@@ -30,3 +30,17 @@ if (!window.ResizeObserver) {
     disconnect: vi.fn(),
   }));
 }
+
+// This environment's File/Blob (from Node, not jsdom's own) has no `.text()` — real browsers do,
+// and UploadSbomModal reads a selected file with it. FileReader (jsdom's, which does understand
+// this Blob) fills the gap.
+if (!Blob.prototype.text) {
+  Blob.prototype.text = function (this: Blob) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}

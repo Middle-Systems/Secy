@@ -39,7 +39,6 @@ import type {
   Page,
   PageParams,
   Product,
-  SBOM,
   Vulnerability,
   VulnerabilityAlert,
 } from './types';
@@ -112,14 +111,26 @@ export interface JobListParams {
 /** How often `useJob` re-reads a job that has not finished yet. */
 export const JOB_POLL_INTERVAL_MS = 2_000;
 
-/** Which feed's cached data a finished job has just invalidated. */
-const FEED_KEYS: Record<JobType, readonly unknown[]> = {
-  KEV: queryKeys.kev.all,
-  EPSS: queryKeys.epss.all,
-  NVD: queryKeys.nvd.all,
+/**
+ * Which cached data a finished job of each type has just invalidated. A job type may touch more
+ * than one cache — SBOM_UPLOAD's ingest changes the product's SBOM list, the alerts derived from it
+ * and the dashboard roll-up all at once — so every entry is a list of query keys, not one.
+ */
+const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
+  KEV: [queryKeys.kev.all],
+  EPSS: [queryKeys.epss.all],
+  NVD: [queryKeys.nvd.all],
   // The exploit index has no browser view of its own; a finished pull only
   // matters because it re-derives every alert's exploitMaturity.
-  EXPLOIT: queryKeys.actionable.all,
+  EXPLOIT: [queryKeys.actionable.all],
+  // Neither OSV nor the CVE List has a browser view of its own either — a finished pull
+  // feeds correlation (OSV) or cveStatus/CVSS/SSVC (CVE List), both surfaced only through
+  // the actionable list and its re-enrichment, never a dedicated table.
+  OSV: [queryKeys.actionable.all],
+  CVE_LIST: [queryKeys.actionable.all],
+  // An upload's components/alerts only exist once its SBOM_UPLOAD job succeeds — see
+  // useUploadSbom, which (like useIngestKev et al.) only invalidates the job list immediately.
+  SBOM_UPLOAD: [queryKeys.products.all, queryKeys.sbom.all, queryKeys.stats.all],
 };
 
 /**
@@ -160,7 +171,9 @@ export function useJob(
     if (!jobId || status !== 'SUCCEEDED' || !type) return;
     if (invalidatedFor.current === jobId) return;
     invalidatedFor.current = jobId;
-    void queryClient.invalidateQueries({ queryKey: FEED_KEYS[type] });
+    for (const queryKey of FEED_KEYS[type]) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
     void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
   }, [jobId, status, type, queryClient]);
 
@@ -428,26 +441,32 @@ export function useSbomVulnerabilities(
 
 export interface UploadSbomVariables {
   productId: string;
-  /** Parsed CycloneDX document. */
+  /** Parsed CycloneDX or SPDX (2.2/2.3 JSON) document. */
   sbom: unknown;
   productVersion?: string;
 }
 
 /**
- * POST /api/sbom/:productId/sboms?productVersion=…
+ * POST /api/sbom/:productId/sboms?productVersion=… — queues an SBOM upload.
  *
- * Uploads a CycloneDX SBOM, which the backend ingests, scans and marks active.
+ * Format detection/validation happens synchronously on the backend (a document that is neither
+ * CycloneDX nor SPDX 2.2/2.3 is still a plain `400` from this call, before anything is queued), but
+ * ingesting its components, correlating alerts and scanning all happen in a background
+ * `SBOM_UPLOAD` job. This resolves with that `Job` — poll it with {@link useJob} — not the finished
+ * `SBOM`; see {@link IngestButton} / {@link useIngestKev} for the same enqueue → poll → settle shape.
+ *
+ * Only the job list is invalidated here — the product's SBOM list has not changed yet. `useJob`
+ * invalidates `products` / `sbom` / `stats` (via `FEED_KEYS.SBOM_UPLOAD`) once the job actually
+ * succeeds.
  */
-export function useUploadSbom(options?: MutationOverrides<SBOM, UploadSbomVariables>) {
+export function useUploadSbom(options?: MutationOverrides<Job, UploadSbomVariables>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ productId, sbom, productVersion = 'Unknown' }: UploadSbomVariables) =>
-      api.post<SBOM>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion } }),
+      api.post<Job>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion } }),
     ...options,
     onSuccess: (...args) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sbom.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.stats.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       options?.onSuccess?.(...args);
     },
   });
