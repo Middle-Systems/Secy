@@ -30,12 +30,16 @@ package net.jdesive.secy.model.component;
  * the four fields below, and an interface supplies them at zero schema cost.
  *
  * <p><b>Why not a parallel {@code AssetVulnerabilityAlert} table (option B).</b> Because
- * {@code DockerVulnerabilityAlert} is the cautionary tale: it has lived next to
- * {@code VulnerabilityAlert} since before Phase 1 and, having no join to {@code Vulnerability}, has
- * never reached the funnel at all — it is still outside {@code GET /actionable} three phases later.
+ * {@code DockerVulnerabilityAlert} was the cautionary tale: it lived next to
+ * {@code VulnerabilityAlert} since before Phase 1 and, having no join to {@code Vulnerability}, never
+ * reached the funnel at all — it was still outside {@code GET /actionable} three phases later.
  * Duplicating the alert table duplicates the funnel, the enrichment, the dashboard roll-ups and the
  * {@code /actionable} query, and the roadmap's own design puts an asset finding in the <em>same</em>
  * list as a product finding. One alert table, two component parents.
+ *
+ * <p>Phase 5 closed that story: a CIS/Docker compliance report's vulnerability findings now become
+ * {@code AssetComponent}s and ordinary {@code VulnerabilityAlert}s through this same interface, and
+ * both dead Docker alert entities were deleted (migration {@code 010}).
  */
 public interface CorrelatableComponent {
 

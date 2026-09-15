@@ -11,6 +11,7 @@ import net.jdesive.secy.model.asset.AssetSummaryResponse;
 import net.jdesive.secy.model.asset.NormalizedScan;
 import net.jdesive.secy.model.asset.ScanFormat;
 import net.jdesive.secy.model.asset.ScannedPackage;
+import net.jdesive.secy.model.asset.ScannerFinding;
 import net.jdesive.secy.model.component.ComponentIdentity;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.ingest.IngestResult;
@@ -144,20 +145,12 @@ public class AssetService {
         assetRepository.saveAndFlush(asset);
 
         NormalizedScan scan = reparse(asset);
-        List<ScannedPackage> packages = new ArrayList<>(scan.packages());
-        packages.addAll(declaredCpePackages(asset));
-
-        int present = upsertComponents(asset, packages);
         asset.setPendingRawBody(null);
         asset.setPendingScanFormat(null);
-        assetRepository.saveAndFlush(asset);
 
-        progress.report(present, "Persisted " + present + " components; correlating");
-
-        // Scanner findings become alerts immediately AND count as reproduced for the lifecycle;
-        // Secy's own OSV/CPE correlation runs over the same components in the same pass. See
-        // CorrelationService.correlate(Asset, List).
-        CorrelationService.CorrelationSummary summary = correlationService.correlate(asset, scan.findings());
+        ScanApplication applied = applyScan(asset, scan.packages(), scan.findings(), progress);
+        int present = applied.componentsPresent();
+        CorrelationService.CorrelationSummary summary = applied.correlation();
 
         asset.setLastScannedAt(LocalDateTime.now());
         asset.setStatus(Asset.STATUS_COMPLETED);
@@ -198,6 +191,67 @@ public class AssetService {
     /* ------------------------------------------------------------------ */
     /* Component upsert                                                   */
     /* ------------------------------------------------------------------ */
+
+    /** What one {@link #applyScan} pass did. */
+    public record ScanApplication(int componentsPresent, CorrelationService.CorrelationSummary correlation) {
+    }
+
+    /**
+     * Persist a set of observed packages onto an asset and reconcile its alerts.
+     *
+     * <p>Extracted in Phase 5 so the <b>compliance path shares it verbatim</b>. A CIS report's
+     * vulnerability section is the same kind of observation an {@code ASSET_SCAN} makes — "this
+     * package, this version, this CVE, on this asset" — so it must produce the same rows, take the
+     * same OSV/CPE correlation, get the same enrichment and land in the same {@code GET /actionable}.
+     * Giving compliance its own copy of this is precisely how {@code DockerVulnerabilityAlert} ended
+     * up outside the funnel for four phases.
+     *
+     * <p>Order matters: components are persisted and flushed <em>before</em> correlation runs,
+     * because correlation writes alerts that point at their ids.
+     *
+     * @param packages what the scan observed; the asset's declared CPEs are added here, not by callers
+     * @param findings the scanner's own {@code (package, CVE)} statements, already resolved to CVE ids
+     */
+    @Transactional
+    public ScanApplication applyScan(Asset asset, List<ScannedPackage> packages,
+                                     List<ScannerFinding> findings, JobProgress progress) {
+        List<ScannedPackage> observed = new ArrayList<>(packages);
+        observed.addAll(declaredCpePackages(asset));
+
+        int present = upsertComponents(asset, observed);
+        assetRepository.saveAndFlush(asset);
+
+        if (progress != null) {
+            progress.report(present, "Persisted " + present + " components; correlating");
+        }
+
+        // Scanner findings become alerts immediately AND count as reproduced for the lifecycle;
+        // Secy's own OSV/CPE correlation runs over the same components in the same pass. See
+        // CorrelationService.correlate(Asset, List).
+        return new ScanApplication(present, correlationService.correlate(asset, findings));
+    }
+
+    /**
+     * Create-or-find the asset a non-{@code ASSET_SCAN} observation is about.
+     *
+     * <p>Same {@code (type, name)} key {@link #createPlaceholder} uses, and for the same reason: an
+     * observation of {@code acme/api:1.4.2} must land on the row that already holds its components
+     * and alerts. Unlike {@code createPlaceholder} it parks no scan body — the compliance path keeps
+     * its raw document on its own report row, which is what it is an audit of.
+     */
+    @Transactional
+    public Asset findOrCreate(AssetType type, String name, Product product, String scanner, UUID jobId) {
+        Asset asset = assetRepository.findByTypeAndName(type, name).orElseGet(Asset::new);
+        asset.setType(type);
+        asset.setName(truncate(name, MAX_NAME));
+        if (product != null) {
+            asset.setProduct(product);
+        }
+        asset.setScanner(scanner);
+        asset.setStatus(Asset.STATUS_QUEUED);
+        asset.setJobId(jobId);
+        return assetRepository.saveAndFlush(asset);
+    }
 
     /**
      * Reconcile the asset's component rows with what the scan reported.

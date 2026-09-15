@@ -41,6 +41,20 @@ public enum JobType {
      * via {@code JobService.create()} and excluded from {@code uq_ingestion_job_active_type} by
      * migration {@code 009}.
      */
-    ASSET_SCAN
+    ASSET_SCAN,
+
+    /**
+     * One uploaded CIS/Docker compliance report being persisted and correlated (Phase 5).
+     *
+     * <p>Per-invocation like {@link #SBOM_UPLOAD} and {@link #ASSET_SCAN} — each report is its own
+     * unit of work with its own payload (which {@code docker_compliance_report} row to finish) — so
+     * it is enqueued via {@code JobService.create()} and excluded from
+     * {@code uq_ingestion_job_active_type} by migration {@code 010}.
+     *
+     * <p>Covers both the upload and {@code POST /compliance/reports/{id}/scan}: a re-scan is the same
+     * job doing the same correlation, just replaying the report's persisted findings instead of a raw
+     * document.
+     */
+    COMPLIANCE_SCAN
 
 }

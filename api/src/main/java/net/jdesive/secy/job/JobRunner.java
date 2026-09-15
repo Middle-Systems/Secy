@@ -9,6 +9,7 @@ import net.jdesive.secy.persistence.entity.Job;
 import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.service.AssetScanIngestJobService;
+import net.jdesive.secy.service.ComplianceScanIngestJobService;
 import net.jdesive.secy.service.CveListIngestService;
 import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
@@ -75,6 +76,8 @@ public class JobRunner {
 
     private final AssetScanIngestJobService assetScanIngestJobService;
 
+    private final ComplianceScanIngestJobService complianceScanIngestJobService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -94,7 +97,8 @@ public class JobRunner {
                      OsvIngestService osvIngestService,
                      CveListIngestService cveListIngestService,
                      SbomIngestJobService sbomIngestJobService,
-                     AssetScanIngestJobService assetScanIngestJobService) {
+                     AssetScanIngestJobService assetScanIngestJobService,
+                     ComplianceScanIngestJobService complianceScanIngestJobService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -107,6 +111,7 @@ public class JobRunner {
         this.cveListIngestService = cveListIngestService;
         this.sbomIngestJobService = sbomIngestJobService;
         this.assetScanIngestJobService = assetScanIngestJobService;
+        this.complianceScanIngestJobService = complianceScanIngestJobService;
     }
 
     /**
@@ -190,11 +195,13 @@ public class JobRunner {
             case EXPLOIT -> exploitIndexService.ingest(progress);
             case OSV -> osvIngestService.ingest(progress);
             case CVE_LIST -> cveListIngestService.ingest(progress);
-            // The two types carrying per-invocation data — dispatch needs the job's own id to look
-            // up which SBOM or asset it is for. See SBOMService.ingestUploadJob / SBOM.jobId and
-            // AssetService.ingestScanJob / Asset.jobId.
+            // The types carrying per-invocation data — dispatch needs the job's own id to look up
+            // which SBOM, asset or compliance report it is for. See SBOMService.ingestUploadJob /
+            // SBOM.jobId, AssetService.ingestScanJob / Asset.jobId and
+            // ComplianceService.ingestScanJob / DockerComplianceReport.jobId.
             case SBOM_UPLOAD -> sbomIngestJobService.ingest(id, progress);
             case ASSET_SCAN -> assetScanIngestJobService.ingest(id, progress);
+            case COMPLIANCE_SCAN -> complianceScanIngestJobService.ingest(id, progress);
         };
     }
 

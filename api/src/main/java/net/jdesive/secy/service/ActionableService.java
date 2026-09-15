@@ -67,7 +67,9 @@ public class ActionableService {
      * <p>Deliberately {@link #findActionable} with an asset filter and nothing else: an asset's
      * findings are rows of the same list the Actionable Items screen shows, with the same funnel, the
      * same sort and the same shape. Giving assets their own query would be the first step towards
-     * giving them their own funnel, which is the trap {@code DockerVulnerabilityAlert} fell into.
+     * giving them their own funnel, which is the trap the (now deleted) {@code DockerVulnerabilityAlert}
+     * fell into. Phase 5 routes compliance-report findings through here too, so this one query backs
+     * the Actionable Items screen, the Infrastructure drill-down and the Compliance detail alike.
      */
     @Transactional(readOnly = true)
     public Page<ActionableItemResponse> findActionableForAsset(int page, int size, UUID assetId) {

@@ -44,7 +44,8 @@ class OpenApiDocsTest {
                 .contains("\"/products\"")
                 .contains("\"/sbom/{sbomId}/vulnerabilities\"")
                 .contains("\"/stats/dashboard\"")
-                .contains("\"/cis/docker/ingest\"");
+                .contains("\"/compliance/reports\"")
+                .contains("\"/compliance/reports/{id}/scan\"");
 
         assertThat(body)
                 .as("@Tag names")
@@ -54,7 +55,7 @@ class OpenApiDocsTest {
                 .contains("\"Products\"")
                 .contains("\"SBOM\"")
                 .contains("\"Stats\"")
-                .contains("\"CIS\"");
+                .contains("\"Compliance\"");
     }
 
     @Test

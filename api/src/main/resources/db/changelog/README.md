@@ -40,6 +40,7 @@ Claimed prefixes:
 | `007`  | `sbom_component.identity_key` — product-stable component identity + widened `purl` (Phase 3) |
 | `008`  | `sbom.pending_raw_body` / `sbom.job_id` for the SBOM_UPLOAD job queue + narrowed `uq_ingestion_job_active_type` (Phase 3) |
 | `009`  | `asset` / `asset_component` / `asset_declared_cpe` + `vulnerability_alert.asset_component_id` with its XOR check + ASSET_SCAN excluded from `uq_ingestion_job_active_type` (Phase 4) |
+| `010`  | `docker_compliance_report.asset_id` + job-queue columns + control pass/fail/skip counts, new `docker_compliance_control`, misconfig `status`/`check_id`/`control_id`, report-vulnerability identity fix, drops the dead `docker_vulnerabitity_alert` / `docker_misconfiguration_alert` tables, COMPLIANCE_SCAN excluded from `uq_ingestion_job_active_type` (Phase 5) |
 
 Pick the next free number if yours isn't listed.
 

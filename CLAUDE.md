@@ -21,7 +21,8 @@ items: KEV-listed OR EPSS > 0.1.
   - `localhost:8080`.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
   `/osv`, `/osv/ingest`, `/cve-list/ingest`, `/products`, `/sbom/{id}/vulnerabilities`,
-  `/actionable`, `/actionable/{id}`, `/stats/dashboard`, plus CIS/docker controllers.
+  `/actionable`, `/actionable/{id}`, `/stats/dashboard`, `/assets`, `/assets/scan/{trivy,grype}`,
+  `/compliance/reports` (+ `/{id}`, `/{id}/scan`, `/{id}/misconfigurations`).
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via
