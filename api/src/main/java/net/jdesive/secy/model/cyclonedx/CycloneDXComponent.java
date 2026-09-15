@@ -25,6 +25,9 @@ public class CycloneDXComponent {
 
     private String purl;
 
+    /** Optional {@code hashes[]} — the digests Phase 6 matches against the malware-hash corpus. */
+    private List<CycloneDXHash> hashes;
+
     private List<CycloneDXExternalReference> externalReferences;
 
 }

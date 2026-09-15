@@ -3,10 +3,12 @@ package net.jdesive.secy.service.sbom;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.component.SbomFormat;
+import net.jdesive.secy.model.spdx.SpdxChecksum;
 import net.jdesive.secy.model.spdx.SpdxDocument;
 import net.jdesive.secy.model.spdx.SpdxExternalRef;
 import net.jdesive.secy.model.spdx.SpdxPackage;
 import net.jdesive.secy.model.spdx.SpdxRelationship;
+import net.jdesive.secy.persistence.entity.ComponentHash;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -161,7 +163,35 @@ public class SpdxNormalizer {
                 .bomRef(pkg.getSpdxId())
                 .licenses(licenses(pkg))
                 .externalReferences(references(pkg))
+                .hashes(hashes(pkg))
                 .build();
+    }
+
+    /**
+     * SPDX {@code checksums[]} → the normalised digest list. This is the {@code checksums[]} read the
+     * class note above anticipated; it needed no {@code files[]} binding after all, because SPDX puts
+     * package-level checksums on the package.
+     *
+     * <p>Note the algorithm spelling differs from CycloneDX's ({@code SHA256} vs {@code SHA-256}) and
+     * is stored verbatim-but-upper-cased; {@code ComponentHash.isSha256()} accepts both, so the two
+     * parsers converge without either having to know about the other.
+     */
+    private List<NormalizedComponent.ComponentHashValue> hashes(SpdxPackage pkg) {
+        if (pkg.getChecksums() == null) {
+            return List.of();
+        }
+        List<NormalizedComponent.ComponentHashValue> out = new ArrayList<>();
+        for (SpdxChecksum checksum : pkg.getChecksums()) {
+            if (checksum == null) {
+                continue;
+            }
+            ComponentHash normalized = ComponentHash.of(checksum.getAlgorithm(), checksum.getChecksumValue());
+            if (normalized != null) {
+                out.add(new NormalizedComponent.ComponentHashValue(
+                        normalized.getAlgorithm(), normalized.getValue()));
+            }
+        }
+        return out;
     }
 
     /** The PURL hides in {@code externalRefs[]} under {@code referenceType: "purl"}. */

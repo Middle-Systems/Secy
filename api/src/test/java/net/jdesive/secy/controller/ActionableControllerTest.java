@@ -33,6 +33,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class ActionableControllerTest {
 
+    /**
+     * Not used to seed anything — cleared because a {@code compromise_finding} left behind by
+     * another test class holds an FK into {@code sbom_component} / {@code asset_component} and
+     * would block the deletes below (Phase 6).
+     */
+    @Autowired
+    private CompromiseFindingRepository findingRepository;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -72,6 +80,7 @@ class ActionableControllerTest {
     @BeforeEach
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
+        findingRepository.deleteAll();
         alertRepository.deleteAll();
         assetRepository.deleteAll();
         sbomRepository.deleteAll();

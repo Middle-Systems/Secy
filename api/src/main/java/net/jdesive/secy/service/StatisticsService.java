@@ -1,11 +1,14 @@
 package net.jdesive.secy.service;
 
 import net.jdesive.secy.model.DashboardStats;
+import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.EPSSRepository;
 import net.jdesive.secy.persistence.KEVRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.VulnerabilityRepository;
 import net.jdesive.secy.persistence.entity.ActionableReason;
+import net.jdesive.secy.persistence.entity.AlertLifecycleState;
+import net.jdesive.secy.persistence.entity.CompromiseConfidence;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +32,9 @@ public class StatisticsService {
 
     @Autowired
     private VulnerabilityAlertRepository alertRepo;
+
+    @Autowired
+    private CompromiseFindingRepository findingRepo;
 
     public DashboardStats getDashboardMetrics() {
         LocalDateTime sevenDaysAgo = LocalDateTime.now().minusDays(7);
@@ -59,6 +65,10 @@ public class StatisticsService {
 
         // 6. The funnel's output — what the operator is actually expected to work through.
         applyActionableMetrics(stats, sevenDaysAgo);
+
+        // 7. The funnel's third limb (Phase 6) — kept as its own tile, not folded into the
+        // actionable roll-ups. See DashboardStats.compromiseFindingCount for why.
+        applyCompromiseMetrics(stats, sevenDaysAgo);
 
         return stats;
     }
@@ -96,5 +106,23 @@ public class StatisticsService {
 
         stats.setPastKevDueCount(alertRepo.countActionablePastKevDue(LocalDate.now()));
         stats.setActionableCreatedLast7d(alertRepo.countByActionableTrueAndCreatedAtAfter(sevenDaysAgo));
+    }
+
+    /**
+     * Roll-ups over {@code compromise_finding}, all restricted to {@code lifecycleState = ACTIVE}.
+     *
+     * <p>Scoped exactly as {@code GET /actionable} and {@code GET /compromise} scope themselves, so
+     * the tile and the screens it links to can never disagree — the same discipline
+     * {@link #applyActionableMetrics} follows against the denormalized enrichment columns.
+     */
+    private void applyCompromiseMetrics(DashboardStats stats, LocalDateTime sevenDaysAgo) {
+        stats.setCompromiseFindingCount(
+                findingRepo.countByLifecycleState(AlertLifecycleState.ACTIVE));
+        stats.setCompromiseConfirmedCount(findingRepo.countByLifecycleStateAndConfidence(
+                AlertLifecycleState.ACTIVE, CompromiseConfidence.CONFIRMED));
+        stats.setCompromiseInvestigateCount(findingRepo.countByLifecycleStateAndConfidence(
+                AlertLifecycleState.ACTIVE, CompromiseConfidence.INVESTIGATE));
+        stats.setCompromiseCreatedLast7d(findingRepo.countByLifecycleStateAndCreatedAtAfter(
+                AlertLifecycleState.ACTIVE, sevenDaysAgo));
     }
 }

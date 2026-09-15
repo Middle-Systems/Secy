@@ -18,11 +18,14 @@ import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.AssetComponentRepository;
 import net.jdesive.secy.persistence.AssetRepository;
+import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.Asset;
 import net.jdesive.secy.persistence.entity.AssetComponent;
 import net.jdesive.secy.persistence.entity.AssetComponentSource;
 import net.jdesive.secy.persistence.entity.AssetType;
+import net.jdesive.secy.persistence.entity.ComponentHash;
+import net.jdesive.secy.persistence.entity.CompromiseFinding;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
 import net.jdesive.secy.service.asset.AssetScanParser;
@@ -86,6 +89,9 @@ public class AssetService {
     private final AssetRepository assetRepository;
     private final AssetComponentRepository assetComponentRepository;
     private final VulnerabilityAlertRepository alertRepository;
+
+    /** Phase 6: compromise findings hold the same asset_component FK the alerts do. See {@link #delete}. */
+    private final CompromiseFindingRepository findingRepository;
     private final ActionableService actionableService;
     private final CorrelationService correlationService;
     private final AssetScanParser scanParser;
@@ -310,6 +316,19 @@ public class AssetService {
         component.setLayer(truncate(scanned.layer(), MAX_VERSION));
         component.setPresentInLastScan(true);
         component.setLastSeenAt(now);
+
+        // Digests, if the scanner reported any. Replaced wholesale rather than merged: this row is
+        // upserted across re-scans (unlike an sbom_component, which is written fresh each upload), so
+        // keeping a digest the latest scan no longer reports would leave the row asserting a hash for
+        // a file that has since been replaced in the image. Empty for Trivy/Grype today — see
+        // AssetComponent.hashes for the gap.
+        component.getHashes().clear();
+        for (NormalizedComponent.ComponentHashValue hash : normalized.hashes()) {
+            ComponentHash parsed = ComponentHash.of(hash.algorithm(), hash.value());
+            if (parsed != null) {
+                component.getHashes().add(parsed);
+            }
+        }
     }
 
     /**
@@ -430,16 +449,25 @@ public class AssetService {
         Asset asset = found.get();
 
         List<VulnerabilityAlert> alerts = alertRepository.findAllByAssetId(id);
+        List<CompromiseFinding> findings = findingRepository.findAllByAssetId(id);
         int componentCount = asset.getComponents().size();
 
-        // Alerts first: they hold the FK into asset_component, and orphanRemoval on the asset would
-        // otherwise try to delete the rows out from under them.
+        // Alerts and compromise findings first: both hold an FK into asset_component, and
+        // orphanRemoval on the asset would otherwise try to delete the rows out from under them.
+        // Compromise findings go the same way and for the same reason spelled out above — an
+        // explicit DELETE is the operator saying the asset is gone, and a finding whose only
+        // component reference is a row owned by that asset cannot outlive it.
         alertRepository.deleteAll(alerts);
         alertRepository.flush();
+        findingRepository.deleteAll(findings);
+        findingRepository.flush();
         assetRepository.delete(asset);
 
-        log.info("Deleted asset {} ({}): {} components, {} alerts", id, asset.getName(),
-                componentCount, alerts.size());
+        log.info("Deleted asset {} ({}): {} components, {} alerts, {} compromise findings",
+                id, asset.getName(), componentCount, alerts.size(), findings.size());
+        // AssetDeletionSummary is unchanged: its `alertCount` is the vulnerability-alert count it has
+        // always been, so an existing client's number does not silently change meaning. The
+        // compromise count is logged rather than bolted onto a response shape Phase 4 fixed.
         return Optional.of(new AssetDeletionSummary(id, asset.getName(), componentCount, alerts.size()));
     }
 

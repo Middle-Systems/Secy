@@ -41,4 +41,7 @@ public class SpdxPackage {
     /** Where a PURL lives in SPDX: {@code referenceType: "purl"}, locator {@code "pkg:..."}. */
     private List<SpdxExternalRef> externalRefs;
 
+    /** Optional {@code checksums[]} — the digests Phase 6 matches against the malware-hash corpus. */
+    private List<SpdxChecksum> checksums;
+
 }

@@ -7,10 +7,15 @@ import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.model.actionable.ActionableDetailResponse;
 import net.jdesive.secy.model.actionable.ActionableFilter;
 import net.jdesive.secy.model.actionable.ActionableItemResponse;
+import net.jdesive.secy.model.actionable.ActionableItemType;
+import net.jdesive.secy.model.actionable.OffsetLimitRequest;
+import net.jdesive.secy.model.compromise.CompromiseFilter;
 import net.jdesive.secy.model.component.CorrelatableComponent;
+import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.*;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -28,12 +33,20 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Reads for the Actionable Items screen.
+ * Reads for the Actionable Items screen — the funnel's output, and since Phase 6 a <b>typed
+ * union</b> over two tables.
  *
- * <p>Every predicate here runs against the denormalized columns {@link EnrichmentService} wrote —
- * no join to {@code kev} or {@code epss} at request time. The trade is that the list reflects the
- * funnel as of the last enrichment; the re-enrichment that follows every KEV/EPSS ingest is what
- * keeps that honest.
+ * <p>Every vulnerability predicate here runs against the denormalized columns
+ * {@link EnrichmentService} wrote — no join to {@code kev} or {@code epss} at request time. The
+ * trade is that the list reflects the funnel as of the last enrichment; the re-enrichment that
+ * follows every KEV/EPSS ingest is what keeps that honest.
+ *
+ * <h2>The third promotion path</h2>
+ *
+ * <p>An item is actionable when its CVE is KEV-listed, <b>or</b> its EPSS is above the threshold,
+ * <b>or</b> it is a {@code CompromiseFinding}. The first two are one boolean column on
+ * {@code vulnerability_alert}; the third is the existence of a row in a table with no join to the
+ * alert table at all. See {@link #findActionable} for how the two are paged as one list.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,18 +60,81 @@ public class ActionableService {
 
     private final VulnerabilityAlertRepository alertRepository;
 
+    private final CompromiseFindingRepository findingRepository;
+
     /**
-     * Paged actionable items, EPSS descending with unscored CVEs last.
+     * Paged actionable items: <b>every compromise finding first</b>, then vulnerability alerts by
+     * EPSS descending with unscored CVEs last.
      *
-     * <p>The sort is fixed rather than caller-supplied: "what is most likely to be exploited" is
-     * the whole point of the screen, and a null EPSS must not float to the top of a descending sort
-     * the way PostgreSQL would default to. It is expressed as a coalesce inside the specification
-     * so the ordering is identical on PostgreSQL and on the H2 the tests run against.
+     * <h2>Why compromise findings form a tier rather than joining the EPSS sort</h2>
+     *
+     * <p>The roadmap's words are "compromise findings sort above everything", and that is not a
+     * ranking preference — it is the only defensible answer. EPSS is the probability that a
+     * vulnerability <em>will be</em> exploited in the next 30 days. A compromise finding says
+     * malicious code is <em>already in your build</em>. There is no score to give the second that
+     * makes it commensurable with the first, and inventing one (say, a synthetic EPSS of 1.0) would
+     * be a lie that later phases would have to keep telling. So: two tiers, compromise first, each
+     * internally sorted by its own meaningful ranking.
+     *
+     * <h2>How two queries page as one list</h2>
+     *
+     * <p>Because the tiers are strictly ordered, the union is a plain concatenation and offsets can
+     * be computed arithmetically — no database {@code UNION} view, no materialised merge table, no
+     * fetching both halves in full and sorting in memory:
+     *
+     * <ol>
+     *   <li>count the compromise findings matching the filter ({@code C}) and the alerts ({@code V});
+     *       {@code totalElements = C + V};</li>
+     *   <li>the requested window is {@code [page*size, page*size+size)}. Whatever part of it falls
+     *       below {@code C} is served from the finding query at that offset;</li>
+     *   <li>whatever is left is served from the alert query at offset {@code max(0, page*size - C)}.</li>
+     * </ol>
+     *
+     * <p>A page that straddles the boundary needs an alert offset that is not a multiple of the page
+     * size, which is what {@link OffsetLimitRequest} exists for. Each half is fetched with a
+     * {@code LIMIT} of at most {@code size}, so a page costs two explicit counts plus at most two
+     * windowed selects however large either table gets — nothing is ever fetched and discarded.
+     * ({@code findAll(Specification, Pageable)} may add a count of its own; Spring elides it when a
+     * page comes back short.)
+     *
+     * <p>A filter that only one arm can satisfy skips the other arm's queries entirely — see
+     * {@link ActionableFilter#includesVulnerabilities()}. That is not just an optimisation: a
+     * {@code minCvss} filter must not report compromise findings in {@code totalElements} that it is
+     * never going to return.
      */
     @Transactional(readOnly = true)
     public Page<ActionableItemResponse> findActionable(int page, int size, ActionableFilter filter) {
         Pageable pageable = PageRequest.of(page, size);
-        return alertRepository.findAll(specification(filter), pageable).map(ActionableService::toRow);
+
+        Specification<CompromiseFinding> compromiseSpec = filter.includesCompromises()
+                ? CompromiseService.specification(compromiseFilterFrom(filter))
+                : null;
+        Specification<VulnerabilityAlert> alertSpec = filter.includesVulnerabilities()
+                ? specification(filter)
+                : null;
+
+        long compromiseTotal = compromiseSpec == null ? 0 : findingRepository.count(compromiseSpec);
+        long alertTotal = alertSpec == null ? 0 : alertRepository.count(alertSpec);
+
+        long offset = pageable.getOffset();
+        List<ActionableItemResponse> content = new ArrayList<>(size);
+
+        if (compromiseSpec != null && offset < compromiseTotal) {
+            int take = (int) Math.min(size, compromiseTotal - offset);
+            findingRepository.findAll(compromiseSpec, OffsetLimitRequest.of(offset, take))
+                    .forEach(finding -> content.add(toRow(finding)));
+        }
+
+        int remaining = size - content.size();
+        if (alertSpec != null && remaining > 0) {
+            long alertOffset = Math.max(0, offset - compromiseTotal);
+            if (alertOffset < alertTotal) {
+                alertRepository.findAll(alertSpec, OffsetLimitRequest.of(alertOffset, remaining))
+                        .forEach(alert -> content.add(toRow(alert)));
+            }
+        }
+
+        return new PageImpl<>(content, pageable, compromiseTotal + alertTotal);
     }
 
     /**
@@ -70,14 +146,39 @@ public class ActionableService {
      * giving them their own funnel, which is the trap the (now deleted) {@code DockerVulnerabilityAlert}
      * fell into. Phase 5 routes compliance-report findings through here too, so this one query backs
      * the Actionable Items screen, the Infrastructure drill-down and the Compliance detail alike.
+     *
+     * <p>Phase 6 changes what this returns without changing the call: an asset shipping a malicious
+     * package now shows that finding at the top of its own drill-down, because the union is built
+     * into the shared query rather than bolted onto the Actionable Items screen.
      */
     @Transactional(readOnly = true)
     public Page<ActionableItemResponse> findActionableForAsset(int page, int size, UUID assetId) {
         return findActionable(page, size,
-                new ActionableFilter(null, assetId, null, null, null, null, null, null));
+                new ActionableFilter(null, assetId, null, null, null, null, null, null, null, null));
     }
 
-    /** Full detail for one alert, or empty when the id is unknown. */
+    /**
+     * Project the union's filter onto the compromise arm.
+     *
+     * <p>Only the dimensions a finding actually has survive: scope and confidence. The
+     * {@code includesCompromises()} guard has already established that no CVE-only dimension is set,
+     * so nothing is being silently dropped here.
+     */
+    private static CompromiseFilter compromiseFilterFrom(ActionableFilter filter) {
+        return new CompromiseFilter(null, filter.confidence(), filter.productId(), filter.assetId(),
+                null, AlertLifecycleState.ACTIVE);
+    }
+
+    /**
+     * Full detail for one <b>vulnerability</b> alert, or empty when the id is unknown.
+     *
+     * <p>Deliberately not a union. This response is the CVE record, every other component the same
+     * CVE affects, the KEV entry, the EPSS entry and the CVE's references — a compromise finding has
+     * none of those, so the only union shape available would be one where two thirds of the body is
+     * null depending on an arm the caller already knows from the list row. A compromise id therefore
+     * gets a 404 here and is fetched from {@code GET /compromise/{id}} instead; the list row's
+     * {@code itemType} is what tells the client which to call.
+     */
     @Transactional(readOnly = true)
     public Optional<ActionableDetailResponse> findDetail(UUID id) {
         return alertRepository.findById(id).map(this::toDetail);
@@ -168,6 +269,7 @@ public class ActionableService {
 
         return new ActionableItemResponse(
                 alert.getId(),
+                ActionableItemType.VULNERABILITY,
                 cve == null ? null : cve.getId(),
                 cve == null ? null : summarize(cve.getDescription()),
                 cve == null ? null : cve.getBaseSeverity(),
@@ -193,7 +295,54 @@ public class ActionableService {
                 component == null ? null : component.getName(),
                 component == null ? null : component.getVersion(),
                 component == null ? null : component.getPurl(),
+                // The compromise arm, absent on a vulnerability row.
+                null, null, null, null, null, null, null, null,
                 alert.getCreatedAt());
+    }
+
+    /**
+     * The other arm of the union: one compromise finding as an actionable row.
+     *
+     * <p>Note what is <em>shared</em> rather than nulled. {@code description} carries the finding's
+     * summary, {@code baseSeverity} its fixed {@code CRITICAL}, and the whole component/scope block
+     * is filled exactly as it is for an alert — because "which component, on which asset or in which
+     * product" means the same thing whichever kind of finding it is, and the table renders those
+     * columns identically. Only the genuinely CVE-shaped fields are null.
+     *
+     * @see ActionableItemResponse for the field-by-field contract
+     */
+    private static ActionableItemResponse toRow(CompromiseFinding finding) {
+        CorrelatableComponent component = finding.getCorrelatableComponent();
+        Product product = CompromiseService.productOf(finding.getComponent());
+        Asset asset = CompromiseService.assetOf(finding.getAssetComponent());
+
+        return new ActionableItemResponse(
+                finding.getId(),
+                ActionableItemType.COMPROMISE,
+                null,
+                summarize(finding.getSummary()),
+                finding.getSeverity(),
+                null, null, null,
+                false,
+                null, null, null, null, null, null, null,
+                ActionableReason.COMPROMISE,
+                product == null ? null : product.getId(),
+                product == null ? null : product.getName(),
+                asset == null ? null : asset.getId(),
+                asset == null ? null : asset.getName(),
+                CompromiseService.componentIdOf(finding),
+                component == null ? null : component.getName(),
+                component == null ? null : component.getVersion(),
+                component == null ? null : component.getPurl(),
+                finding.getType(),
+                finding.getConfidence(),
+                finding.getSource(),
+                finding.getIocId(),
+                finding.getMatchedOn(),
+                finding.getIocFirstSeen(),
+                finding.getIocLastSeen(),
+                finding.getIocConfidence(),
+                finding.getCreatedAt());
     }
 
     /** The id of whichever component row the alert cites. */

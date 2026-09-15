@@ -7,8 +7,10 @@ import net.jdesive.secy.model.cyclonedx.CycloneDXComponent;
 import net.jdesive.secy.model.cyclonedx.CycloneDXComponentLicense;
 import net.jdesive.secy.model.cyclonedx.CycloneDXExternalReference;
 import net.jdesive.secy.model.cyclonedx.CycloneDXFile;
+import net.jdesive.secy.model.cyclonedx.CycloneDXHash;
 import net.jdesive.secy.model.cyclonedx.CycloneDXMetadata;
 import net.jdesive.secy.model.cyclonedx.CycloneDXTool;
+import net.jdesive.secy.persistence.entity.ComponentHash;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -74,7 +76,34 @@ public class CycloneDXNormalizer {
                 .bomRef(cdx.getBomRef())
                 .licenses(licenses(cdx))
                 .externalReferences(references(cdx))
+                .hashes(hashes(cdx))
                 .build();
+    }
+
+    /**
+     * CycloneDX {@code hashes[]} → the normalised digest list.
+     *
+     * <p>{@code ComponentHash.of} does the normalising and returns null for anything malformed — a
+     * non-hex "digest", an over-long algorithm name — which is dropped here rather than stored.
+     * Same rule as {@link #licenses}: an unusable entry is not worth a parse failure, and an
+     * unusable digest could never match anything anyway.
+     */
+    private List<NormalizedComponent.ComponentHashValue> hashes(CycloneDXComponent cdx) {
+        if (cdx.getHashes() == null) {
+            return List.of();
+        }
+        List<NormalizedComponent.ComponentHashValue> out = new ArrayList<>();
+        for (CycloneDXHash hash : cdx.getHashes()) {
+            if (hash == null) {
+                continue;
+            }
+            ComponentHash normalized = ComponentHash.of(hash.getAlg(), hash.getContent());
+            if (normalized != null) {
+                out.add(new NormalizedComponent.ComponentHashValue(
+                        normalized.getAlgorithm(), normalized.getValue()));
+            }
+        }
+        return out;
     }
 
     /**

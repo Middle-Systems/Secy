@@ -41,6 +41,7 @@ Claimed prefixes:
 | `008`  | `sbom.pending_raw_body` / `sbom.job_id` for the SBOM_UPLOAD job queue + narrowed `uq_ingestion_job_active_type` (Phase 3) |
 | `009`  | `asset` / `asset_component` / `asset_declared_cpe` + `vulnerability_alert.asset_component_id` with its XOR check + ASSET_SCAN excluded from `uq_ingestion_job_active_type` (Phase 4) |
 | `010`  | `docker_compliance_report.asset_id` + job-queue columns + control pass/fail/skip counts, new `docker_compliance_control`, misconfig `status`/`check_id`/`control_id`, report-vulnerability identity fix, drops the dead `docker_vulnerabitity_alert` / `docker_misconfiguration_alert` tables, COMPLIANCE_SCAN excluded from `uq_ingestion_job_active_type` (Phase 5) |
+| `011`  | `malicious_package` (+ `_version`, `_range`), `malware_hash`, `sbom_component_hash` / `asset_component_hash`, `compromise_finding` with its own XOR check, and `ingestion_job.type` widened to `varchar(32)` for `MALICIOUS_PACKAGES` (Phase 6) |
 
 Pick the next free number if yours isn't listed.
 

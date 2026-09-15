@@ -45,7 +45,15 @@ class OpenApiDocsTest {
                 .contains("\"/sbom/{sbomId}/vulnerabilities\"")
                 .contains("\"/stats/dashboard\"")
                 .contains("\"/compliance/reports\"")
-                .contains("\"/compliance/reports/{id}/scan\"");
+                .contains("\"/compliance/reports/{id}/scan\"")
+                // Phase 6.
+                .contains("\"/compromise\"")
+                .contains("\"/compromise/{id}\"")
+                .contains("\"/threat/ingest\"")
+                .contains("\"/threat/ingest/malicious-packages\"")
+                .contains("\"/threat/ingest/malware-hashes\"")
+                .contains("\"/threat/malicious-packages\"")
+                .contains("\"/threat/malware-hashes\"");
 
         assertThat(body)
                 .as("@Tag names")
@@ -55,7 +63,19 @@ class OpenApiDocsTest {
                 .contains("\"Products\"")
                 .contains("\"SBOM\"")
                 .contains("\"Stats\"")
-                .contains("\"Compliance\"");
+                .contains("\"Compliance\"")
+                .contains("\"Compromise\"")
+                .contains("\"Threat\"");
+
+        assertThat(body)
+                .as("the GET /actionable typed union is described to clients — itemType is the "
+                        + "discriminator a UI switches on, and the compromise arm's fields have to be "
+                        + "in the schema for a generated client to see them")
+                .contains("\"itemType\"")
+                .contains("\"compromiseType\"")
+                .contains("\"compromiseConfidence\"")
+                .contains("\"iocId\"")
+                .contains("\"matchedOn\"");
     }
 
     @Test

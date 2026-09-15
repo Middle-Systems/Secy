@@ -1,6 +1,7 @@
 package net.jdesive.secy.job;
 
 import net.jdesive.secy.model.ingest.JobProgress;
+import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.AssetComponentRepository;
 import net.jdesive.secy.persistence.AssetRepository;
 import net.jdesive.secy.persistence.EPSSRepository;
@@ -69,6 +70,14 @@ class AssetScanJobFlowTest {
 
     private static final Duration SETTLE = Duration.ofSeconds(15);
 
+    /**
+     * Not used to seed anything — cleared because a {@code compromise_finding} left behind by
+     * another test class holds an FK into {@code sbom_component} / {@code asset_component} and
+     * would block the deletes below (Phase 6).
+     */
+    @Autowired
+    private CompromiseFindingRepository findingRepository;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -105,6 +114,7 @@ class AssetScanJobFlowTest {
     @BeforeEach
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
+        findingRepository.deleteAll();
         alertRepository.deleteAll();
         assetRepository.deleteAll();
         jobRepository.deleteAll();

@@ -10,6 +10,8 @@ import net.jdesive.secy.model.component.ComponentIdentity;
 import net.jdesive.secy.model.component.CorrelatableComponent;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -69,6 +71,24 @@ public class AssetComponent implements CorrelatableComponent {
      */
     @Column(name = "identity_key", length = ComponentIdentity.MAX_LENGTH)
     private String identityKey;
+
+    /**
+     * Digests a scanner reported for this package.
+     *
+     * <p><b>Structurally supported, not yet populated.</b> Neither {@code TrivyNormalizer} nor
+     * {@code GrypeNormalizer} reads a package-level digest today — both derive their
+     * {@code ScannedPackage}s from the scanners' vulnerability entries, which carry a package name
+     * and version and no checksum. The column exists because
+     * {@code CompromiseDetectionService} matches through {@code CorrelatableComponent} and must
+     * behave identically for both component kinds; wiring Trivy's {@code Packages[].Digest} into
+     * {@code ScannedPackage} is the follow-up that fills it. See {@code PHASE6-CONTRACT.md} §3.2.
+     */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "asset_component_hash",
+            joinColumns = @JoinColumn(name = "asset_component_id"),
+            indexes = @Index(name = "idx_asset_component_hash_value", columnList = "hash_value"))
+    @ToString.Exclude
+    private Set<ComponentHash> hashes = new LinkedHashSet<>();
 
     /** Which scanner reported it, or {@code DECLARED_CPE}. Provenance only. */
     @Enumerated(EnumType.STRING)

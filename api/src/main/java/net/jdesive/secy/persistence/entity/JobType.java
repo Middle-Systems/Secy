@@ -55,6 +55,26 @@ public enum JobType {
      * job doing the same correlation, just replaying the report's persisted findings instead of a raw
      * document.
      */
-    COMPLIANCE_SCAN
+    COMPLIANCE_SCAN,
+
+    /**
+     * OpenSSF Malicious Packages — the {@code MAL-} corpus, mirrored from the
+     * {@code ossf/malicious-packages} repository archive (Phase 6).
+     *
+     * <p>A singleton feed pull like {@link #NVD} and {@link #OSV}, not a per-invocation job, so it
+     * <b>keeps</b> the {@code uq_ingestion_job_active_type} slot: one of these runs at a time, and a
+     * second {@code POST /threat/ingest/malicious-packages} returns the in-flight job rather than
+     * starting a duplicate 310 MB download.
+     */
+    MALICIOUS_PACKAGES,
+
+    /**
+     * abuse.ch MalwareBazaar SHA-256 samples (Phase 6).
+     *
+     * <p>Its own type rather than sharing {@link #MALICIOUS_PACKAGES}, precisely because the active-type
+     * constraint is per type: sharing would mean a multi-minute malicious-packages pull blocking a
+     * one-second hash refresh. See {@code ThreatController} for the rest of that reasoning.
+     */
+    MALWARE_HASHES
 
 }

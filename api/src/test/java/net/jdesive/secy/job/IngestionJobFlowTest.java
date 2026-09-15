@@ -10,6 +10,8 @@ import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
+import net.jdesive.secy.service.MaliciousPackageIngestService;
+import net.jdesive.secy.service.MalwareHashIngestService;
 import net.jdesive.secy.service.OsvIngestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +65,12 @@ class IngestionJobFlowTest {
 
     @MockBean
     private OsvIngestService osvIngestService;
+
+    @MockBean
+    private MaliciousPackageIngestService maliciousPackageIngestService;
+
+    @MockBean
+    private MalwareHashIngestService malwareHashIngestService;
 
     @Autowired
     private JobService jobService;
@@ -172,6 +180,48 @@ class IngestionJobFlowTest {
         assertThat(finished.getType()).isEqualTo(JobType.OSV);
         assertThat(finished.getItemsProcessed()).isEqualTo(123);
         assertThat(finished.getMessage()).contains("npm (123)");
+    }
+
+    @Test
+    void theRunnerDispatchesTheTwoPhase6ThreatFeedsToTheirOwnServices() {
+        when(maliciousPackageIngestService.ingest(any(JobProgress.class)))
+                .thenReturn(new IngestResult(4200, "Ingested 4200 malicious-package rows from 4100 record(s)"));
+        when(malwareHashIngestService.ingest(any(JobProgress.class)))
+                .thenReturn(new IngestResult(876, "Ingested 876 MalwareBazaar sample(s) (public CSV export, no Auth-Key)"));
+
+        // Also the regression guard for migration 011e: ingestion_job.type was varchar(16) and
+        // 'MALICIOUS_PACKAGES' is 18 characters. Every enum name up to COMPLIANCE_SCAN (15) fitted,
+        // so nothing before this would have caught the overflow.
+        Job packages = jobService.enqueue(JobType.MALICIOUS_PACKAGES, "alice@example.com");
+        Job hashes = jobService.enqueue(JobType.MALWARE_HASHES, "alice@example.com");
+        jobRunner.poll();
+
+        Job finishedPackages = awaitTerminal(packages.getId());
+        assertThat(finishedPackages.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(finishedPackages.getType()).isEqualTo(JobType.MALICIOUS_PACKAGES);
+        assertThat(finishedPackages.getItemsProcessed()).isEqualTo(4200);
+
+        Job finishedHashes = awaitTerminal(hashes.getId());
+        assertThat(finishedHashes.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(finishedHashes.getType()).isEqualTo(JobType.MALWARE_HASHES);
+        assertThat(finishedHashes.getItemsProcessed()).isEqualTo(876);
+    }
+
+    @Test
+    void theTwoThreatFeedsHoldSeparateActiveSlotsSoNeitherBlocksTheOther() {
+        // The reason they are two JobTypes and not one shared THREAT type: the
+        // uq_ingestion_job_active_type constraint is per type, so sharing would let a multi-minute
+        // 310 MB malicious-packages pull block a one-second hash refresh.
+        Job packages = jobService.enqueue(JobType.MALICIOUS_PACKAGES, "alice@example.com");
+        Job hashes = jobService.enqueue(JobType.MALWARE_HASHES, "alice@example.com");
+
+        assertThat(hashes.getId()).isNotEqualTo(packages.getId());
+        assertThat(jobRepository.findAll()).hasSize(2);
+
+        // But a second enqueue of the SAME type still returns the in-flight job — these are
+        // singleton feed pulls, unlike SBOM_UPLOAD / ASSET_SCAN / COMPLIANCE_SCAN.
+        assertThat(jobService.enqueue(JobType.MALICIOUS_PACKAGES, "bob@example.com").getId())
+                .isEqualTo(packages.getId());
     }
 
     @Test

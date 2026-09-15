@@ -38,6 +38,11 @@ import java.util.List;
  * @param bomRef             the document's own internal handle — CycloneDX {@code bom-ref}, SPDX {@code SPDXID}.
  *                           Provenance only; it is <b>not</b> stable across uploads and must never be
  *                           used as an identity (that is {@link ComponentIdentity}'s job)
+ * @param hashes             digests the document declared — CycloneDX {@code hashes[]}, SPDX
+ *                           {@code checksums[]} — already normalised by
+ *                           {@link net.jdesive.secy.persistence.entity.ComponentHash#of}. Usually
+ *                           empty; Phase 6 matches the SHA-256 entry against the malware-hash corpus.
+ *                           Malformed entries are dropped by the normaliser rather than stored
  */
 @Builder
 public record NormalizedComponent(String name,
@@ -48,10 +53,22 @@ public record NormalizedComponent(String name,
                                   String description,
                                   @Singular List<String> licenses,
                                   @Singular List<ExternalReference> externalReferences,
-                                  String bomRef) {
+                                  String bomRef,
+                                  @Singular List<ComponentHashValue> hashes) {
 
     /** A link the source document carried for a component. */
     public record ExternalReference(String type, String url) {
+    }
+
+    /**
+     * One declared digest, in the format-neutral shape.
+     *
+     * <p>A record rather than the {@code ComponentHash} entity for the same reason this whole class
+     * is a record and not an entity: it is a parse target with a request-scoped lifetime, and
+     * binding JPA into the parsers is what keeps them from being unit-testable with no Spring
+     * context. {@code SBOMService} converts.
+     */
+    public record ComponentHashValue(String algorithm, String value) {
     }
 
     public NormalizedComponent {
@@ -63,6 +80,7 @@ public record NormalizedComponent(String name,
         description = trimToNull(description);
         licenses = licenses == null ? List.of() : List.copyOf(licenses);
         externalReferences = externalReferences == null ? List.of() : List.copyOf(externalReferences);
+        hashes = hashes == null ? List.of() : List.copyOf(hashes);
         bomRef = trimToNull(bomRef);
 
         // Derived, never supplied: a parser that guessed its own ecosystem could disagree with the

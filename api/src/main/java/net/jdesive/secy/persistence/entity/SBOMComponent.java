@@ -12,7 +12,9 @@ import lombok.ToString;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Getter
@@ -65,6 +67,20 @@ public class SBOMComponent implements CorrelatableComponent {
      */
     @Column(name = "identity_key", length = ComponentIdentity.MAX_LENGTH)
     private String identityKey;
+
+    /**
+     * Digests the document declared for this component — CycloneDX {@code hashes[]} / SPDX
+     * {@code checksums[]}. Empty for the large majority of SBOMs, which omit them.
+     *
+     * <p>Phase 6 reads the SHA-256 entry against the malware-hash corpus. See
+     * {@link ComponentHash} for why the whole set is stored rather than one column.
+     */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "sbom_component_hash",
+            joinColumns = @JoinColumn(name = "component_id"),
+            indexes = @Index(name = "idx_sbom_component_hash_value", columnList = "hash_value"))
+    @ToString.Exclude
+    private Set<ComponentHash> hashes = new LinkedHashSet<>();
 
     @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude

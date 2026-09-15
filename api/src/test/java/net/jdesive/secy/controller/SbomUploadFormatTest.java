@@ -1,5 +1,6 @@
 package net.jdesive.secy.controller;
 
+import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.ProductRepository;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
@@ -55,6 +56,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @org.springframework.transaction.annotation.Transactional
 class SbomUploadFormatTest {
 
+    /**
+     * Not used to seed anything — cleared because a {@code compromise_finding} left behind by
+     * another test class holds an FK into {@code sbom_component} / {@code asset_component} and
+     * would block the deletes below (Phase 6).
+     */
+    @Autowired
+    private CompromiseFindingRepository findingRepository;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -79,6 +88,7 @@ class SbomUploadFormatTest {
     @BeforeEach
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
+        findingRepository.deleteAll();
         alertRepository.deleteAll();
         assetRepository.deleteAll();
         sbomRepository.deleteAll();

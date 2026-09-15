@@ -14,6 +14,8 @@ import net.jdesive.secy.service.CveListIngestService;
 import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
 import net.jdesive.secy.service.KEVService;
+import net.jdesive.secy.service.MaliciousPackageIngestService;
+import net.jdesive.secy.service.MalwareHashIngestService;
 import net.jdesive.secy.service.NVDService;
 import net.jdesive.secy.service.OsvIngestService;
 import net.jdesive.secy.service.SbomIngestJobService;
@@ -78,6 +80,10 @@ public class JobRunner {
 
     private final ComplianceScanIngestJobService complianceScanIngestJobService;
 
+    private final MaliciousPackageIngestService maliciousPackageIngestService;
+
+    private final MalwareHashIngestService malwareHashIngestService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -98,7 +104,9 @@ public class JobRunner {
                      CveListIngestService cveListIngestService,
                      SbomIngestJobService sbomIngestJobService,
                      AssetScanIngestJobService assetScanIngestJobService,
-                     ComplianceScanIngestJobService complianceScanIngestJobService) {
+                     ComplianceScanIngestJobService complianceScanIngestJobService,
+                     MaliciousPackageIngestService maliciousPackageIngestService,
+                     MalwareHashIngestService malwareHashIngestService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -112,6 +120,8 @@ public class JobRunner {
         this.sbomIngestJobService = sbomIngestJobService;
         this.assetScanIngestJobService = assetScanIngestJobService;
         this.complianceScanIngestJobService = complianceScanIngestJobService;
+        this.maliciousPackageIngestService = maliciousPackageIngestService;
+        this.malwareHashIngestService = malwareHashIngestService;
     }
 
     /**
@@ -195,6 +205,11 @@ public class JobRunner {
             case EXPLOIT -> exploitIndexService.ingest(progress);
             case OSV -> osvIngestService.ingest(progress);
             case CVE_LIST -> cveListIngestService.ingest(progress);
+            // Phase 6's two threat feeds. Singleton pulls like the rest of this block; the
+            // compromise findings they enable are raised by CompromiseDetectionService on the next
+            // SBOM upload or asset scan, not here.
+            case MALICIOUS_PACKAGES -> maliciousPackageIngestService.ingest(progress);
+            case MALWARE_HASHES -> malwareHashIngestService.ingest(progress);
             // The types carrying per-invocation data — dispatch needs the job's own id to look up
             // which SBOM, asset or compliance report it is for. See SBOMService.ingestUploadJob /
             // SBOM.jobId, AssetService.ingestScanJob / Asset.jobId and

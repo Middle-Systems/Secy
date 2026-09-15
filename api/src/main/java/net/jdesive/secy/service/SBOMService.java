@@ -230,6 +230,17 @@ public class SBOMService {
             entity.getReferences().add(sbomReference);
         }
 
+        // Digests the document declared (CycloneDX hashes[] / SPDX checksums[]). Already normalised
+        // and validated by the parsers via ComponentHash.of, so nothing here can be malformed — and
+        // deliberately NOT truncated: a clipped digest is not a shorter digest, it is a wrong one
+        // that would silently never match. Over-long values were dropped at parse time instead.
+        for (NormalizedComponent.ComponentHashValue hash : component.hashes()) {
+            ComponentHash normalized = ComponentHash.of(hash.algorithm(), hash.value());
+            if (normalized != null) {
+                entity.getHashes().add(normalized);
+            }
+        }
+
         return entity;
     }
 

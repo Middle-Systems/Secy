@@ -89,6 +89,14 @@ import java.util.function.BiConsumer;
  *       places, and fixing the source does not fix the running image. They share an
  *       {@code identityKey}, which is what lets a later phase group them by "the same dependency".</li>
  * </ul>
+ *
+ * <h2>And, since Phase 6, compromise detection</h2>
+ *
+ * <p>Both {@code correlate} methods end by handing the same scope to
+ * {@link CompromiseDetectionService}, which asks a different question of a different corpus — "is any
+ * of this <em>known-bad</em>", rather than "does any of this have a CVE". It writes
+ * {@code compromise_finding} rows and touches nothing this class owns. See that class for why it is
+ * a sibling rather than a third path inside {@link #matchAll}.
  */
 @Slf4j
 @Service
@@ -112,6 +120,17 @@ public class CorrelationService {
     private final VulnerabilityRepository vulnerabilityRepository;
     private final VulnerabilityAlertRepository alertRepository;
     private final EnrichmentService enrichmentService;
+
+    /**
+     * Phase 6's third promotion path, run over the same components in the same pass.
+     *
+     * <p>Called from here rather than from {@code SBOMService}/{@code AssetService} because this is
+     * the one place every ingest path already converges on — SBOM upload, Trivy/Grype scan and
+     * compliance re-scan all end up in one of the two {@code correlate} methods below, so hooking it
+     * here is what makes "runs automatically on ingest, no separate trigger" true for all three
+     * without three call sites to keep in step.
+     */
+    private final CompromiseDetectionService compromiseDetectionService;
 
     /**
      * What one correlation run did. Returned for logging and tests; nothing persists it.
@@ -165,8 +184,11 @@ public class CorrelationService {
 
         Matches matches = matchAll(componentsByIdentity);
 
-        return reconcile("SBOM " + sbomId, priorAlerts, matches, Map.of(),
+        CorrelationSummary summary = reconcile("SBOM " + sbomId, priorAlerts, matches, Map.of(),
                 (alert, identity) -> alert.setComponent(componentsByIdentity.get(identity)));
+
+        compromiseDetectionService.detect(sbom);
+        return summary;
     }
 
     /* ------------------------------------------------------------------ */
@@ -210,8 +232,11 @@ public class CorrelationService {
         Matches matches = matchAll(componentsByIdentity);
         Map<AlertKey, FixResolution> scannerFixes = mergeScannerFindings(matches, findings);
 
-        return reconcile("asset " + assetId, priorAlerts, matches, scannerFixes,
+        CorrelationSummary summary = reconcile("asset " + assetId, priorAlerts, matches, scannerFixes,
                 (alert, identity) -> alert.setAssetComponent(componentsByIdentity.get(identity)));
+
+        compromiseDetectionService.detect(asset);
+        return summary;
     }
 
     /**

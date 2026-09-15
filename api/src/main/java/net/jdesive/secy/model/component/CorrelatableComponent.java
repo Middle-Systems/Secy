@@ -62,4 +62,31 @@ public interface CorrelatableComponent {
      */
     String getIdentityKey();
 
+    /**
+     * <h2>Why component <em>hashes</em> are deliberately not on this interface</h2>
+     *
+     * <p>Phase 6 matches a component's SHA-256 against the malware-hash corpus, and the obvious move
+     * was a fifth method here — one matcher, two parents, exactly like the four above.
+     * {@code SBOMComponent} and {@code AssetComponent} do both carry a
+     * {@link net.jdesive.secy.persistence.entity.ComponentHash} collection, so it would have
+     * compiled. It is wrong, and the SBOM upload path proves it:
+     *
+     * <p>{@code VulnerabilityScanner.handleSbomUploaded} self-invokes its own
+     * {@code @Transactional performAsyncScan}, so Spring's proxy never applies and the SBOM is loaded
+     * outside a transaction. By the time {@code CorrelationService} is handed that graph it is
+     * <b>detached</b>. The four methods above survive that because they are scalar columns already
+     * materialised by the fetch join; a {@code FetchType.LAZY} collection reached through the same
+     * interface throws {@code LazyInitializationException} instead. The four methods make a promise
+     * about a <em>value</em>; a collection getter would be making one about a <em>session</em>, which
+     * no interface can keep.
+     *
+     * <p>So {@code CompromiseDetectionService} loads digests by component id through the
+     * repositories, inside its own transaction, and passes them down keyed by identity — the same
+     * shape {@code CorrelationService} already uses for its scope-specific prior-alert queries. The
+     * matcher below stays component-kind agnostic; only the loading step knows which table it is.
+     *
+     * @see net.jdesive.secy.persistence.SBOMComponentRepository#findHashesByComponentIds
+     * @see net.jdesive.secy.persistence.AssetComponentRepository#findHashesByComponentIds
+     */
+
 }

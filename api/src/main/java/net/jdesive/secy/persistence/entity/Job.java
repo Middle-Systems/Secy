@@ -36,8 +36,12 @@ public class Job {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /**
+     * Widened from 16 to 32 in Phase 6: {@code MALICIOUS_PACKAGES} is 18 characters and would not
+     * fit. Migration {@code 011e} widens the column to match.
+     */
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
+    @Column(nullable = false, length = 32)
     private JobType type;
 
     @Enumerated(EnumType.STRING)
