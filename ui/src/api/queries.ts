@@ -33,6 +33,10 @@ import type {
   AssetDetail,
   AssetSummary,
   AssetType,
+  ComplianceMisconfiguration,
+  ComplianceReportDetail,
+  ComplianceReportSummary,
+  ComplianceStatus,
   CreateProductPayload,
   DashboardStats,
   EPSS,
@@ -93,6 +97,14 @@ export const queryKeys = {
     list: (params: AssetListParams) => [...queryKeys.assets.all, 'list', params] as const,
     detail: (id: string) => [...queryKeys.assets.all, 'detail', id] as const,
   },
+  compliance: {
+    all: ['compliance'] as const,
+    reports: (params: ComplianceReportListParams) =>
+      [...queryKeys.compliance.all, 'reports', params] as const,
+    report: (id: string) => [...queryKeys.compliance.all, 'report', id] as const,
+    misconfigurations: (id: string, params: ComplianceMisconfigurationListParams) =>
+      [...queryKeys.compliance.all, 'misconfigurations', id, params] as const,
+  },
 } as const;
 
 /** Options a caller may override on any of the query hooks below. */
@@ -143,6 +155,10 @@ const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
   // Same shape as SBOM_UPLOAD (Phase 4): the asset's components/alerts only exist once its
   // ASSET_SCAN job succeeds. `stats.all` is invalidated unconditionally below regardless.
   ASSET_SCAN: [queryKeys.assets.all, queryKeys.actionable.all],
+  // Same shape again (Phase 5): a compliance report's controls/misconfigurations only exist
+  // once its COMPLIANCE_SCAN job succeeds, and it audits an asset — the same asset Infrastructure
+  // shows, correlated through the same funnel — so assets and actionable both need invalidating too.
+  COMPLIANCE_SCAN: [queryKeys.compliance.all, queryKeys.actionable.all, queryKeys.assets.all],
 };
 
 /**
@@ -590,6 +606,140 @@ export function useScanAssetGrype(options?: MutationOverrides<Job, ScanAssetVari
   return useMutation({
     mutationFn: ({ report, name, type, productId }: ScanAssetVariables) =>
       api.post<Job>('/assets/scan/grype', report, { query: { name, type, productId } }),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Compliance reports (Phase 5)                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Filters accepted by `GET /api/compliance/reports`. */
+export interface ComplianceReportListParams {
+  page: number;
+  size: number;
+  assetId?: string;
+}
+
+/**
+ * GET /api/compliance/reports?page&size&assetId — reports newest first, each
+ * row carrying its control pass/fail/skip counts and the audited asset's
+ * current actionable count. Keeps the previous page visible while the next
+ * loads, same as {@link useAssets}.
+ */
+export function useComplianceReports(
+  { page = 0, size = DEFAULT_PAGE_SIZE, assetId }: Partial<ComplianceReportListParams> = {},
+  options?: QueryOverrides<Page<ComplianceReportSummary>>,
+) {
+  const params: ComplianceReportListParams = { page, size, assetId };
+  return useQuery({
+    queryKey: queryKeys.compliance.reports(params),
+    queryFn: () =>
+      api.get<Page<ComplianceReportSummary>>('/compliance/reports', {
+        query: { page, size, assetId },
+      }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+/**
+ * GET /api/compliance/reports/:id — the control breakdown, a first page of
+ * misconfigurations and a first page of the audited asset's actionable items.
+ * Disabled until `id` is truthy, same as {@link useAssetDetail}. Deeper paging
+ * through the misconfiguration list goes through {@link useComplianceMisconfigurations}
+ * instead of re-fetching this.
+ */
+export function useComplianceReportDetail(
+  id: string | undefined,
+  options?: QueryOverrides<ComplianceReportDetail>,
+) {
+  return useQuery({
+    queryKey: queryKeys.compliance.report(id ?? ''),
+    queryFn: () => api.get<ComplianceReportDetail>(`/compliance/reports/${id}`),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+/** Filters accepted by `GET /api/compliance/reports/:id/misconfigurations`. */
+export interface ComplianceMisconfigurationListParams {
+  page: number;
+  size: number;
+  status?: ComplianceStatus;
+}
+
+/**
+ * GET /api/compliance/reports/:id/misconfigurations?page&size&status — the
+ * same page `GET /compliance/reports/:id` embeds, for paging deeper (or
+ * filtering by PASS/FAIL/SKIP) without re-fetching the whole report. Disabled
+ * until `id` is truthy.
+ */
+export function useComplianceMisconfigurations(
+  id: string | undefined,
+  { page = 0, size = 10, status }: Partial<ComplianceMisconfigurationListParams> = {},
+  options?: QueryOverrides<Page<ComplianceMisconfiguration>>,
+) {
+  const params: ComplianceMisconfigurationListParams = { page, size, status };
+  return useQuery({
+    queryKey: queryKeys.compliance.misconfigurations(id ?? '', params),
+    queryFn: () =>
+      api.get<Page<ComplianceMisconfiguration>>(`/compliance/reports/${id}/misconfigurations`, {
+        query: { page, size, status },
+      }),
+    enabled: Boolean(id),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+export interface UploadComplianceReportVariables {
+  /** Raw `trivy --compliance <spec> -f json` report body, sent verbatim. */
+  report: unknown;
+  /** Required unless the document names its own artifact (most `--compliance` runs do not). */
+  name?: string;
+  /** Default `CONTAINER_IMAGE` on the backend when omitted. */
+  type?: AssetType;
+  productId?: string;
+}
+
+/**
+ * POST /api/compliance/reports?name&type&productId — validates synchronously
+ * (a document that isn't a Trivy compliance report — including one posted to
+ * the wrong endpoint — is a plain `400` from this call, before anything is
+ * queued), then queues persistence + correlation as a background
+ * `COMPLIANCE_SCAN` job. Resolves with that `Job` — poll it with {@link useJob}
+ * — same enqueue → poll → settle shape as {@link useScanAssetTrivy}.
+ */
+export function useUploadComplianceReport(
+  options?: MutationOverrides<Job, UploadComplianceReportVariables>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ report, name, type, productId }: UploadComplianceReportVariables) =>
+      api.post<Job>('/compliance/reports', report, { query: { name, type, productId } }),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * POST /api/compliance/reports/:id/scan — re-scan an already-ingested report:
+ * replays its persisted findings through correlation and enrichment again
+ * (e.g. after a KEV/EPSS/OSV refresh) without re-uploading the document.
+ * Resolves with the `Job` to poll, same contract as {@link useUploadComplianceReport}.
+ */
+export function useRescanComplianceReport(options?: MutationOverrides<Job, string>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Job>(`/compliance/reports/${id}/scan`),
     ...options,
     onSuccess: (...args) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });

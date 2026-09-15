@@ -69,7 +69,15 @@ export interface PageParams {
  * document, so many may be active at once (see `useUploadSbom`).
  */
 export type JobType =
-  'NVD' | 'EPSS' | 'KEV' | 'EXPLOIT' | 'OSV' | 'CVE_LIST' | 'SBOM_UPLOAD' | 'ASSET_SCAN';
+  | 'NVD'
+  | 'EPSS'
+  | 'KEV'
+  | 'EXPLOIT'
+  | 'OSV'
+  | 'CVE_LIST'
+  | 'SBOM_UPLOAD'
+  | 'ASSET_SCAN'
+  | 'COMPLIANCE_SCAN';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
@@ -534,4 +542,118 @@ export interface AssetDeletionSummary {
   name: string;
   componentsRemoved: number;
   alertsRemoved: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Compliance reports — /api/compliance (Phase 5)                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The verdict on one control, or on one check inside it. Mirrors
+ * `ComplianceStatus.java`: three values, not a boolean, because Trivy only
+ * emits a finding for a check it actually evaluated — a great many CIS Docker
+ * controls are manual/operational items it cannot evaluate at all, and those
+ * are `SKIP`, not a silent `PASS`.
+ */
+export type ComplianceStatus = 'PASS' | 'FAIL' | 'SKIP';
+
+/**
+ * A compliance report's own ingest/correlation lifecycle — mirrors
+ * `DockerComplianceReport.STATUS_*`. Distinct from {@link ComplianceStatus}
+ * (that's the benchmark's verdict; this is "has Secy finished processing the
+ * upload").
+ */
+export type ComplianceReportStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+/** One control's rolled-up verdict, part of `ComplianceReportDetail.controls`. */
+export interface ComplianceControl {
+  id: string;
+  controlId: string | null;
+  name: string | null;
+  severity: string | null;
+  status: ComplianceStatus;
+  /** How many checks under this control failed. Zero on a PASS or SKIP. */
+  failedChecks: number;
+}
+
+/**
+ * One configuration check in the Compliance view's misconfiguration list.
+ *
+ * `resolution` is the remediation text, verbatim from the benchmark — never
+ * elided by the backend, and never hidden here: a compliance finding without
+ * "and here is what to do about it" is a complaint, not a finding.
+ */
+export interface ComplianceMisconfiguration {
+  id: string;
+  controlId: string | null;
+  controlName: string | null;
+  checkId: string | null;
+  avdId: string | null;
+  type: string | null;
+  title: string | null;
+  description: string | null;
+  message: string | null;
+  resolution: string | null;
+  severity: string | null;
+  status: ComplianceStatus;
+  target: string | null;
+  primaryUrl: string | null;
+  references: string[];
+}
+
+/**
+ * One row of `GET /api/compliance/reports` — a `Page<ComplianceReportSummary>`.
+ *
+ * `actionableItems` counts the audited asset's current ACTIVE actionable
+ * alerts (the same predicate `/actionable` applies), not this report's own
+ * vulnerability line count — the report's findings are reconciled onto the
+ * asset, so "how bad is this thing" is an asset question.
+ */
+export interface ComplianceReportSummary {
+  id: string;
+  /** The benchmark's own id, e.g. "docker-cis-1.6.0". Not unique — every audit repeats it. */
+  benchmarkId: string | null;
+  title: string | null;
+  version: string | null;
+  assetId: string | null;
+  assetName: string | null;
+  status: ComplianceReportStatus;
+  passedControls: number;
+  failedControls: number;
+  skippedControls: number;
+  totalControls: number;
+  actionableItems: number;
+  /** ISO-8601 date-time string. Null until the report's first scan finishes. */
+  scannedAt: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+}
+
+/**
+ * `GET /api/compliance/reports/:id` — the audit, both halves: the benchmark
+ * result (`controls` + paged `misconfigurations`, with remediation text) and
+ * a page of the audited asset's `ActionableItem`s (same shape/sort
+ * `/actionable` returns).
+ */
+export interface ComplianceReportDetail {
+  id: string;
+  benchmarkId: string | null;
+  title: string | null;
+  description: string | null;
+  version: string | null;
+  assetId: string | null;
+  assetName: string | null;
+  status: ComplianceReportStatus;
+  passedControls: number;
+  failedControls: number;
+  skippedControls: number;
+  totalControls: number;
+  /** ISO-8601 date-time string. Null until the report's first scan finishes. */
+  scannedAt: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+  relatedResources: string[];
+  controls: ComplianceControl[];
+  misconfigurations: Page<ComplianceMisconfiguration>;
+  actionableItems: Page<ActionableItem>;
 }
