@@ -173,7 +173,26 @@ Each phase is independently shippable and leaves `master` green
 - **API**: `GET /assets` paged + filter, `GET /assets/{id}` with its actionable items, `DELETE /assets/{id}`.
 - **UI**: build the **Infrastructure** view — asset list, per-asset drilldown, "scan output" upload modal (mirrors SBOM upload). Actionable Items view gains an asset filter.
 
-### Phase 5 — Compliance (Docker / CIS)
+### Phase 5 — Compliance (Docker / CIS)  ✅ shipped 2026-09-15
+
+> **Landed** on `feat/phase-1-actionable-core` (commits `3017217` backend, `819ed48` UI): CIS-report
+> vulnerabilities now route through the *same* `Asset → AssetComponent → VulnerabilityAlert`
+> pipeline Phase 4 built for Trivy/Grype image scans — `DockerVulnerabilityAlert` and
+> `DockerMisconfigurationAlert` (dead since before Phase 1, written by one endpoint, read by
+> nothing) are **deleted**, tables dropped. Misconfigurations deliberately stay out of the funnel
+> (no CVE ⇒ no EPSS/KEV/exploit-maturity/CVSS to rank on) and get their own control-breakdown +
+> remediation model. `POST /compliance/reports` merges ingest+scan into one job (202 + a
+> `COMPLIANCE_SCAN` job), replacing the old two-call `/cis/docker/*` path entirely; `POST
+> /compliance/reports/{id}/scan` replays stored findings for a re-scan. `GET /compliance/reports`
+> + real Compliance UI (report list, pass/fail/skip breakdown, misconfig list with remediation,
+> linked actionable items). A latent PK bug fixed en route (two reports naming the same CVE
+> collided on `DockerComplianceReportVulnerability`'s id). Backend 263 tests green (+9 — including
+> the one that matters, compliance-sourced alerts now appearing in `GET /actionable`); UI green.
+> **Deferred:** misconfiguration triage/dismissal has no replacement (Phase 7 — needs keying on
+> `(asset, check)` to persist across snapshot-per-upload reports); a compliance report and an
+> image scan of the same `(type, name)` share one asset scope (give an audit its own name to
+> separate them); Liquibase `010` (like `004`-`009`) not yet run against a real PostgreSQL. Not
+> merged to `master`.
 - Job-queue the report scan; replace `GET /cis/docker/scan/{id}` with `POST /compliance/reports/{id}/scan`.
 - **API**: `GET /compliance/reports` paged, `GET /compliance/reports/{id}` (pass/fail summary, misconfig + vuln alerts paged), remediation text included.
 - Docker vuln alerts feed the same enrichment/funnel as SBOM alerts where a CVE is present.
