@@ -7,11 +7,12 @@ import {
   useRescanComplianceReport,
 } from '@/api/queries';
 import type {
+  ActionableItemType,
   ComplianceMisconfiguration,
   ComplianceReportDetail,
   ComplianceStatus,
 } from '@/api/types';
-import { actionableColumns } from '@/components/actionable/actionable.columns';
+import { actionableColumns, actionableRowClassName } from '@/components/actionable/actionable.columns';
 import { ActionableDetailPanel } from '@/components/actionable/ActionableDetailPanel';
 import { DataTable } from '@/components/common/DataTable';
 import { Pagination } from '@/components/common/Pagination';
@@ -145,6 +146,8 @@ function Body({
   const [misconfigPage, setMisconfigPage] = useState(0);
   const [misconfigStatus, setMisconfigStatus] = useState<ComplianceStatus | 'ALL'>('ALL');
   const [selectedActionableId, setSelectedActionableId] = useState<string | null>(null);
+  const [selectedActionableType, setSelectedActionableType] =
+    useState<ActionableItemType | null>(null);
 
   const misconfigQuery = useComplianceMisconfigurations(id, {
     page: misconfigPage,
@@ -282,7 +285,11 @@ function Body({
             columns={actionColumns}
             data={actionableRows}
             getRowId={(entry) => entry.id}
-            onRowClick={(entry) => setSelectedActionableId(entry.id)}
+            onRowClick={(entry) => {
+              setSelectedActionableId(entry.id);
+              setSelectedActionableType(entry.itemType);
+            }}
+            rowClassName={actionableRowClassName}
             emptyMessage="No vulnerability alerts from this report's audited asset right now."
           />
         )}
@@ -290,8 +297,12 @@ function Body({
 
       <ActionableDetailPanel
         id={selectedActionableId}
+        itemType={selectedActionableType}
         onOpenChange={(open) => {
-          if (!open) setSelectedActionableId(null);
+          if (!open) {
+            setSelectedActionableId(null);
+            setSelectedActionableType(null);
+          }
         }}
       />
     </div>

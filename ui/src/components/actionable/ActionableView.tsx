@@ -3,7 +3,13 @@ import { RefreshCw, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useActionablePage, useAssets } from '@/api/queries';
-import type { ActionableFilters, ActionableReason, MatchConfidence } from '@/api/types';
+import type {
+  ActionableFilters,
+  ActionableItemType,
+  ActionableReason,
+  CompromiseConfidence,
+  MatchConfidence,
+} from '@/api/types';
 import { DataTable } from '@/components/common/DataTable';
 import { ListPageHeader } from '@/components/common/ListPageHeader';
 import { Pagination } from '@/components/common/Pagination';
@@ -20,7 +26,7 @@ import { Switch } from '@/components/ui/switch';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-import { actionableColumns } from './actionable.columns';
+import { actionableColumns, actionableRowClassName } from './actionable.columns';
 import {
   readTogglePrefs,
   writeTogglePrefs,
@@ -51,6 +57,19 @@ const MATCH_CONFIDENCE_OPTIONS: { value: MatchConfidence | 'ALL'; label: string 
   { value: 'HEURISTIC', label: 'Heuristic match only' },
 ];
 
+const ITEM_TYPE_OPTIONS: { value: ActionableItemType | 'ALL'; label: string }[] = [
+  { value: 'ALL', label: 'Vulnerabilities + compromise' },
+  { value: 'VULNERABILITY', label: 'Vulnerabilities only' },
+  { value: 'COMPROMISE', label: 'Compromise findings only' },
+];
+
+const CONFIDENCE_OPTIONS: { value: CompromiseConfidence | 'ALL'; label: string }[] = [
+  { value: 'ALL', label: 'Any confidence' },
+  { value: 'CONFIRMED', label: 'Confirmed only' },
+  { value: 'LIKELY', label: 'Likely only' },
+  { value: 'INVESTIGATE', label: 'Investigate only' },
+];
+
 /**
  * Actionable Items — the funnel output (KEV-listed OR EPSS > threshold), the
  * home screen. Server-driven via `useActionablePage`; sort is fixed server-side
@@ -60,6 +79,7 @@ export function ActionableView() {
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(15);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedItemType, setSelectedItemType] = useState<ActionableItemType | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
 
   const [prefs, setPrefs] = useState<ActionableTogglePrefs>(() => readTogglePrefs());
@@ -67,6 +87,8 @@ export function ActionableView() {
   const [minCvss, setMinCvss] = useState<string>('ALL');
   const [matchConfidence, setMatchConfidence] = useState<MatchConfidence | 'ALL'>('ALL');
   const [assetId, setAssetId] = useState<string>('ALL');
+  const [itemType, setItemType] = useState<ActionableItemType | 'ALL'>('ALL');
+  const [confidence, setConfidence] = useState<CompromiseConfidence | 'ALL'>('ALL');
 
   useEffect(() => {
     writeTogglePrefs(prefs);
@@ -85,8 +107,10 @@ export function ActionableView() {
       minCvss: minCvss === 'ALL' ? undefined : Number(minCvss),
       matchConfidence: matchConfidence === 'ALL' ? undefined : matchConfidence,
       assetId: assetId === 'ALL' ? undefined : assetId,
+      itemType: itemType === 'ALL' ? undefined : itemType,
+      confidence: confidence === 'ALL' ? undefined : confidence,
     }),
-    [prefs, reason, minCvss, matchConfidence, assetId],
+    [prefs, reason, minCvss, matchConfidence, assetId, itemType, confidence],
   );
 
   const query = useActionablePage({ page, size, ...filters });
@@ -224,6 +248,48 @@ export function ActionableView() {
                 ))}
               </SelectContent>
             </Select>
+
+            <Select
+              value={itemType}
+              onValueChange={(v) => {
+                setItemType(v as ActionableItemType | 'ALL');
+                // A confidence filter only means anything for compromise rows.
+                if (v !== 'COMPROMISE') setConfidence('ALL');
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="h-9 w-[210px]" aria-label="Filter by item type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ITEM_TYPE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {itemType === 'COMPROMISE' && (
+              <Select
+                value={confidence}
+                onValueChange={(v) => {
+                  setConfidence(v as CompromiseConfidence | 'ALL');
+                  setPage(0);
+                }}
+              >
+                <SelectTrigger className="h-9 w-[170px]" aria-label="Filter by compromise confidence">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONFIDENCE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
 
@@ -246,7 +312,11 @@ export function ActionableView() {
               isLoading={query.isPending}
               skeletonRows={size > 15 ? 15 : size}
               getRowId={(entry) => entry.id}
-              onRowClick={(entry) => setSelectedId(entry.id)}
+              onRowClick={(entry) => {
+                setSelectedId(entry.id);
+                setSelectedItemType(entry.itemType);
+              }}
+              rowClassName={actionableRowClassName}
               emptyMessage="Nothing actionable right now. Ingest KEV / EPSS and scan an SBOM to populate the funnel."
             />
 
@@ -269,8 +339,12 @@ export function ActionableView() {
 
         <ActionableDetailPanel
           id={selectedId}
+          itemType={selectedItemType}
           onOpenChange={(open) => {
-            if (!open) setSelectedId(null);
+            if (!open) {
+              setSelectedId(null);
+              setSelectedItemType(null);
+            }
           }}
           onOpenAsset={(id) => setSelectedAssetId(id)}
         />

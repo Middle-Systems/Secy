@@ -65,6 +65,13 @@ export const REASON_LABELS: Record<string, string> = {
   KEV: 'KEV-listed',
   EPSS_HIGH: 'High EPSS',
   KEV_AND_EPSS_HIGH: 'KEV-listed + high EPSS',
+  COMPROMISE: 'Compromise finding',
+};
+
+/** `CompromiseType` display labels — the CVE column's replacement on a compromise row. */
+export const COMPROMISE_TYPE_LABELS: Record<string, string> = {
+  MALICIOUS_PACKAGE: 'Malicious Package',
+  MALWARE_HASH: 'Malware Hash',
 };
 
 export const EXPLOIT_MATURITY_LABELS: Record<string, string> = {

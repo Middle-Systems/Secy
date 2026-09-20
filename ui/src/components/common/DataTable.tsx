@@ -34,6 +34,14 @@ export interface DataTableProps<TData> {
   /** Row click handler. Adds a pointer cursor + hover affordance. */
   onRowClick?: (row: TData) => void;
   /**
+   * Extra classes for one row's `<tr>`, keyed off its data — e.g. a distinct
+   * background for a row that needs to read as categorically different (a
+   * Phase 6 compromise finding among vulnerability rows). Merged with the
+   * table's own state classes via `cn`, so a `hover:` class here composes
+   * rather than fights the default hover treatment.
+   */
+  rowClassName?: (row: TData) => string | undefined;
+  /**
    * Render an expandable detail panel under a row. When set, a chevron toggle
    * column is prepended automatically and rows become individually expandable
    * (click the chevron, or the row when `onRowClick` is not set).
@@ -74,6 +82,7 @@ export function DataTable<TData>({
   emptyMessage = 'No results.',
   getRowId,
   onRowClick,
+  rowClassName,
   renderSubRow,
   className,
 }: DataTableProps<TData>) {
@@ -145,7 +154,7 @@ export function DataTable<TData>({
                 <Fragment key={row.id}>
                   <TableRow
                     data-state={isOpen ? 'selected' : undefined}
-                    className={cn(interactive && 'cursor-pointer')}
+                    className={cn(interactive && 'cursor-pointer', rowClassName?.(row.original))}
                     onClick={interactive ? () => handleRowActivate(row) : undefined}
                   >
                     {expandable && (

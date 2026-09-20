@@ -11,6 +11,7 @@ const rescanMutateAsync = vi.fn();
 const useRescanComplianceReport = vi.fn();
 const useJob = vi.fn();
 const useActionableDetail = vi.fn();
+const useCompromiseFindingDetail = vi.fn();
 
 vi.mock('@/api/queries', () => ({
   useComplianceReportDetail: (...args: unknown[]) => useComplianceReportDetail(...args),
@@ -19,6 +20,7 @@ vi.mock('@/api/queries', () => ({
   useJob: (...args: unknown[]) => useJob(...args),
   // ComplianceReportDetailPanel nests ActionableDetailPanel for its actionable-items list.
   useActionableDetail: (...args: unknown[]) => useActionableDetail(...args),
+  useCompromiseFindingDetail: (...args: unknown[]) => useCompromiseFindingDetail(...args),
 }));
 
 const toastSuccess = vi.fn();

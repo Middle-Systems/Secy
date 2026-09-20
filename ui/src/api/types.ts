@@ -77,7 +77,9 @@ export type JobType =
   | 'CVE_LIST'
   | 'SBOM_UPLOAD'
   | 'ASSET_SCAN'
-  | 'COMPLIANCE_SCAN';
+  | 'COMPLIANCE_SCAN'
+  | 'MALICIOUS_PACKAGES'
+  | 'MALWARE_HASHES';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
@@ -156,14 +158,63 @@ export interface DashboardStats {
   pastKevDueCount: number;
   /** createdAt within 7 days — the trend arrow. */
   actionableCreatedLast7d: number;
+
+  /* ---------------------------------------------------------------------- */
+  /* Supply-chain compromise roll-up (Phase 6). Scoped to ACTIVE findings.  */
+  /* Deliberately NOT folded into `openActionableCount` — see PHASE6        */
+  /* contract §8: a compromise finding has no severity/fix/exploit band, so */
+  /* it gets its own tile rather than silently breaking those breakdowns.   */
+  /* `GET /actionable`'s totalElements DOES include both — the Actionable   */
+  /* screen's row count is openActionableCount + compromiseFindingCount.    */
+  /* ---------------------------------------------------------------------- */
+
+  /** Active `compromise_finding` rows — the headline for the compromise tile. */
+  compromiseFindingCount: number;
+  /** confidence = CONFIRMED — the feed named this exact artefact. */
+  compromiseConfirmedCount: number;
+  /** confidence = INVESTIGATE — decayed by IOC aging. Still counted in `compromiseFindingCount`. */
+  compromiseInvestigateCount: number;
+  /** createdAt within 7 days — the trend arrow for the tile. */
+  compromiseCreatedLast7d: number;
 }
 
 /* -------------------------------------------------------------------------- */
 /* Actionable Items — GET /api/actionable, GET /api/actionable/:id            */
 /* -------------------------------------------------------------------------- */
 
-/** Why an alert made it through the funnel. `KEV_AND_EPSS_HIGH` is its own value. */
-export type ActionableReason = 'KEV' | 'EPSS_HIGH' | 'KEV_AND_EPSS_HIGH';
+/**
+ * Why an item made it through the funnel. `KEV_AND_EPSS_HIGH` is its own value.
+ * `COMPROMISE` (Phase 6) is never stored on a `vulnerability_alert` — it is
+ * derived at response time for a `compromise_finding` row; the existence of
+ * the finding *is* the promotion, so none of the CVE-based reasons apply.
+ */
+export type ActionableReason = 'KEV' | 'EPSS_HIGH' | 'KEV_AND_EPSS_HIGH' | 'COMPROMISE';
+
+/**
+ * The `GET /actionable` union discriminator (Phase 6). Always present, never
+ * null — including on rows that predate Phase 6. A `VULNERABILITY` row is a
+ * `vulnerability_alert` (CVE against a component), detail at
+ * `GET /actionable/:id`. A `COMPROMISE` row is a `compromise_finding` (a
+ * known-bad artefact, no CVE), detail at `GET /compromise/:id` — see
+ * {@link CompromiseFinding} and `useCompromiseFindingDetail`.
+ */
+export type ActionableItemType = 'VULNERABILITY' | 'COMPROMISE';
+
+/** What kind of known-bad thing a compromise finding matched. */
+export type CompromiseType = 'MALICIOUS_PACKAGE' | 'MALWARE_HASH';
+
+/**
+ * How firmly Secy believes the operator is actually shipping the known-bad
+ * thing. `CONFIRMED` — the feed's own statement covers this exact artefact
+ * with no inference. `LIKELY` — reaching the artefact needed an inference
+ * (e.g. a bounded version range, or no version to test at all). `INVESTIGATE`
+ * — the evidence has decayed past `secy.compromise.ioc-stale-after`; written
+ * by the nightly IOC-aging sweep. Deliberately not {@link MatchConfidence}:
+ * that answers "is this really my component?" for a CVE correlation, this
+ * answers "how sure are we that you are compromised", and has a third,
+ * decayed state with no counterpart there.
+ */
+export type CompromiseConfidence = 'CONFIRMED' | 'LIKELY' | 'INVESTIGATE';
 
 /** Whether a patch exists for an actionable item. */
 export type FixState = 'FIXED' | 'NO_FIX' | 'UNKNOWN';
@@ -184,30 +235,56 @@ export type ExploitMaturity = 'NONE' | 'POC' | 'WEAPONIZED' | 'IN_THE_WILD';
 export type MatchConfidence = 'EXACT' | 'RANGE' | 'HEURISTIC';
 
 /**
- * One row of `GET /api/actionable` — a `Page<ActionableItem>`. Sort is fixed
- * server-side (EPSS desc, then createdAt desc). `description` is truncated at
- * 280 chars with a trailing `…`. `kev` is a convenience boolean. Nulls arrive
- * as `null`, not omitted.
+ * One row of `GET /api/actionable` — a `Page<ActionableItem>`. Since Phase 6
+ * this is a **typed union** over two source tables (`vulnerability_alert` and
+ * `compromise_finding`), discriminated by {@link ActionableItem.itemType}.
+ * Every Phase 1-5 field keeps its exact meaning and is `null` on a
+ * `COMPROMISE` row (`kev` is `false` rather than null); the `compromiseType`
+ * family of fields is `null` on a `VULNERABILITY` row. A client that ignores
+ * `itemType` reads a compromise row as a vulnerability row with a null
+ * `cveId` — wrong, but not dangerous.
+ *
+ * Sort is fixed server-side: every compromise row is ranked above every
+ * vulnerability row (compromise tier: confidence, then IOC freshness, then
+ * newest; vulnerability tier: EPSS desc, then createdAt desc, unchanged from
+ * Phase 1). `description` is truncated at 280 chars with a trailing `…` on a
+ * vulnerability row. Nulls arrive as `null`, not omitted.
  */
 export interface ActionableItem {
-  /** Alert UUID — the id for `GET /api/actionable/:id`. */
+  /**
+   * The row id — a `vulnerability_alert` id on a `VULNERABILITY` row, a
+   * `compromise_finding` id on a `COMPROMISE` row. **Which detail endpoint
+   * this feeds depends on `itemType`**: `GET /actionable/:id` for
+   * `VULNERABILITY`, `GET /compromise/:id` for `COMPROMISE` — the former 404s
+   * on a compromise id. See `useActionableDetail` / `useCompromiseFindingDetail`.
+   */
   id: string;
-  cveId: string;
+  /** The union discriminator. Always set, never null — including on pre-Phase-6 rows. */
+  itemType: ActionableItemType;
+  /** Null on a `COMPROMISE` row, which has no CVE. */
+  cveId: string | null;
+  /** CVE description (truncated), or the finding's summary on a compromise row. */
   description: string;
+  /** NVD severity band, or always `CRITICAL` on a compromise row. */
   baseSeverity: BaseSeverity;
   cvssScore: number | null;
   epssScore: number | null;
   epssPercentile: number | null;
+  /** Always `false` on a compromise row (not just null — it's a real boolean field). */
   kev: boolean;
-  /** Date string, e.g. "2021-12-24". Null when the CVE is not KEV-listed. */
+  /** Date string, e.g. "2021-12-24". Null when the CVE is not KEV-listed, or on a compromise row. */
   kevDueDate: string | null;
-  /** Mirrors KEV's field verbatim: "Known" / "Unknown" / null. */
+  /** Mirrors KEV's field verbatim: "Known" / "Unknown" / null. Null on a compromise row. */
   knownRansomwareUse: string | null;
-  exploitMaturity: ExploitMaturity;
-  fixState: FixState;
+  /** Null on a compromise row. */
+  exploitMaturity: ExploitMaturity | null;
+  /** Null on a compromise row — malware is removed, not "fixed" in a later version. */
+  fixState: FixState | null;
   fixedVersions: string | null;
   fixSource: FixSource | null;
+  /** Null on a compromise row, which reports `compromiseConfidence` instead. */
   matchConfidence: MatchConfidence | null;
+  /** `COMPROMISE` on a compromise row — see {@link ActionableReason}. */
   actionableReason: ActionableReason;
   productId: string | null;
   productName: string | null;
@@ -219,6 +296,28 @@ export interface ActionableItem {
   componentName: string | null;
   componentVersion: string | null;
   componentPurl: string | null;
+
+  /* ------------------------------------------------------------------ */
+  /* Compromise-only fields (Phase 6). Null on a VULNERABILITY row.      */
+  /* ------------------------------------------------------------------ */
+
+  /** `MALICIOUS_PACKAGE` / `MALWARE_HASH`. Compromise rows only. */
+  compromiseType: CompromiseType | null;
+  /** `CONFIRMED` / `LIKELY` / `INVESTIGATE` — the primary sort within the compromise tier. */
+  compromiseConfidence: CompromiseConfidence | null;
+  /** The feed name, e.g. "OpenSSF Malicious Packages". */
+  compromiseSource: string | null;
+  /** The feed's id for the indicator — a `MAL-…` id, or a SHA-256. */
+  iocId: string | null;
+  /** What of yours matched: the component's PURL, or the digest. */
+  matchedOn: string | null;
+  /** ISO-8601 date-time string. When the feed first saw the indicator. */
+  iocFirstSeen: string | null;
+  /** ISO-8601 date-time string. When the feed last saw it — what IOC aging measures against. */
+  iocLastSeen: string | null;
+  /** The feed's own 0-1 conviction about the indicator, when it states one. */
+  iocConfidence: number | null;
+
   /** ISO-8601 date-time string. */
   createdAt: string;
 }
@@ -309,22 +408,101 @@ export interface ActionableDetail {
  * deliberately omitted — the backend still accepts and ignores it (Phase 7).
  * `assetId` **is** a real filter as of Phase 4 — passing an arbitrary id now
  * returns an empty page rather than the unfiltered list.
+ *
+ * **Cross-arm exclusion (Phase 6, PHASE6-CONTRACT §4.8):** a filter only one
+ * arm can satisfy excludes the *other* arm entirely, from `totalElements` as
+ * well as `content` — the server enforces this, the client just needs to
+ * present a sensible combination. `confidence` excludes every vulnerability
+ * row; `minCvss` / `fixState` / `minExploitMaturity` / `matchConfidence`
+ * exclude every compromise row. `itemType=COMPROMISE` and `reason=COMPROMISE`
+ * are equivalent.
  */
 export interface ActionableFilters {
   /** Alerts on SBOMs belonging to this product. */
   productId?: string;
   /** Alerts on this asset. Now a real filter (Phase 4) — no longer accepted-and-ignored. */
   assetId?: string;
-  /** Exact match — `reason=KEV` does NOT include `KEV_AND_EPSS_HIGH`. */
+  /** Exact match — `reason=KEV` does NOT include `KEV_AND_EPSS_HIGH`. `COMPROMISE` excludes every vulnerability row. */
   reason?: ActionableReason;
-  /** `cvssScore >= minCvss`; unscored CVEs are excluded. */
+  /** `cvssScore >= minCvss`; unscored CVEs are excluded. Excludes every compromise row (Phase 6). */
   minCvss?: number;
-  /** Exact match. */
+  /** Exact match. Excludes every compromise row (Phase 6). */
   fixState?: FixState;
-  /** At or above, by declaration order. `NONE` is a no-op. */
+  /** At or above, by declaration order. `NONE` is a no-op. Excludes every compromise row (Phase 6). */
   minExploitMaturity?: ExploitMaturity;
-  /** Exact match — no "at or above" form. */
+  /** Exact match — no "at or above" form. Excludes every compromise row (Phase 6). */
   matchConfidence?: MatchConfidence;
+  /** Restrict to one arm of the union (Phase 6). Omit to see both, merged and ranked. */
+  itemType?: ActionableItemType;
+  /** Exact match on a compromise finding's confidence (Phase 6). Excludes every vulnerability row. */
+  confidence?: CompromiseConfidence;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Supply-chain compromise findings — GET /api/compromise (Phase 6)           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `GET /api/compromise` and `GET /api/compromise/:id` — the **same shape** for
+ * both a list row and the detail body. A finding's "detail" is just its feed
+ * write-up and provenance (`details` / `origins` / `referencesJson`), two
+ * extra strings, so splitting it into a separate detail type would cost a
+ * second type and endpoint to save a couple hundred bytes per row.
+ *
+ * A compromise finding is a distinct table from `vulnerability_alert` — it has
+ * no CVE and never will, so none of the CVSS/EPSS/KEV/fix machinery applies.
+ * `severity` is always `"CRITICAL"`; there is no severity knob per the
+ * contract. `referencesJson` is passed through **unparsed** on the wire —
+ * parse it defensively when rendering, never assume it's valid JSON.
+ */
+export interface CompromiseFinding {
+  id: string;
+  type: CompromiseType;
+  confidence: CompromiseConfidence;
+  /** Always "CRITICAL" — fixed, not configurable. */
+  severity: string;
+  /** The feed name, e.g. "OpenSSF Malicious Packages" / "abuse.ch MalwareBazaar". */
+  source: string;
+  /** The feed's id for the indicator — a `MAL-…` id, or the SHA-256. */
+  iocId: string;
+  /** What of yours matched: the component's PURL, or the digest. */
+  matchedOn: string;
+  /** The feed's one-line description. */
+  summary: string | null;
+  /** The feed's write-up — the most useful thing in the drawer for a malicious package. Null for a hash. */
+  details: string | null;
+  /** Who reported it — malicious-packages origin sources, or the MalwareBazaar submitter. */
+  origins: string | null;
+  /** The feed record's `references[]` array, verbatim JSON — unparsed. Null when the record carried none. */
+  referencesJson: string | null;
+  /** ISO-8601 date-time string. When the feed first saw the indicator. */
+  iocFirstSeen: string | null;
+  /** ISO-8601 date-time string. When the feed last saw it — what IOC aging measures against. */
+  iocLastSeen: string | null;
+  /** The feed's own 0-1 conviction, when it states one. */
+  iocConfidence: number | null;
+  /**
+   * ISO-8601 date-time string, or null if IOC aging never demoted this
+   * finding. Non-null next to `confidence: "INVESTIGATE"` is how the UI
+   * explains *why* a finding is only worth investigating.
+   */
+  agedAt: string | null;
+  /** `ACTIVE` on every list row by default; pass `lifecycleState=AUTO_RESOLVED` to see history. */
+  lifecycleState: 'ACTIVE' | 'AUTO_RESOLVED';
+  /** Null on an asset finding. */
+  productId: string | null;
+  productName: string | null;
+  /** Null on an SBOM finding. Exactly one of `productId`/`assetId` is normally set. */
+  assetId: string | null;
+  assetName: string | null;
+  componentId: string | null;
+  componentName: string | null;
+  componentVersion: string | null;
+  componentPurl: string | null;
+  /** ISO-8601 date-time string. When the finding was first raised. */
+  createdAt: string;
+  /** ISO-8601 date-time string. When detection last reproduced it. */
+  lastSeenAt: string | null;
 }
 
 /* -------------------------------------------------------------------------- */

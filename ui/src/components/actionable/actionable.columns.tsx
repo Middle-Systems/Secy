@@ -6,17 +6,33 @@ import { SeverityBadge } from '@/components/common/SeverityBadge';
 import { formatPercent, formatPercentile, formatRelativeDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-import { componentLabel, isKevOverdue } from './actionable.helpers';
+import { COMPROMISE_TYPE_LABELS, componentLabel, isKevOverdue } from './actionable.helpers';
+import { CompromiseConfidenceBadge } from './CompromiseConfidenceBadge';
 import { ExploitBadge } from './ExploitBadge';
 import { FixBadge } from './FixBadge';
+import { MaliciousBadge } from './MaliciousBadge';
 import { MatchConfidenceBadge } from './MatchConfidenceBadge';
 
 const DASH = <span className="text-xs text-muted-foreground">—</span>;
 
+/** Tailwind classes for the "this row is different and urgent" treatment on a COMPROMISE row. */
+export function actionableRowClassName(item: ActionableItem): string | undefined {
+  return item.itemType === 'COMPROMISE'
+    ? 'border-l-2 border-l-destructive bg-destructive/5 hover:bg-destructive/10'
+    : undefined;
+}
+
 /**
  * Column defs for the Actionable Items table. Non-sortable by design — the sort
- * is fixed server-side (EPSS desc); row clicks open the detail panel, wired in
- * the view via `DataTable`'s `onRowClick`.
+ * is fixed server-side (compromise tier first, then EPSS desc within the
+ * vulnerability tier — see PHASE6-CONTRACT §4.6); row clicks open the detail
+ * panel, wired in the view via `DataTable`'s `onRowClick`.
+ *
+ * Since Phase 6 a row may be either arm of the `/actionable` union
+ * (`ActionableItem.itemType`). Every column that only makes sense for a CVE
+ * (EPSS / KEV / Exploit / Fix / Match) renders a dash on a `COMPROMISE` row —
+ * those fields arrive `null`, never a misleading zero — and the identity
+ * column swaps the CVE id for the finding's IOC id + type, badged distinctly.
  */
 export function actionableColumns(): ColumnDef<ActionableItem, unknown>[] {
   return [
@@ -31,13 +47,31 @@ export function actionableColumns(): ColumnDef<ActionableItem, unknown>[] {
       ),
     },
     {
-      accessorKey: 'cveId',
+      id: 'identity',
       header: 'CVE',
-      cell: ({ row }) => (
-        <span className="whitespace-nowrap font-mono text-sm font-semibold text-primary">
-          {row.original.cveId}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const item = row.original;
+        if (item.itemType === 'COMPROMISE') {
+          return (
+            <div className="flex flex-col gap-1">
+              <MaliciousBadge />
+              <span
+                className="whitespace-nowrap font-mono text-xs text-muted-foreground"
+                title={item.matchedOn ?? undefined}
+              >
+                {(item.compromiseType && COMPROMISE_TYPE_LABELS[item.compromiseType]) ||
+                  item.compromiseType}
+                {item.iocId ? ` · ${item.iocId}` : ''}
+              </span>
+            </div>
+          );
+        }
+        return (
+          <span className="whitespace-nowrap font-mono text-sm font-semibold text-primary">
+            {item.cveId}
+          </span>
+        );
+      },
     },
     {
       id: 'epss',
@@ -84,33 +118,33 @@ export function actionableColumns(): ColumnDef<ActionableItem, unknown>[] {
     {
       id: 'exploit',
       header: 'Exploit',
-      cell: ({ row }) =>
-        row.original.exploitMaturity === 'NONE' ? (
+      cell: ({ row }) => {
+        const { exploitMaturity } = row.original;
+        return !exploitMaturity || exploitMaturity === 'NONE' ? (
           DASH
         ) : (
-          <ExploitBadge maturity={row.original.exploitMaturity} />
-        ),
+          <ExploitBadge maturity={exploitMaturity} />
+        );
+      },
     },
     {
       id: 'fix',
       header: 'Fix',
-      cell: ({ row }) => (
-        <FixBadge
-          state={row.original.fixState}
-          fixedVersions={row.original.fixedVersions}
-          fixSource={row.original.fixSource}
-        />
-      ),
+      cell: ({ row }) => {
+        const { fixState, fixedVersions, fixSource } = row.original;
+        if (!fixState) return DASH;
+        return <FixBadge state={fixState} fixedVersions={fixedVersions} fixSource={fixSource} />;
+      },
     },
     {
       id: 'match',
       header: 'Match',
-      cell: ({ row }) =>
-        row.original.matchConfidence ? (
-          <MatchConfidenceBadge confidence={row.original.matchConfidence} />
-        ) : (
-          DASH
-        ),
+      cell: ({ row }) => {
+        const { matchConfidence, compromiseConfidence } = row.original;
+        if (matchConfidence) return <MatchConfidenceBadge confidence={matchConfidence} />;
+        if (compromiseConfidence) return <CompromiseConfidenceBadge confidence={compromiseConfidence} />;
+        return DASH;
+      },
     },
     {
       id: 'affected',

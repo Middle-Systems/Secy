@@ -7,11 +7,13 @@ import { renderWithProviders } from '@/test/render';
 
 const useActionablePage = vi.fn();
 const useActionableDetail = vi.fn();
+const useCompromiseFindingDetail = vi.fn();
 const useAssets = vi.fn();
 
 vi.mock('@/api/queries', () => ({
   useActionablePage: (...args: unknown[]) => useActionablePage(...args),
   useActionableDetail: (...args: unknown[]) => useActionableDetail(...args),
+  useCompromiseFindingDetail: (...args: unknown[]) => useCompromiseFindingDetail(...args),
   useAssets: (...args: unknown[]) => useAssets(...args),
 }));
 
@@ -26,6 +28,7 @@ import { ActionableView } from './ActionableView';
 function item(overrides: Partial<ActionableItem> = {}): ActionableItem {
   return {
     id: 'alert-1',
+    itemType: 'VULNERABILITY',
     cveId: 'CVE-2021-44228',
     description: 'Apache Log4j2 JNDI features do not protect against attacker controlled LDAP…',
     baseSeverity: 'CRITICAL',
@@ -49,6 +52,14 @@ function item(overrides: Partial<ActionableItem> = {}): ActionableItem {
     componentName: 'log4j-core',
     componentVersion: '2.14.1',
     componentPurl: 'pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1',
+    compromiseType: null,
+    compromiseConfidence: null,
+    compromiseSource: null,
+    iocId: null,
+    matchedOn: null,
+    iocFirstSeen: null,
+    iocLastSeen: null,
+    iocConfidence: null,
     createdAt: '2026-09-05T14:22:31.118',
     ...overrides,
   };

@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { ExternalLink, Info, Loader2, ShieldAlert } from 'lucide-react';
 
-import { useActionableDetail } from '@/api/queries';
-import type { ActionableDetail } from '@/api/types';
+import { useActionableDetail, useCompromiseFindingDetail } from '@/api/queries';
+import type { ActionableDetail, ActionableItemType, CompromiseFinding } from '@/api/types';
 import { SeverityBadge } from '@/components/common/SeverityBadge';
 import {
   Sheet,
@@ -11,22 +11,32 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { EM_DASH, formatDate, formatPercent, formatPercentile } from '@/lib/format';
+import { EM_DASH, formatDate, formatDateTime, formatPercent, formatPercentile } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import {
   componentLabel,
+  COMPROMISE_TYPE_LABELS,
   EXPLOIT_MATURITY_LABELS,
   isKevOverdue,
   REASON_LABELS,
 } from './actionable.helpers';
+import { CompromiseConfidenceBadge } from './CompromiseConfidenceBadge';
 import { ExploitBadge } from './ExploitBadge';
 import { FixBadge } from './FixBadge';
+import { MaliciousBadge } from './MaliciousBadge';
 import { MatchConfidenceBadge } from './MatchConfidenceBadge';
 
 interface ActionableDetailPanelProps {
-  /** Alert id to load, or `null` when the panel is closed. */
+  /** Alert id (VULNERABILITY) or finding id (COMPROMISE) to load, or `null` when closed. */
   id: string | null;
+  /**
+   * Which detail endpoint `id` addresses (Phase 6) — `GET /actionable/:id` for
+   * a `vulnerability_alert`, `GET /compromise/:id` for a `compromise_finding`.
+   * `null`/`VULNERABILITY` both resolve to the pre-Phase-6 endpoint, so every
+   * existing caller (e.g. a deep link with no row context) keeps working.
+   */
+  itemType?: ActionableItemType | null;
   onOpenChange: (open: boolean) => void;
   /**
    * Called when the user activates an asset reference in "Affected
@@ -35,6 +45,125 @@ interface ActionableDetailPanelProps {
    * but not required by every caller.
    */
   onOpenAsset?: (assetId: string) => void;
+}
+
+/** `CompromiseFinding.referencesJson` is a raw feed array, unparsed on the wire. */
+function parseReferences(json: string | null): { url: string; type?: string }[] {
+  if (!json) return [];
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (r): r is { url: string; type?: string } =>
+        typeof r === 'object' && r != null && typeof (r as { url?: unknown }).url === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function CompromiseBody({
+  finding,
+  onOpenAsset,
+}: {
+  finding: CompromiseFinding;
+  onOpenAsset?: (assetId: string) => void;
+}) {
+  const references = parseReferences(finding.referencesJson);
+
+  return (
+    <div className="mt-4 flex flex-col gap-6 text-sm">
+      {finding.agedAt && (
+        <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Demoted to Investigate on {formatDateTime(finding.agedAt)} — this indicator's evidence
+          has gone stale.
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <MaliciousBadge />
+        <CompromiseConfidenceBadge confidence={finding.confidence} />
+        <span className="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          {COMPROMISE_TYPE_LABELS[finding.type] ?? finding.type}
+        </span>
+      </div>
+
+      {finding.summary && <p className="whitespace-pre-line text-sm text-foreground">{finding.summary}</p>}
+
+      <div className="grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2">
+        <Section title="Indicator">
+          <Row label="Source" value={finding.source} />
+          <Row label="IOC id" value={<span className="font-mono text-xs">{finding.iocId}</span>} />
+          <Row label="Matched on" value={<span className="font-mono text-xs">{finding.matchedOn}</span>} />
+          {finding.origins && <Row label="Reported by" value={finding.origins} />}
+        </Section>
+
+        <Section title="Freshness">
+          <Row label="First seen" value={formatDateTime(finding.iocFirstSeen)} />
+          <Row label="Last seen" value={formatDateTime(finding.iocLastSeen)} />
+          {finding.iocConfidence != null && (
+            <Row label="Feed confidence" value={formatPercent(finding.iocConfidence, 0)} />
+          )}
+          <Row label="Added to funnel" value={formatDateTime(finding.createdAt)} />
+        </Section>
+      </div>
+
+      <Section title="Matched component">
+        <div className="rounded border border-border bg-card p-2">
+          <div className="font-mono text-xs text-foreground" title={finding.componentPurl ?? undefined}>
+            {componentLabel(finding.componentName, finding.componentVersion)}
+          </div>
+          {finding.assetName ? (
+            onOpenAsset && finding.assetId ? (
+              <button
+                type="button"
+                onClick={() => onOpenAsset(finding.assetId!)}
+                className="text-xs text-primary hover:underline"
+              >
+                {finding.assetName} (asset)
+              </button>
+            ) : (
+              <div className="text-xs text-muted-foreground">{finding.assetName} (asset)</div>
+            )
+          ) : (
+            finding.productName && (
+              <div className="text-xs text-muted-foreground">{finding.productName}</div>
+            )
+          )}
+        </div>
+      </Section>
+
+      {finding.details && (
+        <Section title="Analyst write-up">
+          <p className="whitespace-pre-line text-sm text-foreground">{finding.details}</p>
+        </Section>
+      )}
+
+      <Section title="References">
+        {references.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No references listed.</p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {references.map((ref, i) => (
+              <li key={`${ref.url}-${i}`} className="min-w-0">
+                <a
+                  href={ref.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-primary hover:underline"
+                  title={ref.url}
+                >
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{ref.type || ref.url}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </div>
+  );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -258,17 +387,28 @@ function Body({
  */
 export function ActionableDetailPanel({
   id,
+  itemType,
   onOpenChange,
   onOpenAsset,
 }: ActionableDetailPanelProps) {
-  const query = useActionableDetail(id ?? undefined);
+  const isCompromise = itemType === 'COMPROMISE';
+  // Both hooks are called on every render (rules of hooks) — only the one
+  // matching `itemType` is ever enabled, the other's `id` stays undefined.
+  const alertQuery = useActionableDetail(!isCompromise ? (id ?? undefined) : undefined);
+  const findingQuery = useCompromiseFindingDetail(isCompromise ? (id ?? undefined) : undefined);
+  const query = isCompromise ? findingQuery : alertQuery;
+
+  const title = isCompromise ? (findingQuery.data?.iocId ?? 'Compromise finding') : (alertQuery.data?.cve.id ?? 'Actionable item');
+  const description = isCompromise
+    ? 'A known-bad artefact matched in your estate — what it is and where it was found.'
+    : 'Why this made the funnel, and what to do about it.';
 
   return (
     <Sheet open={id != null} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle className="font-mono">{query.data?.cve.id ?? 'Actionable item'}</SheetTitle>
-          <SheetDescription>Why this made the funnel, and what to do about it.</SheetDescription>
+          <SheetTitle className="font-mono">{title}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
 
         {query.isPending ? (
@@ -280,11 +420,15 @@ export function ActionableDetailPanel({
           <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center">
             <ShieldAlert className="h-8 w-8 text-destructive" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">
-              Could not load this item. It may have been re-evaluated out of the funnel.
+              {isCompromise
+                ? 'Could not load this finding.'
+                : 'Could not load this item. It may have been re-evaluated out of the funnel.'}
             </p>
           </div>
+        ) : isCompromise ? (
+          <CompromiseBody finding={findingQuery.data!} onOpenAsset={onOpenAsset} />
         ) : (
-          <Body detail={query.data} onOpenAsset={onOpenAsset} />
+          <Body detail={alertQuery.data!} onOpenAsset={onOpenAsset} />
         )}
       </SheetContent>
     </Sheet>

@@ -1,11 +1,13 @@
 import { useEffect, useMemo } from 'react';
 import {
   Ban,
+  Biohazard,
   CalendarClock,
   Flame,
   Loader2,
   RefreshCw,
   ShieldAlert,
+  ShieldX,
   Skull,
   Target,
   TrendingUp,
@@ -206,6 +208,52 @@ export function DashboardView() {
               ))}
             </CardContent>
           </Card>
+        </div>
+      </section>
+
+      {/* 0b — Compromise findings: a categorically different signal from the
+          KEV/EPSS funnel above (malicious code already in your build, not a
+          probability of future exploitation), so it gets its own tile rather
+          than folding into openActionableCount — see PHASE6-CONTRACT §8. */}
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-bold tracking-tight text-foreground">
+            <Biohazard className="h-5 w-5 text-destructive" aria-hidden="true" />
+            Compromise Findings
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Known-malicious packages and malware hashes matched in your estate.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard
+            label="Compromise Findings"
+            value={
+              <span className="flex items-baseline gap-2">
+                {formatInteger(s.compromiseFindingCount)}
+                {s.compromiseCreatedLast7d > 0 && (
+                  <span className="text-xs font-semibold text-destructive">
+                    +{formatInteger(s.compromiseCreatedLast7d)} / 7d
+                  </span>
+                )}
+              </span>
+            }
+            icon={Biohazard}
+            accent="red"
+          />
+          <StatCard
+            label="Confirmed"
+            value={formatInteger(s.compromiseConfirmedCount)}
+            icon={ShieldX}
+            accent="red"
+          />
+          <StatCard
+            label="Investigate (decayed)"
+            value={formatInteger(s.compromiseInvestigateCount)}
+            icon={ShieldAlert}
+            accent="amber"
+          />
         </div>
       </section>
 

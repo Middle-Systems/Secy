@@ -37,6 +37,9 @@ import type {
   ComplianceReportDetail,
   ComplianceReportSummary,
   ComplianceStatus,
+  CompromiseConfidence,
+  CompromiseFinding,
+  CompromiseType,
   CreateProductPayload,
   DashboardStats,
   EPSS,
@@ -76,6 +79,11 @@ export const queryKeys = {
     all: ['actionable'] as const,
     page: (params: ActionablePageParams) => [...queryKeys.actionable.all, 'page', params] as const,
     detail: (id: string) => [...queryKeys.actionable.all, 'detail', id] as const,
+  },
+  compromise: {
+    all: ['compromise'] as const,
+    list: (params: CompromiseListParams) => [...queryKeys.compromise.all, 'list', params] as const,
+    detail: (id: string) => [...queryKeys.compromise.all, 'detail', id] as const,
   },
   products: {
     all: ['products'] as const,
@@ -159,6 +167,13 @@ const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
   // once its COMPLIANCE_SCAN job succeeds, and it audits an asset — the same asset Infrastructure
   // shows, correlated through the same funnel — so assets and actionable both need invalidating too.
   COMPLIANCE_SCAN: [queryKeys.compliance.all, queryKeys.actionable.all, queryKeys.assets.all],
+  // Phase 6: a finished feed pull only updates the mirrored corpus (browsable through
+  // ThreatController, not surfaced in this UI) — it does NOT retro-scan existing SBOMs/assets
+  // (PHASE6-CONTRACT §9, deferred), so findings only appear on the next correlation of a scope.
+  // Invalidated anyway so a manual re-scan afterwards reads fresh data, and because detection
+  // may have already fired inline off an unrelated upload that raced the ingest.
+  MALICIOUS_PACKAGES: [queryKeys.actionable.all, queryKeys.compromise.all, queryKeys.stats.all],
+  MALWARE_HASHES: [queryKeys.actionable.all, queryKeys.compromise.all, queryKeys.stats.all],
 };
 
 /**
@@ -396,6 +411,123 @@ export function useActionableDetail(
     queryFn: () => api.get<ActionableDetail>(`/actionable/${id}`),
     enabled: Boolean(id),
     ...options,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Supply-chain compromise findings (Phase 6)                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Query params for `GET /api/compromise` beyond `page` / `size`. */
+export interface CompromiseListParams {
+  page: number;
+  size: number;
+  type?: CompromiseType;
+  confidence?: CompromiseConfidence;
+  productId?: string;
+  assetId?: string;
+  componentId?: string;
+  /** Defaults to `ACTIVE` server-side when omitted. */
+  lifecycleState?: 'ACTIVE' | 'AUTO_RESOLVED';
+}
+
+/**
+ * GET /api/compromise — the compromise findings corpus, paged and filtered.
+ *
+ * Sort is fixed server-side (confidence, then IOC freshness desc, then
+ * createdAt desc — the same fixed order `/actionable` uses for its compromise
+ * tier). `componentId` matches either an SBOM or asset component, so an id
+ * lifted off an `/actionable` row works without knowing which kind it is.
+ * Keeps the previous page visible while the next loads, same as
+ * {@link useActionablePage}.
+ */
+export function useCompromiseFindings(
+  { page = 0, size = DEFAULT_PAGE_SIZE, ...filters }: Partial<CompromiseListParams> = {},
+  options?: QueryOverrides<Page<CompromiseFinding>>,
+) {
+  const params: CompromiseListParams = { page, size, ...filters };
+  return useQuery({
+    queryKey: queryKeys.compromise.list(params),
+    queryFn: () =>
+      api.get<Page<CompromiseFinding>>('/compromise', { query: { page, size, ...filters } }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+/**
+ * GET /api/compromise/:id — full detail for one compromise finding. List row
+ * and detail body are the same shape (see {@link CompromiseFinding}).
+ *
+ * Disabled until `id` is truthy. **This is the hook an `/actionable` row with
+ * `itemType: 'COMPROMISE'` must route its detail panel to** — its `id` is a
+ * `compromise_finding` id, not a `vulnerability_alert` id, and
+ * `GET /actionable/:id` 404s on it (PHASE6-CONTRACT §4.5).
+ */
+export function useCompromiseFindingDetail(
+  id: string | undefined,
+  options?: QueryOverrides<CompromiseFinding>,
+) {
+  return useQuery({
+    queryKey: queryKeys.compromise.detail(id ?? ''),
+    queryFn: () => api.get<CompromiseFinding>(`/compromise/${id}`),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+/**
+ * POST /api/threat/ingest/malicious-packages — queues a mirror of the OpenSSF
+ * Malicious Packages corpus (~310 MB, full refresh every run). Returns the
+ * `Job` to poll; see {@link useIngestKev} for the full enqueue → poll → settle
+ * contract.
+ */
+export function useIngestMaliciousPackages(options?: MutationOverrides<Job, void>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<Job>('/threat/ingest/malicious-packages'),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * POST /api/threat/ingest/malware-hashes — queues a pull of the abuse.ch
+ * MalwareBazaar CSV export. Returns the `Job` to poll; see {@link useIngestKev}
+ * for the full contract.
+ */
+export function useIngestMalwareHashes(options?: MutationOverrides<Job, void>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<Job>('/threat/ingest/malware-hashes'),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * POST /api/threat/ingest — convenience wrapper that queues *both* threat
+ * feeds at once and resolves with both jobs, in order
+ * `[MALICIOUS_PACKAGES, MALWARE_HASHES]`. Prefer the two feed-specific hooks
+ * above when a caller wants to poll/label each independently (e.g. two
+ * separate {@link IngestButton}s); this one is for a single "sync everything"
+ * control that doesn't need per-feed progress.
+ */
+export function useIngestThreat(options?: MutationOverrides<Job[], void>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<Job[]>('/threat/ingest'),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
   });
 }
 

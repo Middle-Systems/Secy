@@ -3,8 +3,8 @@ import { Loader2, ShieldAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAssetDetail, useDeleteAsset } from '@/api/queries';
-import type { AssetDetail } from '@/api/types';
-import { actionableColumns } from '@/components/actionable/actionable.columns';
+import type { ActionableItemType, AssetDetail } from '@/api/types';
+import { actionableColumns, actionableRowClassName } from '@/components/actionable/actionable.columns';
 import { ActionableDetailPanel } from '@/components/actionable/ActionableDetailPanel';
 import { DataTable } from '@/components/common/DataTable';
 import {
@@ -59,6 +59,8 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
 function Body({ detail, onDeleted }: { detail: AssetDetail; onDeleted: () => void }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [selectedActionableId, setSelectedActionableId] = useState<string | null>(null);
+  const [selectedActionableType, setSelectedActionableType] =
+    useState<ActionableItemType | null>(null);
   const deleteAsset = useDeleteAsset();
   const actionColumns = actionableColumns();
   const items = detail.actionableItems.content;
@@ -127,7 +129,11 @@ function Body({ detail, onDeleted }: { detail: AssetDetail; onDeleted: () => voi
             columns={actionColumns}
             data={items}
             getRowId={(entry) => entry.id}
-            onRowClick={(entry) => setSelectedActionableId(entry.id)}
+            onRowClick={(entry) => {
+              setSelectedActionableId(entry.id);
+              setSelectedActionableType(entry.itemType);
+            }}
+            rowClassName={actionableRowClassName}
             emptyMessage="Nothing actionable on this asset right now."
           />
         )}
@@ -161,8 +167,12 @@ function Body({ detail, onDeleted }: { detail: AssetDetail; onDeleted: () => voi
 
       <ActionableDetailPanel
         id={selectedActionableId}
+        itemType={selectedActionableType}
         onOpenChange={(open) => {
-          if (!open) setSelectedActionableId(null);
+          if (!open) {
+            setSelectedActionableId(null);
+            setSelectedActionableType(null);
+          }
         }}
       />
     </div>
