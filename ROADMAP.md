@@ -198,7 +198,34 @@ Each phase is independently shippable and leaves `master` green
 - Docker vuln alerts feed the same enrichment/funnel as SBOM alerts where a CVE is present.
 - **UI**: build the **Compliance** view — report list, per-report control breakdown (pass/fail/skip), misconfiguration list with remediation, linked vuln actionable items.
 
-### Phase 6 — Supply-chain compromise detection
+### Phase 6 — Supply-chain compromise detection  ✅ shipped 2026-09-20
+
+> **Landed** on `feat/phase-1-actionable-core` (commits `509a931` backend, `d0f7514` UI):
+> `CompromiseFinding` gets its own table (not a row in `vulnerability_alert` — no CVE means no
+> EPSS/KEV/exploit-maturity/fix-state for that funnel to evaluate). Two feeds: OpenSSF Malicious
+> Packages pulled from the `ossf/malicious-packages` repo archive directly (measured, not
+> assumed — the OSV per-ecosystem export already silently carries 97% of these as `MAL-*` records
+> `OsvMatcher` discards for having no CVE alias); abuse.ch MalwareBazaar via its keyless CSV
+> exports (the documented JSON API needs a key, the CSVs don't). `GET /actionable` becomes a
+> typed union (`itemType: VULNERABILITY | COMPROMISE`) — every Phase 1-5 field keeps its exact
+> JSON path, compromise findings sort in their own tier above every vulnerability row (no
+> synthetic score invented to make "probability of future exploitation" and "already in your
+> build" commensurable). IOC aging demotes stale `CONFIRMED`/`LIKELY` findings to `INVESTIGATE`,
+> never deletes. UI: Malicious badge + red row treatment in Actionable Items, a branching detail
+> panel routing to `GET /compromise/{id}`, and a dashboard tile. Backend 298 tests green (+35);
+> UI green.
+> **Note on this phase's cost:** the backend core agent used over 1M tokens across its runs —
+> 2-3x any other phase — because it did real external research (verifying actual feed formats
+> against live sources rather than assuming) and found/fixed two pre-existing self-invocation
+> transaction bugs unprompted. The UI agent was interrupted mid-task by the usage limit; rather
+> than re-running it, the remaining wiring (view filters, detail-panel branching, dashboard tile)
+> was finished directly in the session instead of via a fresh subagent.
+> **Deferred:** no retro-scan on a feed ingest (findings appear on the next correlation of a
+> scope, not immediately — flagged as the most likely thing an operator notices first);
+> `evidence_files[]` hashes and scanner-reported digests not ingested; two pre-existing
+> self-invocation transaction bugs found but left unfixed outside this phase's own code;
+> Liquibase `011` (like `004`-`010`) not yet run against a real PostgreSQL. Not merged to
+> `master`.
 *Goal: distinguish "you have a vulnerability" from "you are shipping something known-bad."*
 
 - **Feeds**: **OpenSSF Malicious Packages** (`ossf/malicious-packages`, OSV-format — reuses the Phase 2 OSV ingester almost verbatim) into `malicious_package` (ecosystem, name, affected versions, category, origin, references); **abuse.ch MalwareBazaar** SHA-256 hashes into `malware_hash` (hash, family, first/last seen, confidence). `POST /threat/ingest` + scheduled refresh.
