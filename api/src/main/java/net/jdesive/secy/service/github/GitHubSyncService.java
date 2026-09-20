@@ -34,15 +34,20 @@ import java.util.concurrent.CancellationException;
  * {@code saveVulnerabilities} is. Each repo's persistence goes through {@code SBOMService}'s own
  * short {@code @Transactional} methods instead, called one repo at a time.
  *
- * <h2>One bad repo does not fail the sync</h2>
+ * <h2>One bad repo does not fail the sync — and "nothing to sync" is not a failure either</h2>
  *
- * <p>A 404 (dependency graph not enabled, or nothing discoverable) or a 403 (rate limit or a
- * scope-restricted token) on one repo is logged and counted, not thrown — same for any other
- * per-repo failure (a malformed SPDX document, a transient network blip). Only when literally every
- * targeted repo fails does this method throw, so the connector's status can go {@code FAILED} rather
- * than a misleadingly cheerful {@code COMPLETED} with zero repos ingested — mirroring
- * {@code Asset}'s "a failed scan degrades to stale, not empty" philosophy that
- * {@code ConnectorSyncService} implements around this call.
+ * <p>A 404 (dependency graph not enabled, or nothing discoverable), a 403 (rate limit or a
+ * scope-restricted token) or any other per-repo failure (a malformed SPDX document, a transient
+ * network blip) on one repo is logged and counted, not thrown. This method only throws — so the
+ * connector's status can go {@code FAILED}, mirroring {@code Asset}'s "a failed scan degrades to
+ * stale, not empty" philosophy that {@code ConnectorSyncService} implements around this call — when
+ * there is real evidence something is broken: at least one 403 or genuine error among the targets.
+ * <b>An every-repo-404 outcome is deliberately NOT a failure.</b> A 404 is GitHub's own answer for
+ * "no dependency graph data here" — a repo with no manifest GitHub recognises, or (very commonly
+ * for a personal account) Dependency graph simply never turned on, since private repos do not get
+ * it by default. Treating that the same as a broken token/network would fail a connector every
+ * time purely because of what the target repos happen to contain, which is not the connector's
+ * fault and not something retrying fixes.
  */
 @Slf4j
 @Service
@@ -116,15 +121,29 @@ public class GitHubSyncService {
                 succeeded, targeted.size(), notFound, forbidden, errored, componentsTotal);
         log.info(message);
 
-        if (!targeted.isEmpty() && succeeded == 0) {
-            // Every targeted repo failed — ConnectorSyncService's catch turns this into
-            // SourceConnector.STATUS_FAILED. An empty target list (nothing matched the allowlist, or
-            // the org has no repos) is NOT this case: there was nothing to fail at, so it falls
-            // through to a normal COMPLETED-with-zero-repos result below.
+        // FAILED means "something is broken" (a bad/scope-restricted token, a genuine error) — not
+        // "GitHub legitimately has nothing to give us". A 404 is GitHub's own answer for "no
+        // dependency graph data for this repo", which is a completely ordinary outcome: the repo
+        // has no manifest GitHub recognises, or (commonly, for a personal account) Dependency graph
+        // was never turned on for it — private repos in particular do NOT get it enabled by default.
+        // Every-repo-404 is therefore a clean, if uneventful, sync: a real "0 of N had data"
+        // COMPLETED, not a scary stack trace. `forbidden`/`errored` are the actual "something is
+        // wrong" signals (a missing/invalid SECY_GITHUB_TOKEN, an out-of-scope token, a transient
+        // failure) and still fail the connector.
+        if (!targeted.isEmpty() && succeeded == 0 && (forbidden > 0 || errored > 0)) {
+            // ConnectorSyncService's catch turns this into SourceConnector.STATUS_FAILED. An empty
+            // target list (nothing matched the allowlist, or the org has no repos) never reaches
+            // here either — there was nothing to fail at, so it falls through to COMPLETED below.
             throw new IllegalStateException("Every repo failed to sync: " + message);
         }
 
-        return new IngestResult(succeeded, message);
+        String resultMessage = (succeeded == 0 && notFound > 0)
+                ? message + " — no repo had GitHub Dependency Graph data available. Check that a repo "
+                  + "has a manifest GitHub recognises, and that Dependency graph is turned on under "
+                  + "Settings → Security → Code security and analysis (private repos require "
+                  + "this explicitly; it is not on by default)."
+                : message;
+        return new IngestResult(succeeded, resultMessage);
     }
 
     /** GitHub's {@code full_name} is always {@code owner/repo}; fall back defensively if it is ever missing. */

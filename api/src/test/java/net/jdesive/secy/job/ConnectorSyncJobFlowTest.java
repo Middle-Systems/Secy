@@ -254,6 +254,44 @@ class ConnectorSyncJobFlowTest {
         assertThat(productRepository.findAll()).isEmpty();
     }
 
+    /**
+     * The regression this test pins: every repo 404ing (no dependency graph — the ordinary state
+     * for a personal account's repos, where Dependency graph is off by default for private repos)
+     * is NOT the same as every repo being broken. Zero {@code forbidden}/{@code errored} means
+     * there is no evidence anything is wrong with the connector or its token, so the sync completes
+     * cleanly with zero components rather than failing the whole connector on a misleading
+     * {@code IllegalStateException}.
+     */
+    @Test
+    @WithMockUser
+    void everyRepoHavingNoDependencyGraphCompletesCleanlyRatherThanFailing() throws Exception {
+        github.expect(requestTo(ORG_REPOS_URL)).andRespond(withSuccess(reposJson(), MediaType.APPLICATION_JSON));
+        github.expect(requestTo("https://api.github.com/repos/demo-org/service-a/dependency-graph/sbom"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON).body("{\"message\":\"Not Found\"}"));
+        github.expect(requestTo("https://api.github.com/repos/demo-org/service-b/dependency-graph/sbom"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON).body("{\"message\":\"Not Found\"}"));
+        github.expect(requestTo("https://api.github.com/repos/demo-org/service-c/dependency-graph/sbom"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON).body("{\"message\":\"Not Found\"}"));
+
+        UUID connectorId = connector("demo-org", null);
+
+        mockMvc.perform(post("/connectors/{id}/sync", connectorId)).andExpect(status().isAccepted());
+        UUID jobId = jobRepository.findAll().get(0).getId();
+        jobRunner.poll();
+
+        Job finished = awaitJobTerminal(jobId);
+        assertThat(finished.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(finished.getMessage()).contains("0/3 repos ingested").contains("Dependency Graph data available");
+
+        SourceConnector completed = sourceConnectorRepository.findById(connectorId).orElseThrow();
+        assertThat(completed.getStatus()).isEqualTo(SourceConnector.STATUS_COMPLETED);
+        assertThat(completed.getLastSyncedAt()).isNotNull();
+        assertThat(productRepository.findAll()).isEmpty();
+    }
+
     /* ------------------------------------------------------------------ */
     /* Per-invocation concurrency                                         */
     /* ------------------------------------------------------------------ */
