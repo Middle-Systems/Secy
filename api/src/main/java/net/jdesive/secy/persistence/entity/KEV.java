@@ -27,17 +27,20 @@ public class KEV {
 
     private LocalDateTime added;
 
-    @Column(length = 1024)
+    // Free-text prose from the CISA feed, no documented length cap (see Liquibase 012 — a real
+    // ingest overflowed varchar(1024) on requiredActions). columnDefinition, not @Column(length=),
+    // since these map to `text` in Postgres and Hibernate's `length` is meaningless without it.
+    @Column(columnDefinition = "text")
     private String description;
 
-    @Column(length = 1024)
+    @Column(columnDefinition = "text")
     private String requiredActions;
 
     private Date dueDate;
 
     private String knownRansomwareCampaignUse;
 
-    @Column(length = 1024)
+    @Column(columnDefinition = "text")
     private String notes;
 
 }
