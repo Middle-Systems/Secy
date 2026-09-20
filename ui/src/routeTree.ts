@@ -1,6 +1,7 @@
 import { rootRoute } from '@/routes/__root';
 import { appLayoutRoute } from '@/routes/_app';
 import { complianceRoute } from '@/routes/compliance';
+import { connectorsRoute } from '@/routes/connectors';
 import { cveDatabaseRoute } from '@/routes/cve-database';
 import { dashboardRoute } from '@/routes/dashboard';
 import { epssDatabaseRoute } from '@/routes/epss-database';
@@ -45,5 +46,6 @@ export const routeTree = rootRoute.addChildren([
     productCatalogRoute,
     infrastructureRoute,
     complianceRoute,
+    connectorsRoute,
   ]),
 ]);

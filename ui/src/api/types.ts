@@ -79,7 +79,8 @@ export type JobType =
   | 'ASSET_SCAN'
   | 'COMPLIANCE_SCAN'
   | 'MALICIOUS_PACKAGES'
-  | 'MALWARE_HASHES';
+  | 'MALWARE_HASHES'
+  | 'CONNECTOR_SYNC';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
@@ -835,3 +836,50 @@ export interface ComplianceReportDetail {
   misconfigurations: Page<ComplianceMisconfiguration>;
   actionableItems: Page<ActionableItem>;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Source connectors — /api/connectors (Phase 6b)                             */
+/* -------------------------------------------------------------------------- */
+
+/** The kind of connector. `GITHUB` is the only value for this pass. */
+export type SourceConnectorType = 'GITHUB';
+
+/**
+ * A connector's own sync lifecycle, mirrors `SourceConnector.STATUS_*` on the
+ * backend. The wire value is `null` before the first sync ever runs — the
+ * connector was created but nothing has been fetched yet.
+ */
+export type SourceConnectorStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+/**
+ * Where Secy should look for inventory on its own — a GitHub org/user whose
+ * repos are enumerated and each repo's dependency-graph SBOM pulled and
+ * ingested through the same path a manual SPDX upload takes.
+ *
+ * Deliberately carries no credential: the token is read server-side from
+ * `SECY_GITHUB_TOKEN`, never entered in the UI (see `application.properties`'s
+ * env-var-driven config).
+ */
+export interface SourceConnector {
+  id: string;
+  type: SourceConnectorType;
+  /** Operator-given label, e.g. "Acme org". */
+  name: string;
+  /** GitHub org or user login to enumerate repos under. */
+  scope: string;
+  /** `owner/repo` names to restrict the sync to. Empty means every repo under `scope`. */
+  repoAllowlist: string[];
+  /** Null until the first sync ever runs. */
+  status: SourceConnectorStatus | null;
+  /** ISO-8601 date-time string. Null until the first sync finishes. */
+  lastSyncedAt: string | null;
+  /** The `CONNECTOR_SYNC` job currently (or most recently) syncing this connector. */
+  jobId: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+}
+
+/** `POST /api/connectors` body — does not trigger a sync. */
+export type CreateSourceConnectorPayload = Pick<SourceConnector, 'type' | 'name' | 'scope'> & {
+  repoAllowlist?: string[];
+};

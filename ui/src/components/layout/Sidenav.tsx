@@ -6,6 +6,7 @@ import {
   Database,
   Flame,
   Percent,
+  Plug,
   Server,
   Target,
 } from 'lucide-react';
@@ -51,6 +52,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Product Catalog', to: '/product-catalog', icon: Boxes },
       { label: 'Infrastructure', to: '/infrastructure', icon: Server },
+      { label: 'Connectors', to: '/connectors', icon: Plug },
     ],
   },
   {

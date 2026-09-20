@@ -41,6 +41,7 @@ import type {
   CompromiseFinding,
   CompromiseType,
   CreateProductPayload,
+  CreateSourceConnectorPayload,
   DashboardStats,
   EPSS,
   Job,
@@ -50,6 +51,7 @@ import type {
   Page,
   PageParams,
   Product,
+  SourceConnector,
   Vulnerability,
   VulnerabilityAlert,
 } from './types';
@@ -113,6 +115,11 @@ export const queryKeys = {
     misconfigurations: (id: string, params: ComplianceMisconfigurationListParams) =>
       [...queryKeys.compliance.all, 'misconfigurations', id, params] as const,
   },
+  connectors: {
+    all: ['connectors'] as const,
+    list: (params: ConnectorListParams) => [...queryKeys.connectors.all, 'list', params] as const,
+    detail: (id: string) => [...queryKeys.connectors.all, 'detail', id] as const,
+  },
 } as const;
 
 /** Options a caller may override on any of the query hooks below. */
@@ -174,6 +181,16 @@ const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
   // may have already fired inline off an unrelated upload that raced the ingest.
   MALICIOUS_PACKAGES: [queryKeys.actionable.all, queryKeys.compromise.all, queryKeys.stats.all],
   MALWARE_HASHES: [queryKeys.actionable.all, queryKeys.compromise.all, queryKeys.stats.all],
+  // Phase 6b: a sync creates/updates Products and their SBOMs (one repo -> one Product, the exact
+  // manual-SPDX-upload ingest path), which flow into the actionable funnel exactly like SBOM_UPLOAD's
+  // components/alerts do — so this invalidates the same keys SBOM_UPLOAD does, plus the connector's
+  // own list (status/lastSyncedAt only change once the sync actually finishes).
+  CONNECTOR_SYNC: [
+    queryKeys.connectors.all,
+    queryKeys.products.all,
+    queryKeys.actionable.all,
+    queryKeys.stats.all,
+  ],
 };
 
 /**
@@ -875,6 +892,105 @@ export function useRescanComplianceReport(options?: MutationOverrides<Job, strin
     ...options,
     onSuccess: (...args) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Source connectors (Phase 6b)                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Filters accepted by `GET /api/connectors`. */
+export interface ConnectorListParams {
+  page: number;
+  size: number;
+}
+
+/**
+ * GET /api/connectors?page&size — connectors newest first, each carrying its
+ * own `status`/`lastSyncedAt` from its most recent sync. Keeps the previous
+ * page visible while the next loads, same as {@link useAssets}.
+ */
+export function useConnectors(
+  { page = 0, size = DEFAULT_PAGE_SIZE }: Partial<ConnectorListParams> = {},
+  options?: QueryOverrides<Page<SourceConnector>>,
+) {
+  const params: ConnectorListParams = { page, size };
+  return useQuery({
+    queryKey: queryKeys.connectors.list(params),
+    queryFn: () => api.get<Page<SourceConnector>>('/connectors', { query: { page, size } }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+/** GET /api/connectors/:id — one connector. Disabled until `id` is truthy. */
+export function useConnectorDetail(
+  id: string | undefined,
+  options?: QueryOverrides<SourceConnector>,
+) {
+  return useQuery({
+    queryKey: queryKeys.connectors.detail(id ?? ''),
+    queryFn: () => api.get<SourceConnector>(`/connectors/${id}`),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+/**
+ * POST /api/connectors — registers a connector but does not trigger a sync;
+ * call {@link useSyncConnector} for that. Invalidates the connector list on
+ * success.
+ */
+export function useCreateConnector(
+  options?: MutationOverrides<SourceConnector, CreateSourceConnectorPayload>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (connector: CreateSourceConnectorPayload) =>
+      api.post<SourceConnector>('/connectors', connector),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.connectors.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * POST /api/connectors/:id/sync — queues a `CONNECTOR_SYNC` job that
+ * enumerates the connector's repos and pulls each one's dependency-graph
+ * SBOM. Resolves with the `Job` to poll — same enqueue → poll → settle shape
+ * as {@link useScanAssetTrivy}; the real cache invalidation (connectors,
+ * products, actionable, stats) happens via `useJob`'s `FEED_KEYS` mechanism
+ * once the job actually succeeds.
+ */
+export function useSyncConnector(options?: MutationOverrides<Job, string>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Job>(`/connectors/${id}/sync`),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * DELETE /api/connectors/:id — removes the connector row only. Does NOT
+ * delete the Products/SBOMs it created (see `SourceConnectorController`) —
+ * those are real inventory now, independent of whichever connector
+ * introduced them. Invalidates the connector list on success.
+ */
+export function useDeleteConnector(options?: MutationOverrides<void, string>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/connectors/${id}`),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.connectors.all });
       options?.onSuccess?.(...args);
     },
   });
