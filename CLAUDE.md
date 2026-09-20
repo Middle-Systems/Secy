@@ -21,8 +21,10 @@ items: KEV-listed OR EPSS > 0.1.
   - `localhost:8080`.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
   `/osv`, `/osv/ingest`, `/cve-list/ingest`, `/products`, `/sbom/{id}/vulnerabilities`,
-  `/actionable`, `/actionable/{id}`, `/stats/dashboard`, `/assets`, `/assets/scan/{trivy,grype}`,
-  `/compliance/reports` (+ `/{id}`, `/{id}/scan`, `/{id}/misconfigurations`).
+  `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
+  `/assets`, `/assets/scan/{trivy,grype}`, `/compliance/reports` (+ `/{id}`, `/{id}/scan`,
+  `/{id}/misconfigurations`), `/connectors` (+ `/{id}`, `/{id}/sync` — Phase 6b agentless source
+  connectors, GitHub only for now).
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via
@@ -64,7 +66,9 @@ devcontainer reaches it via `host.docker.internal:5433` — `SECY_DB_URL` is pre
   `SECY_ACTIONABLE_EPSS_THRESHOLD` (default `0.1` — an alert is actionable when its CVE is
   KEV-listed **or** its EPSS score is strictly above this),
   `SECY_OSV_ECOSYSTEMS` (comma-separated OSV ecosystem names mirrored by `POST /osv/ingest`;
-  default `npm,Maven,PyPI,Go,NuGet,RubyGems,crates.io,Packagist,Hex,Pub`)
+  default `npm,Maven,PyPI,Go,NuGet,RubyGems,crates.io,Packagist,Hex,Pub`),
+  `SECY_GITHUB_TOKEN` (a GitHub PAT with `repo` + `read:org` scope, one token instance-wide, used
+  by every `SourceConnector` — blank means a connector sync 401/403s per-repo, skipped not fatal)
   (see `application.properties` for defaults). For local dev, copy
   `application-local.properties.example` → `application-local.properties` (git-ignored) and fill in
   the NVD key. Never put a real secret in a tracked file.
