@@ -239,6 +239,44 @@ Each phase is independently shippable and leaves `master` green
 - **IOC aging**: a nightly job re-checks `iocLastSeen` / confidence; findings whose IOC has decayed below a threshold move to `INVESTIGATE` rather than disappearing.
 - **Tests**: malicious-package match on a crafted SBOM; hash match; funnel-promotion test; aging-transition test.
 
+### Phase 6b — Source & cloud connectors (agentless discovery)
+*Goal: manual upload stays (CI/CD keeps working the same way), but Secy can also be pointed at a
+source and pull its own inventory — no agent to install, no pipeline step to add.*
+
+Pulled forward from Phase 10's stretch bullet and expanded, per direction locked in
+2026-09-20: **GitHub first**, **agentless only** for this pass — a real host agent (package
+inventory + host-level IOC checks) stays deferred, tracked below under Phase 10.
+
+- **`SourceConnector`** — `type` (`GITHUB` first; `AWS`/`AZURE` are later adapters on the same
+  shape), a name, scope (org/user + optional repo allowlist for GitHub), `lastSyncedAt`, `status`.
+  Credential is a single env-var token per provider (`SECY_GITHUB_TOKEN`, PAT with `repo` +
+  `read:org` scope) — the same "env var, never in a tracked file" pattern `NVD_API_KEY` already
+  uses, not a new secrets-at-rest system. A `SourceConnector` row holds *where to look*, not the
+  credential itself.
+- **GitHub sync**: enumerate repos for the configured org/user (respecting an allowlist), and for
+  each repo pull `GET /repos/{owner}/{repo}/dependency-graph/sbom` — GitHub's own **SPDX SBOM per
+  repo**, which is exactly Phase 3's `SpdxNormalizer` input. No new parser: one repo → one
+  `Product` (created/reused by repo full name) → the *exact* `SbomParser`/`SBOMService` ingest
+  path a manual SPDX upload already takes, including the Phase 3 cross-version component identity
+  and the Phase 2 correlation pass. A repo with no dependency graph enabled (or none supported)
+  logs and is skipped, not failed.
+- **Job-queue wiring**: `JobType.CONNECTOR_SYNC`, per-invocation (not singleton — same
+  non-dedup pattern as `SBOM_UPLOAD`/`ASSET_SCAN`), so multiple connectors can sync concurrently.
+  `POST /connectors` (create), `GET /connectors` (list + `lastSyncedAt`/status), `POST
+  /connectors/{id}/sync` (202 + Job, mirrors the SBOM/asset upload contract), `DELETE
+  /connectors/{id}`.
+- **UI**: a Connectors settings view — add a connector (provider + org/repo scope; the token is
+  read from the env var server-side, never entered in the UI), list with last-sync status, a Sync
+  Now button with the same queue→poll→settle UX as SBOM/asset upload, delete.
+- **Scheduling**: manual trigger only in this pass (`POST /connectors/{id}/sync`); folding
+  connector syncs into Phase 8's cron scheduler is a small addition once that phase lands, not a
+  reason to block this one.
+- **AWS / Azure**: not built in this pass. The `SourceConnector` shape and job pattern are
+  designed so each is "write an adapter that enumerates targets and produces `NormalizedComponent`s
+  or scanner-shaped findings", reusing Phase 4's `Asset`/Trivy-Grype pipeline for cloud resources
+  (EC2/ECR/Lambda, Azure VMs/ACR) rather than SBOM ingest — tracked as the next slice of this
+  phase, not re-litigated from scratch.
+
 ### Phase 7 — Triage workflow
 - **State machine** on every alert / compromise finding: `OPEN → ACKNOWLEDGED → SNOOZED(until) → RESOLVED | FALSE_POSITIVE`, plus `assignee` and free-text `notes` / comment thread with an append-only history table.
 - **API**: `PATCH /actionable/{id}` (state, assignee), `POST /actionable/{id}/comments`, bulk `PATCH /actionable` for multi-select.
@@ -272,7 +310,12 @@ Each phase is independently shippable and leaves `master` green
 
 ### Phase 10 — Stretch: cloud & agent discovery
 *May ship as a fast-follow after the MVP tag.*
-- Lightweight inventory sync from a cloud provider API (start with one: AWS) and/or a minimal agent that reports installed packages.
+
+> The agentless cloud-connector half of this phase was pulled forward to **Phase 6b**
+> (GitHub shipped there; AWS/Azure adapters are 6b's next slice, same `SourceConnector` shape).
+> What's left here is specifically the **host agent** — deliberately deferred out of 6b.
+- A minimal agent that reports installed packages from a host, for environments a cloud API or a
+  CI-embedded scan can't reach.
 - Populates `Asset`s and their components; everything downstream already works.
 - The agent can also do host-level IOC checks (file-hash / path / YARA) — the local half of vNext IOC validation.
 
@@ -293,7 +336,8 @@ Phase 9  ─────────────▶ (start compose/CI early, fin
 Phase 10 ──▶            (stretch)
 ```
 
-Recommended path: **1 → 2 → 9a (compose + CI skeleton) → 3 → 4 → 5 → 6 → 7 → 8 → 9b (polish + docs) → tag MVP → 10**.
+Recommended path: **1 → 2 → 9a (compose + CI skeleton) → 3 → 4 → 5 → 6 → 6b (connectors, GitHub
+first) → 7 → 8 → 9b (polish + docs) → tag MVP → 10 (host agent + remaining cloud adapters)**.
 
 The **feed ingesters** (OSV and CVE-5.1/Vulnrichment in Phase 2, the exploit index in Phase 1,
 malicious-packages + malware hashes in Phase 6) have no dependency on the alert model and can be
