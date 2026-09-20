@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.service.CompromiseAgingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -64,6 +66,12 @@ public class JobScheduler {
     /**
      * Fail jobs stuck in {@code RUNNING} — a worker that died, or an app killed mid-ingest, would
      * otherwise hold that feed's active slot forever and block every later enqueue.
+     *
+     * <p>The {@code fixedDelayString}/{@code initialDelayString} both reuse {@code stale-timeout}
+     * deliberately — see {@link #reapStaleJobsOnStartup}, which exists precisely because that
+     * shared value means the FIRST check after a restart does not happen for a full
+     * {@code stale-timeout} (default 30 minutes), even when the row it needs to catch has been
+     * stale since before this process even started.
      */
     @Scheduled(fixedDelayString = "${secy.jobs.stale-timeout:PT30M}", initialDelayString = "${secy.jobs.stale-timeout:PT30M}")
     public void reapStaleJobs() {
@@ -74,6 +82,32 @@ public class JobScheduler {
             }
         } catch (Exception e) {
             log.error("Stale ingestion job reaper failed", e);
+        }
+    }
+
+    /**
+     * Run the stale-job reaper once, right after startup, instead of waiting for
+     * {@link #reapStaleJobs}'s first scheduled tick.
+     *
+     * <p>A row can only be {@code RUNNING} in this fresh process's eyes if some earlier process
+     * claimed it and then vanished without finishing — this JVM has never dispatched anything yet.
+     * There is no "maybe it's still legitimately running" case to protect against the way there is
+     * mid-uptime, so there is no reason to wait out a full {@code stale-timeout} window before the
+     * first look: a job left {@code RUNNING} by a killed process (a crash, an operator killing the
+     * backend, a container restart) is caught on the very next tick after the app comes back up,
+     * not up to {@code stale-timeout} later on top of however long it had already been stuck.
+     * {@link #reapStaleJobs}'s own periodic schedule is unchanged and still the one that catches a
+     * job that goes stale <em>during</em> this process's uptime.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void reapStaleJobsOnStartup() {
+        try {
+            int reaped = jobService.reapStale(properties.getStaleTimeout());
+            if (reaped > 0) {
+                log.warn("Reaped {} ingestion job(s) left RUNNING by a previous process", reaped);
+            }
+        } catch (Exception e) {
+            log.error("Startup stale-job reap failed", e);
         }
     }
 
