@@ -239,7 +239,20 @@ Each phase is independently shippable and leaves `master` green
 - **IOC aging**: a nightly job re-checks `iocLastSeen` / confidence; findings whose IOC has decayed below a threshold move to `INVESTIGATE` rather than disappearing.
 - **Tests**: malicious-package match on a crafted SBOM; hash match; funnel-promotion test; aging-transition test.
 
-### Phase 6b — Source & cloud connectors (agentless discovery)
+### Phase 6b — Source & cloud connectors (agentless discovery)  🔄 GitHub slice shipped 2026-09-20
+
+> **GitHub connector landed** on `feat/phase-1-actionable-core` (commits `b94fe5a`+`95a61fd`
+> backend, `d3ba37a` UI). `SourceConnector` (type `GITHUB` only), one instance-wide
+> `SECY_GITHUB_TOKEN`, `GitHubSyncService` pulls each repo's real GitHub-generated SPDX SBOM
+> (`GET .../dependency-graph/sbom`) through the *exact* manual-upload ingest path — verified
+> directly against the live GitHub API (the SPDX doc nests under `"sbom"`, pagination is a real
+> `Link` header, `/orgs/{user}/repos` 404s and falls back to `/users/{login}/repos`). `POST
+> /connectors` + `/{id}/sync` (202 + a per-invocation `CONNECTOR_SYNC` job) + `GET`/`DELETE`; a
+> real Connectors settings view. Deleting a connector does not cascade to the `Product`s/SBOMs it
+> created. Liquibase `013`.
+> **Still open, tracked here — not yet built:** AWS and Azure adapters on the same
+> `SourceConnector` shape (the next slice); the host agent stays in Phase 10, deliberately
+> deferred. Not merged to `master`.
 *Goal: manual upload stays (CI/CD keeps working the same way), but Secy can also be pointed at a
 source and pull its own inventory — no agent to install, no pipeline step to add.*
 
