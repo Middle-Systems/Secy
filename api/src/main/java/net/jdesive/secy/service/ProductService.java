@@ -30,6 +30,20 @@ public class ProductService {
         return productRepository.save(product);
     }
 
+    /**
+     * Find the product named {@code name}, or create it. Backs the GitHub connector sync, where
+     * {@code owner/repo} is the product name and re-syncing the same repo must land on the same
+     * product rather than raising a unique-constraint violation on {@code products.name}.
+     */
+    @Transactional
+    public Product findOrCreateByName(String name) {
+        return productRepository.findByName(name).orElseGet(() -> {
+            Product product = new Product();
+            product.setName(name);
+            return productRepository.save(product);
+        });
+    }
+
     @Transactional
     public void deleteProduct(UUID id) {
         productRepository.deleteById(id);

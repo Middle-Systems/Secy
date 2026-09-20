@@ -10,6 +10,7 @@ import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.service.AssetScanIngestJobService;
 import net.jdesive.secy.service.ComplianceScanIngestJobService;
+import net.jdesive.secy.service.ConnectorSyncService;
 import net.jdesive.secy.service.CveListIngestService;
 import net.jdesive.secy.service.EPSSService;
 import net.jdesive.secy.service.ExploitIndexService;
@@ -84,6 +85,8 @@ public class JobRunner {
 
     private final MalwareHashIngestService malwareHashIngestService;
 
+    private final ConnectorSyncService connectorSyncService;
+
     /**
      * Jobs this instance has dispatched and not yet finished. Purely a local capacity guard so the
      * poller does not submit more work than the pool can hold — correctness of the claim itself
@@ -106,7 +109,8 @@ public class JobRunner {
                      AssetScanIngestJobService assetScanIngestJobService,
                      ComplianceScanIngestJobService complianceScanIngestJobService,
                      MaliciousPackageIngestService maliciousPackageIngestService,
-                     MalwareHashIngestService malwareHashIngestService) {
+                     MalwareHashIngestService malwareHashIngestService,
+                     ConnectorSyncService connectorSyncService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -122,6 +126,7 @@ public class JobRunner {
         this.complianceScanIngestJobService = complianceScanIngestJobService;
         this.maliciousPackageIngestService = maliciousPackageIngestService;
         this.malwareHashIngestService = malwareHashIngestService;
+        this.connectorSyncService = connectorSyncService;
     }
 
     /**
@@ -217,6 +222,9 @@ public class JobRunner {
             case SBOM_UPLOAD -> sbomIngestJobService.ingest(id, progress);
             case ASSET_SCAN -> assetScanIngestJobService.ingest(id, progress);
             case COMPLIANCE_SCAN -> complianceScanIngestJobService.ingest(id, progress);
+            // Looks up which SourceConnector by job id, same as the three above — see
+            // SourceConnectorService.beginSyncJob / SourceConnector.jobId.
+            case CONNECTOR_SYNC -> connectorSyncService.ingest(id, progress);
         };
     }
 

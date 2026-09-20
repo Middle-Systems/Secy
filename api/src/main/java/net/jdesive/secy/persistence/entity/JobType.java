@@ -75,6 +75,18 @@ public enum JobType {
      * constraint is per type: sharing would mean a multi-minute malicious-packages pull blocking a
      * one-second hash refresh. See {@code ThreatController} for the rest of that reasoning.
      */
-    MALWARE_HASHES
+    MALWARE_HASHES,
+
+    /**
+     * One {@code SourceConnector} sync — enumerate its repos and pull each one's dependency-graph
+     * SBOM (Phase 6b).
+     *
+     * <p>Per-invocation like {@link #SBOM_UPLOAD}, {@link #ASSET_SCAN} and {@link #COMPLIANCE_SCAN},
+     * not a singleton feed pull: several connectors may sync concurrently, so this is enqueued via
+     * {@code JobService.create()} and excluded from {@code uq_ingestion_job_active_type} by migration
+     * {@code 013}. 14 characters — fits the {@code varchar(32)} {@code ingestion_job.type} column
+     * {@code 011e} already widened for {@code MALICIOUS_PACKAGES} with no further migration needed.
+     */
+    CONNECTOR_SYNC
 
 }

@@ -43,6 +43,7 @@ Claimed prefixes:
 | `010`  | `docker_compliance_report.asset_id` + job-queue columns + control pass/fail/skip counts, new `docker_compliance_control`, misconfig `status`/`check_id`/`control_id`, report-vulnerability identity fix, drops the dead `docker_vulnerabitity_alert` / `docker_misconfiguration_alert` tables, COMPLIANCE_SCAN excluded from `uq_ingestion_job_active_type` (Phase 5) |
 | `011`  | `malicious_package` (+ `_version`, `_range`), `malware_hash`, `sbom_component_hash` / `asset_component_hash`, `compromise_finding` with its own XOR check, and `ingestion_job.type` widened to `varchar(32)` for `MALICIOUS_PACKAGES` (Phase 6) |
 | `012`  | `kev.description` / `required_actions` / `notes` widened `varchar(1024)` → `text` — a real KEV ingest overflowed the cap on CISA's free-text prose |
+| `013`  | `source_connector` + `source_connector_repo_allowlist`, `CONNECTOR_SYNC` excluded from `uq_ingestion_job_active_type` (Phase 6b) |
 
 Pick the next free number if yours isn't listed.
 

@@ -46,6 +46,11 @@ import java.util.UUID;
  * <p>Format detection/parsing itself lives in {@code SbomParser} and is identical for both phases —
  * everything downstream of it, in both phases, is identical for CycloneDX and SPDX uploads.
  *
+ * <p>Phase 6b added a third entry point, {@link #ingestDocument}, which is what {@link #ingestUploadJob}
+ * itself now delegates to after its find-by-job-id/re-parse step: the normalized-model → storage
+ * persistence work alone, for a caller ({@code GitHubSyncService}) that already holds a loaded
+ * {@code SBOM} row and a parsed {@link NormalizedSbom} and has no job-id indirection to unwind.
+ *
  * <h2>Component rows are per-SBOM; component <em>identity</em> is per-product</h2>
  *
  * <p>Each upload still writes its own {@code sbom_component} rows. That is deliberate, not
@@ -84,6 +89,11 @@ public class SBOMService {
      * controller's {@code 202} response to carry a real id, and to hold what {@link #ingestUploadJob}
      * will need to finish the work. No components are attached yet, and {@code status} is
      * {@code QUEUED} — matching the job's own starting state.
+     *
+     * <p>{@code rawBody} and {@code jobId} may both be null — {@code GitHubSyncService} does this for
+     * each repo it syncs: it already has the parsed {@link NormalizedSbom} in hand within its own
+     * {@code CONNECTOR_SYNC} job, so there is nothing to stash for a later job-id lookup, and it calls
+     * {@link #ingestDocument} directly rather than {@link #ingestUploadJob}.
      */
     @Transactional
     public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
@@ -111,10 +121,8 @@ public class SBOMService {
     /**
      * The persistence half of an upload, run inside the {@code SBOM_UPLOAD} job rather than on the
      * request thread. Looks the placeholder row up by the job that owns it, re-parses the raw body
-     * {@code SBOMController} stashed on it, and creates the real component/tool rows. On success this
-     * publishes the same {@link SbomUploadedEvent} the old synchronous path did, so
-     * {@code VulnerabilityScanner}'s async scan (and the {@code PROCESSING -> COMPLETED/FAILED}
-     * transition it performs) is unaffected.
+     * {@code SBOMController} stashed on it, and hands off to {@link #ingestDocument} for the actual
+     * component persistence.
      *
      * @throws IllegalStateException if the job's SBOM row is missing or its raw body is already
      *                               consumed/absent
@@ -124,10 +132,34 @@ public class SBOMService {
         SBOM sbom = sbomRepository.findByJobId(jobId)
                 .orElseThrow(() -> new IllegalStateException("No SBOM row is waiting on upload job " + jobId));
 
+        NormalizedSbom document = reparse(sbom.getPendingRawBody());
+        return ingestDocument(sbom, document, progress);
+    }
+
+    /**
+     * The normalized-model → storage persistence step itself, factored out of {@link #ingestUploadJob}
+     * (Phase 6b) so a caller that already holds a loaded {@link SBOM} row and a freshly-parsed
+     * {@link NormalizedSbom} — rather than a job id and a stashed raw body to re-parse — can drive the
+     * exact same component/identity/correlation path a manual upload takes.
+     *
+     * <p>{@code GitHubSyncService} is that caller: a {@code CONNECTOR_SYNC} job processes many repos,
+     * not one document behind one job id, so the {@code find-by-jobId-then-reparse} indirection
+     * {@link #ingestUploadJob} needs — which exists only because {@code SBOMController} must hand back
+     * a real id before the document is actually processed — does not apply. The connector sync builds
+     * its own placeholder row per repo (see {@link #createPlaceholder}, called with a null job id/raw
+     * body since nothing is pending on it) and a document it has already fetched and parsed
+     * synchronously within the job, then calls this directly, once per repo.
+     *
+     * <p>Sets {@code sbom.status} to {@code PROCESSING} itself (both callers start from a row whose
+     * status is not yet that), persists the components/tools, clears any stashed raw body, and
+     * publishes {@link SbomUploadedEvent} exactly as before — so {@code VulnerabilityScanner}'s async
+     * scan (and the {@code PROCESSING -> COMPLETED/FAILED} transition it performs) fires for both
+     * callers identically.
+     */
+    @Transactional
+    public IngestResult ingestDocument(SBOM sbom, NormalizedSbom document, JobProgress progress) {
         sbom.setStatus("PROCESSING");
         sbomRepository.saveAndFlush(sbom);
-
-        NormalizedSbom document = reparse(sbom.getPendingRawBody());
 
         if (document.rootComponent() != null) {
             sbom.setComponent(toEntity(document.rootComponent(), sbom));
