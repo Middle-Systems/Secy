@@ -22,7 +22,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
@@ -96,9 +98,39 @@ public class NVDService {
        return IngestResult.of(processed, "CVE records");
     }
 
-    /** @return how many vulnerabilities were written */
+    /**
+     * @return how many vulnerabilities were written
+     *
+     * <p>Upserts against the existing managed row rather than constructing a fresh detached
+     * {@link Vulnerability} and blind-{@code saveAll}ing it. That used to be safe only because
+     * nothing ever populated {@code Vulnerability.alerts} before Phase 1's correlation existed to
+     * write real {@link net.jdesive.secy.persistence.entity.VulnerabilityAlert} rows against a CVE.
+     * Once a CVE has real alerts, a re-ingest that builds a brand-new object (whose {@code alerts}
+     * field is Java {@code null} — it has no field initializer, unlike its sibling collections
+     * {@code references}/{@code cpeOperators}, which default to an empty list) and saves it makes
+     * Spring Data fall through to {@code entityManager.merge(...)}, since this entity's
+     * {@code @Id} is manually assigned rather than {@code @GeneratedValue} and so is never "new" by
+     * Spring Data's default check. Merging a {@code null} collection onto a managed entity that
+     * already has a real, tracked {@code orphanRemoval=true} collection for that role is exactly
+     * what Hibernate refuses at flush time with "A collection with cascade=all-delete-orphan was no
+     * longer referenced by the owning entity instance" — it cannot tell "leave it alone" from "the
+     * caller means to delete everything in it" from a bare {@code null}, and correctly declines to
+     * guess. See the KEV/OSV/malicious-package ingesters for the same upsert-onto-a-managed-row
+     * pattern; {@code references}/{@code cpeOperators} are cleared and rebuilt <em>in place</em> on
+     * the managed instance below for the identical reason — replacing the field with a new
+     * {@code ArrayList} would risk the same disconnect the moment either of them ever needs an
+     * {@code orphanRemoval} child of its own.
+     */
     @Transactional
     public int saveVulnerabilities(NVDCVEResult result) {
+
+        List<String> ids = result.getVulnerabilities().stream()
+                .map(v -> v.getCve().getId())
+                .toList();
+        Map<String, Vulnerability> existing = new HashMap<>();
+        for (Vulnerability v : this.vulnerabilityRepository.findAllById(ids)) {
+            existing.put(v.getId(), v);
+        }
 
         List<Vulnerability> vulns = new ArrayList<>();
         for (NVDVulnerability nvdVulnerability : result.getVulnerabilities()) {
@@ -110,8 +142,16 @@ public class NVDService {
                 description = descriptionOptional.get().getValue();
             }
 
-            Vulnerability vulnerability = new Vulnerability();
+            // Reuse the managed row when one exists. `alerts` is never read or written here — it
+            // is exclusively owned by CorrelationService — so whatever Hibernate already tracks for
+            // it on a managed instance is simply never touched, never dirtied, never at risk.
+            Vulnerability vulnerability = existing.getOrDefault(nvdVulnerability.getCve().getId(), new Vulnerability());
             vulnerability.setId(nvdVulnerability.getCve().getId());
+            // references/cpeOperators are fully re-derived from NVD on every ingest -- clear the
+            // managed collection in place (not a field replacement) so a re-ingest of an existing
+            // CVE correctly drops stale entries via orphanRemoval instead of accumulating duplicates.
+            vulnerability.getReferences().clear();
+            vulnerability.getCpeOperators().clear();
             vulnerability.setPublished(LocalDateTime.ofInstant(nvdVulnerability.getCve().getPublished().toInstant(), ZoneId.systemDefault()));
             vulnerability.setLastModified(LocalDateTime.ofInstant(nvdVulnerability.getCve().getLastModified().toInstant(), ZoneId.systemDefault()));
             vulnerability.setSourceIdentifier(nvdVulnerability.getCve().getSourceIdentifier());
