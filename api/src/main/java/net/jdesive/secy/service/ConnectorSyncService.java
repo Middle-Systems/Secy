@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.SourceConnector;
+import net.jdesive.secy.service.aws.AwsSyncService;
+import net.jdesive.secy.service.azure.AzureSyncService;
 import net.jdesive.secy.service.github.GitHubSyncService;
 import org.springframework.stereotype.Service;
 
@@ -31,12 +33,16 @@ public class ConnectorSyncService {
 
     private final SourceConnectorService sourceConnectorService;
     private final GitHubSyncService gitHubSyncService;
+    private final AwsSyncService awsSyncService;
+    private final AzureSyncService azureSyncService;
 
     public IngestResult ingest(UUID jobId, JobProgress progress) {
         SourceConnector connector = sourceConnectorService.beginSyncJob(jobId);
         try {
             IngestResult result = switch (connector.getType()) {
                 case GITHUB -> gitHubSyncService.sync(connector, progress);
+                case AWS -> awsSyncService.sync(connector, progress);
+                case AZURE -> azureSyncService.sync(connector, progress);
             };
             sourceConnectorService.completeSync(connector.getId());
             return result;

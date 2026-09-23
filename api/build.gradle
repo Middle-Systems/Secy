@@ -38,6 +38,20 @@ dependencies {
 	// correlation engine. `transitive = false` keeps it to one 58 KB jar: ComparableVersion and its
 	// inner Item classes reference nothing outside java.*, verified against the class file.
 	implementation('org.apache.maven:maven-artifact:3.9.9') { transitive = false }
+	// AWS connector (Phase 6b): EC2/ECR/Lambda enumeration + Inspector v2 findings. AWS's SigV4
+	// request signing is genuinely unsafe to hand-roll (unlike GitHub's/Azure's plain bearer-token
+	// auth, which is just an HTTP header) -- this is the one deliberate exception to "plain REST +
+	// the shared RestTemplate" every other integration in this codebase uses. Scoped to the four
+	// service modules actually needed, not the full SDK bundle; versions come from the BOM below.
+	implementation platform('software.amazon.awssdk:bom:2.28.11')
+	implementation 'software.amazon.awssdk:ec2'
+	implementation 'software.amazon.awssdk:ecr'
+	implementation 'software.amazon.awssdk:lambda'
+	implementation 'software.amazon.awssdk:inspector2'
+	// Azure connector (Phase 6b) needs no SDK: Azure Resource Manager and Defender for Cloud are
+	// both plain OAuth2-bearer-token REST APIs, so AzureSyncService authenticates with a
+	// client-credentials token fetch through the shared RestTemplate, matching every other
+	// integration's style. See AzureSyncService.
 	// JWT — api on the compile classpath, impl/jackson resolved at runtime only.
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'

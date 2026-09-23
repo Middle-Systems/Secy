@@ -14,6 +14,12 @@ public enum AssetComponentSource {
      * OS/firmware/appliance case where no package manager exists to enumerate. Carries no PURL, so it
      * correlates through the CPE fallback path by construction.
      */
-    DECLARED_CPE
+    DECLARED_CPE,
+
+    /** Reported by Amazon Inspector v2 against an AWS connector's enumerated assets (Phase 6b). */
+    AWS_INSPECTOR,
+
+    /** Reported by Microsoft Defender for Cloud against an Azure connector's enumerated assets (Phase 6b). */
+    AZURE_DEFENDER
 
 }
