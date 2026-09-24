@@ -9,6 +9,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+
 /**
  * Every {@code @Scheduled} in the application, kept apart from the logic it triggers so tests can
  * drive {@link JobRunner}, {@link JobService} and {@link CompromiseAgingService} directly instead of
@@ -102,7 +104,11 @@ public class JobScheduler {
     @EventListener(ApplicationReadyEvent.class)
     public void reapStaleJobsOnStartup() {
         try {
-            int reaped = jobService.reapStale(properties.getStaleTimeout());
+            // Duration.ZERO, not staleTimeout: a job's age is irrelevant here. Any RUNNING row is
+            // guaranteed orphaned regardless of how recently it started, since this JVM has claimed
+            // nothing yet -- unlike reapStaleJobs's periodic tick, which must tolerate a job that is
+            // still legitimately in flight.
+            int reaped = jobService.reapStale(Duration.ZERO);
             if (reaped > 0) {
                 log.warn("Reaped {} ingestion job(s) left RUNNING by a previous process", reaped);
             }

@@ -12,6 +12,7 @@ import net.jdesive.secy.service.KEVService;
 import net.jdesive.secy.service.NVDService;
 import net.jdesive.secy.service.MaliciousPackageIngestService;
 import net.jdesive.secy.service.MalwareHashIngestService;
+import net.jdesive.secy.service.CompromiseAgingService;
 import net.jdesive.secy.service.OsvIngestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,12 @@ class IngestionJobFlowTest {
 
     @Autowired
     private JobRunner jobRunner;
+
+    @Autowired
+    private IngestionJobProperties jobProperties;
+
+    @Autowired
+    private CompromiseAgingService compromiseAgingService;
 
     @Autowired
     private JobRepository jobRepository;
@@ -317,6 +324,24 @@ class IngestionJobFlowTest {
         assertThat(jobService.reapStale(Duration.ofMinutes(30))).isZero();
         assertThat(reload(done.getId()).getStatus()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(reload(fresh.getId()).getStatus()).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    void theStartupReaperFailsARunningJobRegardlessOfAge() {
+        // Orphaned seconds ago, not staleTimeout's 30 minutes ago -- a job this fresh is exactly
+        // what the periodic reaper (theReaperLeavesFinishedAndFreshJobsAlone) is right to leave
+        // alone, but a freshly-booted JVM cannot have claimed it, so the startup reaper must not
+        // wait out that same window before catching it.
+        Job orphaned = jobService.enqueue(JobType.NVD, "alice@example.com");
+        jobService.claim(orphaned.getId());
+
+        // secy.jobs.scheduler-enabled=false in the test profile keeps JobScheduler out of the
+        // context (see its class Javadoc), so build one directly rather than autowiring it.
+        new JobScheduler(jobRunner, jobService, jobProperties, compromiseAgingService).reapStaleJobsOnStartup();
+
+        Job reaped = reload(orphaned.getId());
+        assertThat(reaped.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(reaped.getMessage()).contains("presumed dead");
     }
 
     /* ---------------------------------------------------------------------- */
