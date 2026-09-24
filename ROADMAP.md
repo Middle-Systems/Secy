@@ -127,6 +127,16 @@ Each milestone is independently shippable and leaves `master` green
 ### M0 — Tenancy foundation (schema only)
 *Goal: nothing built from here on needs a tenancy retrofit.*
 
+**Status: SHIPPED.** `Tenant` + `TenantMembership` (explicit many-to-many join, not a bare
+`@ManyToMany`) landed, along with a `TenantOwnedEntity` mapped superclass that `Product`, `SBOM`,
+`Asset`, `VulnerabilityAlert`, `CompromiseFinding`, `SourceConnector` and `DockerComplianceReport`
+now extend. Migration `018` creates `tenant`/`tenant_membership`, adds `tenant_id` to all seven
+tables, backfills everything onto one default tenant, and replaces the old global
+`products.name`/`asset (type, name)` uniqueness with tenant-scoped equivalents. Every new user
+joins the default tenant on registration. `tenant_id`/`tenant` are `@JsonIgnore`d, so neither
+appears in a response nor can be set by a client. No enforcement, tenant CRUD, tenant switching, or
+per-tenant roles yet — that's Tenancy hardening, still ahead.
+
 - **`Tenant` entity**: id, name, slug, created-at. `User` gains a tenant membership (many-to-many
   if a user can belong to more than one tenant — decide during implementation; the design doc's
   "a user can hold more than one role and switch views" is per-tenant, not cross-tenant).

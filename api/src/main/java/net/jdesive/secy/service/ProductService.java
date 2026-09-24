@@ -33,7 +33,9 @@ public class ProductService {
     /**
      * Find the product named {@code name}, or create it. Backs the GitHub connector sync, where
      * {@code owner/repo} is the product name and re-syncing the same repo must land on the same
-     * product rather than raising a unique-constraint violation on {@code products.name}.
+     * product rather than raising a unique-constraint violation on {@code products.name}, which is
+     * unique per tenant (not globally) as of migration 018 — unambiguous while only the default
+     * tenant exists.
      */
     @Transactional
     public Product findOrCreateByName(String name) {

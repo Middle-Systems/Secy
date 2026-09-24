@@ -46,7 +46,7 @@ import java.util.UUID;
 @Setter
 @Entity
 @Table(name = "source_connector")
-public class SourceConnector {
+public class SourceConnector extends TenantOwnedEntity {
 
     /** Created, no sync has ever run. */
     public static final String STATUS_QUEUED = "QUEUED";

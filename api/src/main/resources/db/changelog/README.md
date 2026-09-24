@@ -44,6 +44,11 @@ Claimed prefixes:
 | `011`  | `malicious_package` (+ `_version`, `_range`), `malware_hash`, `sbom_component_hash` / `asset_component_hash`, `compromise_finding` with its own XOR check, and `ingestion_job.type` widened to `varchar(32)` for `MALICIOUS_PACKAGES` (Phase 6) |
 | `012`  | `kev.description` / `required_actions` / `notes` widened `varchar(1024)` → `text` — a real KEV ingest overflowed the cap on CISA's free-text prose |
 | `013`  | `source_connector` + `source_connector_repo_allowlist`, `CONNECTOR_SYNC` excluded from `uq_ingestion_job_active_type` (Phase 6b) |
+| `014`  | `triage_state` / `snoozed_until` / `assignee_id` on `vulnerability_alert` and `compromise_finding` + new `triage_event` append-only history table, with its own XOR check (Phase 7) |
+| `015`  | `nvd_ingest_cursor` (NVD incremental ingest high-water mark) + indexes for the ingest write path and the CPE-join/dashboard read paths |
+| `016`  | `nvd_ingest_cursor.oldest_swept_modified_date` — the backward-bootstrap sweep's own frontier |
+| `017`  | `ingestion_job.last_progress_at` — heartbeat the stale-job reaper checks instead of total running duration |
+| `018`  | `tenant` + `tenant_membership` (backfilled for every existing account) + `tenant_id` on `products`, `sbom`, `asset`, `vulnerability_alert`, `compromise_finding`, `source_connector`, `docker_compliance_report` (backfilled onto one default tenant), replacing the old global `products.name` and `asset (type, name)` uniqueness with tenant-scoped equivalents — schema only, no enforcement yet (ROADMAP.md, M0 — "Tenancy foundation") |
 
 Pick the next free number if yours isn't listed.
 

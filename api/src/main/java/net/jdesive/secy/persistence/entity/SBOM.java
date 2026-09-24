@@ -21,7 +21,7 @@ import java.util.UUID;
 @Transactional
 @Table(name = "sbom")
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-public class SBOM {
+public class SBOM extends TenantOwnedEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

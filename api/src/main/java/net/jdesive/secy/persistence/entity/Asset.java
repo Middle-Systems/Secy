@@ -28,17 +28,18 @@ import java.util.UUID;
  *
  * <h2>Re-scanning updates in place</h2>
  *
- * <p>An asset is keyed by {@code (type, name)}: scanning {@code acme/api:1.4.2} again finds the same
- * row, upserts its components by identity, and reconciles its alerts — the same lifecycle an SBOM
- * re-upload gets. That is the whole reason {@code AssetComponent} carries an identity key.
+ * <p>An asset is keyed by {@code (tenant, type, name)}: scanning {@code acme/api:1.4.2} again finds
+ * the same row, upserts its components by identity, and reconciles its alerts — the same lifecycle
+ * an SBOM re-upload gets. That is the whole reason {@code AssetComponent} carries an identity key.
  */
 @Getter
 @Setter
 @Entity
 @Table(name = "asset",
-        uniqueConstraints = @UniqueConstraint(name = "uq_asset_type_name", columnNames = {"type", "name"}))
+        uniqueConstraints = @UniqueConstraint(name = "uq_asset_tenant_type_name",
+                columnNames = {"tenant_id", "type", "name"}))
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-public class Asset {
+public class Asset extends TenantOwnedEntity {
 
     /** A scan that has been accepted but not yet ingested. Mirrors {@code SBOM.status}. */
     public static final String STATUS_QUEUED = "QUEUED";

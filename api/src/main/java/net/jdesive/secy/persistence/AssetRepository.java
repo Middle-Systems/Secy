@@ -18,7 +18,9 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     /**
      * The upsert key for a scan: re-scanning {@code acme/api:1.4.2} must land on the same row, or the
-     * alert lifecycle has nothing to reconcile against.
+     * alert lifecycle has nothing to reconcile against. {@code (type, name)} is unique per tenant
+     * ({@code uq_asset_tenant_type_name}, migration 018), not globally — unambiguous while only the
+     * default tenant exists; M1 must switch callers to a tenant-qualified lookup.
      */
     Optional<Asset> findByTypeAndName(AssetType type, String name);
 

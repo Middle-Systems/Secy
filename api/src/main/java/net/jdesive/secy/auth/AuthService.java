@@ -7,7 +7,11 @@ import net.jdesive.secy.auth.dto.LoginRequest;
 import net.jdesive.secy.auth.dto.RegisterRequest;
 import net.jdesive.secy.auth.dto.UserResponse;
 import net.jdesive.secy.persistence.AppUserRepository;
+import net.jdesive.secy.persistence.TenantMembershipRepository;
+import net.jdesive.secy.persistence.TenantRepository;
 import net.jdesive.secy.persistence.entity.Role;
+import net.jdesive.secy.persistence.entity.Tenant;
+import net.jdesive.secy.persistence.entity.TenantMembership;
 import net.jdesive.secy.persistence.entity.User;
 import net.jdesive.secy.security.AppUserDetailsService;
 import net.jdesive.secy.security.AuthProperties;
@@ -29,6 +33,8 @@ import java.util.UUID;
 public class AuthService {
 
     private final AppUserRepository users;
+    private final TenantRepository tenants;
+    private final TenantMembershipRepository tenantMemberships;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
@@ -69,6 +75,13 @@ public class AuthService {
 
         User saved = users.save(user);
         log.info("Registered account {} with role {}", saved.getEmail(), saved.getRole());
+
+        // M0: every new account joins the one default tenant — there is no tenant selection yet.
+        // See ROADMAP.md's "M0 -- Tenancy foundation (schema only)".
+        TenantMembership membership = new TenantMembership();
+        membership.setTenant(tenants.getReferenceById(Tenant.DEFAULT_TENANT_ID));
+        membership.setUser(saved);
+        tenantMemberships.save(membership);
 
         return tokenFor(saved);
     }

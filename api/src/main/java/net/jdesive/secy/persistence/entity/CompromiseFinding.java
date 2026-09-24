@@ -72,10 +72,11 @@ import java.util.UUID;
                 @Index(name = "idx_compromise_finding_asset_component", columnList = "asset_component_id"),
                 @Index(name = "idx_compromise_finding_state", columnList = "lifecycle_state"),
                 @Index(name = "idx_compromise_finding_ioc", columnList = "ioc_id"),
-                @Index(name = "idx_compromise_finding_triage_state", columnList = "triage_state")
+                @Index(name = "idx_compromise_finding_triage_state", columnList = "triage_state"),
+                @Index(name = "idx_compromise_finding_tenant", columnList = "tenant_id")
         })
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-public class CompromiseFinding {
+public class CompromiseFinding extends TenantOwnedEntity {
 
     /** The one severity a compromise finding ever has. See the class note. */
     public static final String SEVERITY = "CRITICAL";

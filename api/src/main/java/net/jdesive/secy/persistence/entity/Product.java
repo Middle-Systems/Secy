@@ -16,15 +16,16 @@ import java.util.UUID;
 @Setter
 @Entity
 @Transactional
-@Table(name = "products")
+@Table(name = "products",
+        uniqueConstraints = @UniqueConstraint(name = "uq_products_tenant_name", columnNames = {"tenant_id", "name"}))
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-public class Product {
+public class Product extends TenantOwnedEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String name;
 
     @Column(length = 1024)

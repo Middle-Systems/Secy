@@ -10,9 +10,11 @@ import java.util.UUID;
 public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     /**
-     * {@code products.name} carries a DB-level unique constraint (see the baseline schema), so this
-     * is the find-or-create key a connector sync uses to land repeated syncs of the same
-     * {@code owner/repo} on the same product — see {@code GitHubSyncService}.
+     * {@code products.name} is unique per tenant ({@code uq_products_tenant_name}, migration 018),
+     * not globally — this is unambiguous while only the default tenant exists, but M1 must switch
+     * callers to a tenant-qualified lookup once a second tenant can exist. Backs the find-or-create
+     * key a connector sync uses to land repeated syncs of the same {@code owner/repo} on the same
+     * product — see {@code GitHubSyncService}.
      */
     Optional<Product> findByName(String name);
 
