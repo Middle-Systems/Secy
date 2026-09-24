@@ -176,6 +176,10 @@ public class AwsSyncService {
     }
 
     /** The instance's {@code Name} tag when it has one, else its instance id. */
+    // TODO(M3): AWS resource tags (including this instance's own tag set) are not read into
+    // product resolution yet — assets stay unassociated with a Product here. See ROADMAP.md's M3
+    // section and ProductTaggingService.resolveProduct, the seam M3 should call into once cloud
+    // resource-tag reading lands. No behavior change yet.
     private static String ec2AssetName(Instance instance) {
         for (Tag tag : instance.tags()) {
             if ("Name".equals(tag.key()) && tag.value() != null && !tag.value().isBlank()) {

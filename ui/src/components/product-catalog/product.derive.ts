@@ -28,6 +28,15 @@ export function activeSbom(product: Product): SBOM | undefined {
   return product.sboms?.find((sbom) => sbom.active === true);
 }
 
+/**
+ * Every active SBOM on a product. For a normal product this is at most one (see {@link activeSbom});
+ * the "Unassigned" bucket (M1a) deliberately keeps every SBOM it ever receives active, since each
+ * one is an unrelated document rather than a version of "the product's" SBOM.
+ */
+export function activeSboms(product: Product): SBOM[] {
+  return (product.sboms ?? []).filter((sbom) => sbom.active === true);
+}
+
 /** Every alert across an SBOM's components, flattened. */
 export function sbomAlerts(sbom: SBOM | undefined): VulnerabilityAlert[] {
   return (sbom?.components ?? []).flatMap((component) => component.vulnerabilityAlerts ?? []);
@@ -68,8 +77,40 @@ export function isProductScanning(product: Product): boolean {
   return (product.sboms ?? []).some((sbom) => sbomStatusLabel(sbom.status) === 'Scanning');
 }
 
+/**
+ * Worst-first roll-up of several SBOMs' status displays, for the "Unassigned" bucket card (M1a),
+ * which can have many active SBOMs at once rather than the usual single one.
+ */
+function aggregateStatusDisplay(statuses: SbomStatusDisplay[]): SbomStatusDisplay {
+  if (statuses.includes('Scanning')) return 'Scanning';
+  if (statuses.includes('Failed')) return 'Failed';
+  if (statuses.includes('Complete')) return 'Complete';
+  return 'Unknown';
+}
+
 /** Resolve the SBOM-derived roll-ups for one product. */
 export function deriveProduct(product: Product): DerivedProduct {
+  if (product.unassigned) {
+    // The bucket (M1a) can hold many active SBOMs at once — roll up over all of them rather than
+    // picking a single "the" active SBOM, which doesn't exist for it.
+    const actives = activeSboms(product);
+    const lastScanned = actives
+      .map((sbom) => sbom.lastScannedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+    return {
+      ...product,
+      activeSbom: undefined,
+      activeSbomId: undefined,
+      activeSbomStatus: undefined,
+      activeSbomStatusDisplay: aggregateStatusDisplay(actives.map((sbom) => sbomStatusLabel(sbom.status))),
+      lastScanned,
+      vulnerabilityCount: actives.reduce((sum, sbom) => sum + countAlerts(sbom), 0),
+      actionableCount: actives.reduce((sum, sbom) => sum + countActionableAlerts(sbom), 0),
+    };
+  }
+
   const sbom = activeSbom(product);
   return {
     ...product,
@@ -88,6 +129,16 @@ export function deriveProducts(products: Product[]): DerivedProduct[] {
   return [...products]
     .map(deriveProduct)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
+ * Put the "Unassigned" bucket (M1a) first, keeping every other product in whatever order it
+ * arrived in (typically {@link deriveProducts}' newest-first order). Pure — does not mutate.
+ */
+export function sortProductsUnassignedFirst<T extends { unassigned?: boolean }>(products: T[]): T[] {
+  const bucket = products.filter((product) => product.unassigned);
+  const rest = products.filter((product) => !product.unassigned);
+  return [...bucket, ...rest];
 }
 
 /** SBOM history rows, newest upload first. */

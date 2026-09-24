@@ -182,6 +182,10 @@ public class AzureSyncService {
             }
             try {
                 List<ScannerFinding> findings = findingsFor(vm, assessments, accessToken, vm.name());
+                // TODO(M3): Azure resource tags are not read into product resolution yet — assets
+                // stay unassociated with a Product here. See ROADMAP.md's M3 section and
+                // ProductTaggingService.resolveProduct, the seam M3 should call into once cloud
+                // resource-tag reading lands. No behavior change yet.
                 Asset asset = assetService.findOrCreate(AssetType.HOST, vm.name(), null, "Azure Defender", null);
                 applyFindings(asset, findings, progress);
                 assetsCreated++;

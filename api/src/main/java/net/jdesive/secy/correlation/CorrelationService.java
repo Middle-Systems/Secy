@@ -158,20 +158,29 @@ public class CorrelationService {
      * Nothing does that today — the scan runs once per upload, on the SBOM the upload just made
      * active — and the behaviour is the correct reading of "last scan wins" if anything ever does.
      *
-     * <p>Must run in a transaction: the component collection and the alert relations are lazy.
+     * <p><b>Except the Unassigned bucket (M1a).</b> A bucket SBOM has no sibling versions — every
+     * upload that lands there is an unrelated document, not a new version of "the product's" SBOM —
+     * so product-wide reconciliation would be wrong: correlating one bucket SBOM would auto-resolve
+     * another bucket SBOM's alerts just because they happen to share a product row. An SBOM with no
+     * product at all (only ever a test fixture) gets the same SBOM-scoped treatment, for the same
+     * reason: there is no product-wide "truth" to reconcile against.
+     *
+     * <p>Must run in a transaction: the component collection and the alert relations are lazy (this
+     * is also why it's safe to call {@code sbom.getProduct().isUnassigned()} here — the lazy
+     * {@code Product} proxy initializes within this transaction).
      */
     @Transactional
     public CorrelationSummary correlate(SBOM sbom) {
         UUID sbomId = sbom.getId();
+        boolean productScoped = sbom.getProduct() != null && !sbom.getProduct().isUnassigned();
         UUID productId = sbom.getProduct() == null ? null : sbom.getProduct().getId();
-        log.info("Correlating SBOM {} (product {})", sbomId, productId);
+        log.info("Correlating SBOM {} (product {}, scope {})", sbomId, productId,
+                productScoped ? "product" : "sbom");
 
         // Existing alerts, keyed the way a match is keyed. This is what makes the run idempotent.
-        // Product-scoped so alerts survive a new SBOM version; an SBOM with no product (only ever a
-        // test fixture) falls back to its own scope, which is the Phase 2 behaviour.
-        List<VulnerabilityAlert> priorAlerts = productId == null
-                ? alertRepository.findAllBySbomIdForCorrelation(sbomId)
-                : alertRepository.findAllByProductIdForCorrelation(productId);
+        List<VulnerabilityAlert> priorAlerts = productScoped
+                ? alertRepository.findAllByProductIdForCorrelation(productId)
+                : alertRepository.findAllBySbomIdForCorrelation(sbomId);
 
         // identity -> the component row of THIS SBOM that carries it, so a carried-forward alert is
         // re-pointed at current evidence rather than at a superseded version's row.

@@ -49,6 +49,7 @@ Claimed prefixes:
 | `016`  | `nvd_ingest_cursor.oldest_swept_modified_date` — the backward-bootstrap sweep's own frontier |
 | `017`  | `ingestion_job.last_progress_at` — heartbeat the stale-job reaper checks instead of total running duration |
 | `018`  | `tenant` + `tenant_membership` (backfilled for every existing account) + `tenant_id` on `products`, `sbom`, `asset`, `vulnerability_alert`, `compromise_finding`, `source_connector`, `docker_compliance_report` (backfilled onto one default tenant), replacing the old global `products.name` and `asset (type, name)` uniqueness with tenant-scoped equivalents — schema only, no enforcement yet (ROADMAP.md, M0 — "Tenancy foundation") |
+| `019`  | `product_tag_config` (per-tenant product tag key, seeded with the default `secy:product`) + `products.unassigned` / `products.tag_value` (with a partial unique index keeping one Unassigned bucket per tenant) + a backfilled Unassigned-bucket product per existing tenant (ROADMAP.md, M1a — "Tag-driven products") |
 
 Pick the next free number if yours isn't listed.
 

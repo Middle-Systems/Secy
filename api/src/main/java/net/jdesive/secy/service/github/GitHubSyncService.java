@@ -90,6 +90,10 @@ public class GitHubSyncService {
                     notFound++;
                 } else {
                     NormalizedSbom document = sbomParser.parse(sbomNode);
+                    // TODO(M2): once GitHub sync reads repo topics/custom-properties, replace this
+                    // one-product-per-repo lookup with ProductTaggingService.resolveProduct so
+                    // GitHub-sourced products go through the same tag-driven resolution M1a's manual
+                    // upload path uses. No behavior change yet — see ROADMAP.md's M2 section.
                     Product product = productService.findOrCreateByName(fullName);
                     SBOM sbom = sbomService.createPlaceholder(
                             product, document, defaultVersion(repo), null, null);

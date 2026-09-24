@@ -629,6 +629,10 @@ export interface Product {
   /** ISO-8601 date-time string. */
   lastScanned?: string;
   actionableCount?: number;
+  /** True only for the tenant's per-M1a "Unassigned" bucket product. Read-only. */
+  unassigned?: boolean;
+  /** The tag value this product answers to (M1a), or `null`/absent for a manually named product. */
+  tagValue?: string | null;
 }
 
 /** SBOM processing state observed on the wire. */

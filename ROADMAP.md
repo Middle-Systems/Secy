@@ -51,7 +51,7 @@ disable toggles and score-snapshot semantics.
 | Tenancy sequencing | **Schema now, enforcement later.** `Tenant` + `tenant_id` land in M0 on every table the roadmap touches. Postgres row-level security, per-tenant KMS, SSO, and the audit log are a dedicated **Tenancy hardening** milestone, not M0 — M1 runs functionally as a single implicit tenant. |
 | Graph DB | **Apache AGE on Postgres.** No second stateful service, no Helm-chart addition for self-host, one backup/restore story, trivially rebuildable from Postgres (the system of record) as the design doc requires, no dependency on one cloud's managed graph service (rules out Neptune). |
 | Prior work | **Reuse as substrate.** `VulnerabilityAlert`, `CompromiseFinding`, `CorrelationService`, all 8 feeds, and the GitHub/AWS/Azure connectors are kept and extended, not rewritten. New work is scoped as deltas. |
-| Products | Tag-driven, tag key configurable per tenant (default `secy:product`, open question in the design doc — this is the recommended default, not yet locked). Untagged assets land in "Unassigned". Manual product assignment at upload time stays available until connectors exist. |
+| Products | Tag-driven, tag key configurable per tenant — **default `secy:product`, locked in M1a**. Untagged assets land in "Unassigned". Manual product assignment at upload time stays available until connectors exist. |
 | Component identity | PURL is the primary key; CPE, SWID, and content hashes are secondary identifiers. Conflicting identifiers flag a low-confidence link rather than guessing. |
 | VEX precedence | Configurable per tenant; default is tenant statements override vendor statements, conflicts flagged for review. |
 | Risk acceptance approval | **Still open** — the design doc leaves this unresolved (security-engineer approval vs. owner self-accept) and it's a policy call, not an engineering one. Decide before M1j (the Finding/Action-item status machine) ships the risk-acceptance flow. |
@@ -163,6 +163,20 @@ suggestion, not a hard requirement.
 override — see the open decisions table). Anything untagged lands in an "Unassigned" bucket
 visible to security engineers. Manual product assignment at SBOM-upload time stays as the path
 until M2/M3's connectors exist to apply tags automatically.
+
+**Status: SHIPPED.** `product_tag_config` (one row per tenant, default `secy:product`, migration
+`019`) plus `products.unassigned` / `products.tag_value` land the real pieces: a per-tenant
+Unassigned-bucket `Product` row (backfilled for every existing tenant, lazily created for a new
+one), `ProductTaggingService.resolveProduct(tenantId, tags)` as the single resolution seam, and a
+tag-driven `POST /sbom` upload (repeated `tag=key=value` params) alongside the unchanged manual
+`POST /sbom/{productId}/sboms` path. The bucket is a first-class catalog row — all of its SBOMs
+stay active and correlate/detect at their own SBOM scope rather than the whole-product scope a
+normal product uses, it can't be deleted or renamed, and `ProductRepository` is closed to Spring
+Data REST's default CRUD. `GET`/`PUT /settings/product-tagging` exposes the tag key.
+**Stubbed for M2/M3, comment-only `TODO`s, no behavior change**: GitHub repo topics/custom-
+properties, AWS/Azure resource tags, and CycloneDX/SPDX property parsing — none of these
+automatically call `resolveProduct` yet; only the manual upload path does. No tag-key-editing UI
+and no role gating (M1k) either.
 
 **M1b — Ownership model.** Manual mapping only in this sub-phase — inference needs M2/M3's
 connectors (CODEOWNERS, GitHub team permissions, cloud resource tags). Each ownership link
@@ -486,9 +500,10 @@ and cloud — it's a high-value target and has to be built like one.
 
 Carried forward from the design doc rather than silently decided:
 
-- **Product tag key default**: recommending `secy:product`, but this is not locked — confirm
+- ~~**Product tag key default**: recommending `secy:product`, but this is not locked — confirm
   before M1a ships, since it's cheap to change now and expensive once tenants have tagged
-  resources against it.
+  resources against it.~~ **Resolved**: `secy:product` locked in as the default, configurable
+  per tenant via `GET`/`PUT /settings/product-tagging` — see M1a's status note.
 - **Risk acceptance approval**: security-engineer approval vs. owner self-accept — genuinely
   open, decide before M1j builds the risk-acceptance flow.
 - **Sample fixtures**: recommending synthetic fixtures extending the existing correlation

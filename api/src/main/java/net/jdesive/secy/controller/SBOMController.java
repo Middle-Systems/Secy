@@ -14,8 +14,11 @@ import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
+import net.jdesive.secy.persistence.entity.Tenant;
 import net.jdesive.secy.service.AlertService;
+import net.jdesive.secy.service.InvalidProductTagException;
 import net.jdesive.secy.service.ProductService;
+import net.jdesive.secy.service.ProductTaggingService;
 import net.jdesive.secy.service.SBOMService;
 import net.jdesive.secy.service.sbom.SbomParser;
 import net.jdesive.secy.service.sbom.UnsupportedSbomFormatException;
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -37,16 +41,19 @@ public class SBOMController {
 
     private SBOMService sbomService;
     private ProductService productService;
+    private ProductTaggingService productTaggingService;
     private VulnerabilityAlertRepository alertRepository;
     private SbomParser sbomParser;
     private JobService jobService;
 
     @Autowired
     public SBOMController(SBOMService sbomService, ProductService productService,
+                          ProductTaggingService productTaggingService,
                           VulnerabilityAlertRepository alertRepository, SbomParser sbomParser,
                           JobService jobService) {
         this.sbomService = sbomService;
         this.productService = productService;
+        this.productTaggingService = productTaggingService;
         this.alertRepository = alertRepository;
         this.sbomParser = sbomParser;
         this.jobService = jobService;
@@ -102,9 +109,68 @@ public class SBOMController {
         return new ResponseEntity<>(job, HttpStatus.ACCEPTED);
     }
 
+    /**
+     * Upload an SBOM without naming a product — M1a's tag-driven path.
+     *
+     * <p>The document is resolved to a product by {@link ProductTaggingService#resolveProduct},
+     * keyed on whatever {@code tag=key=value} params the caller supplied (repeatable; a value may
+     * itself contain {@code '='} since only the first {@code '='} splits key from value). A tag
+     * naming the tenant's configured key (default {@code secy:product}) lands the upload on the
+     * product answering to that value, creating it if needed; no tags, no matching key, a blank
+     * value, or the reserved value {@code "unassigned"} all land it in the tenant's Unassigned
+     * bucket instead.
+     *
+     * <p>Everything is validated — tag params, then the document itself — before any write, exactly
+     * like {@link #uploadSbom}: a request that can never succeed must never queue a job or create a
+     * product.
+     *
+     * <p>The existing {@code POST /sbom/{productId}/sboms} manual-assignment path is unchanged and
+     * stays available.
+     */
+    @Operation(summary = "Upload a CycloneDX or SPDX SBOM, resolving its product from tag params rather than a URL path",
+            description = "Same synchronous-validate/async-ingest contract as POST /sbom/{productId}/sboms, but the "
+                    + "product is resolved from repeated tag=key=value params via the tenant's configured product "
+                    + "tag key (default secy:product); untagged or unresolved uploads land in the Unassigned bucket.")
+    @ApiResponse(responseCode = "202", description = "Document validated; ingest queued")
+    @PostMapping(value = "", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Job> uploadTaggedSbom(
+            @RequestParam(value = "productVersion", defaultValue = "Unknown") String productVersion,
+            @RequestParam(value = "tag", required = false) List<String> tags,
+            @RequestBody JsonNode body,
+            Principal principal) {
+
+        // 1. Parse the tag params. Malformed input (duplicate key, missing '=') -> 400 via
+        //    onInvalidProductTag, before anything else runs.
+        Map<String, String> tagMap = ProductTaggingService.parseTagParams(tags);
+
+        // 2. Detect the format and normalize -> 400 via onUnsupportedFormat for a document that can
+        //    never succeed. Same synchronous validation as the manual-assignment endpoint.
+        NormalizedSbom document = sbomParser.parse(body);
+
+        // 3. Resolve the product from the tags. TODO(tenancy-hardening): request-scoped tenant.
+        Product product = productTaggingService.resolveProduct(Tenant.DEFAULT_TENANT_ID, tagMap);
+
+        // 4-5. Queue the job, then persist the placeholder row against the resolved product.
+        Job job = jobService.create(JobType.SBOM_UPLOAD, principal);
+        SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(), job.getId());
+
+        log.info("Queued {} SBOM upload {} for tag-resolved product {} ({}) as job {}: {} components pending ingest",
+                document.format().label(), placeholder.getId(), product.getId(), product.getName(), job.getId(),
+                document.components().size());
+
+        return new ResponseEntity<>(job, HttpStatus.ACCEPTED);
+    }
+
     /** An unreadable document is the client's problem, and the message says exactly what was wrong. */
     @ExceptionHandler(UnsupportedSbomFormatException.class)
     public ResponseEntity<ErrorResponse> onUnsupportedFormat(UnsupportedSbomFormatException e) {
+        log.warn("Rejected SBOM upload: {}", e.getMessage());
+        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+    }
+
+    /** A malformed {@code tag=key=value} param is the client's problem, same treatment as a bad document. */
+    @ExceptionHandler(InvalidProductTagException.class)
+    public ResponseEntity<ErrorResponse> onInvalidProductTag(InvalidProductTagException e) {
         log.warn("Rejected SBOM upload: {}", e.getMessage());
         return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
     }

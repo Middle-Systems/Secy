@@ -52,6 +52,7 @@ export function ProductCard({
   const status = product.activeSbomStatusDisplay;
   const hasActiveSbom = Boolean(product.activeSbomId);
   const shortId = product.id.slice(0, 8);
+  const isUnassignedBucket = Boolean(product.unassigned);
 
   const copyId = async () => {
     try {
@@ -78,9 +79,16 @@ export function ProductCard({
     <Card className="flex h-full flex-col">
       <CardContent className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="min-w-0 truncate text-base font-bold text-foreground" title={product.name}>
-            {product.name}
-          </h3>
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="min-w-0 truncate text-base font-bold text-foreground" title={product.name}>
+              {product.name}
+            </h3>
+            {isUnassignedBucket && (
+              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Unassigned
+              </span>
+            )}
+          </div>
           <span
             className={cn(
               'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide',
@@ -90,6 +98,12 @@ export function ProductCard({
             {status}
           </span>
         </div>
+
+        {isUnassignedBucket && (
+          <p className="text-xs text-muted-foreground">
+            SBOMs that arrived without the tenant&apos;s product tag land here for triage.
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <button
@@ -158,8 +172,14 @@ export function ProductCard({
         <Button
           variant="outline"
           size="sm"
-          disabled={!hasActiveSbom}
-          title={hasActiveSbom ? undefined : 'No active SBOM to inspect yet'}
+          disabled={isUnassignedBucket || !hasActiveSbom}
+          title={
+            isUnassignedBucket
+              ? 'The Unassigned bucket can hold many SBOMs at once — open History to inspect one'
+              : hasActiveSbom
+                ? undefined
+                : 'No active SBOM to inspect yet'
+          }
           onClick={() => onViewVulnerabilities(product)}
         >
           View Vulnerabilities
@@ -168,43 +188,47 @@ export function ProductCard({
           <History className="h-4 w-4" />
           History
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto text-muted-foreground hover:text-destructive"
-          aria-label={`Delete ${product.name}`}
-          title="Delete product"
-          onClick={() => setConfirmOpen(true)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        {!isUnassignedBucket && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="ml-auto text-muted-foreground hover:text-destructive"
+            aria-label={`Delete ${product.name}`}
+            title="Delete product"
+            onClick={() => setConfirmOpen(true)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
       </CardFooter>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{product.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes the product and every SBOM and finding attached to it. This
-              cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteProduct.isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault();
-                void handleDelete();
-              }}
-              disabled={deleteProduct.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleteProduct.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {!isUnassignedBucket && (
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete “{product.name}”?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This permanently removes the product and every SBOM and finding attached to it. This
+                cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteProduct.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault();
+                  void handleDelete();
+                }}
+                disabled={deleteProduct.isPending}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleteProduct.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </Card>
   );
 }

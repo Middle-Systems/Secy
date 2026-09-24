@@ -112,7 +112,15 @@ public class SBOMService {
         // Versioning logic: the new upload becomes the active SBOM immediately, matching the old
         // synchronous behaviour — the upload is "the current one" from the moment it is accepted,
         // even while its components are still being persisted.
-        deactivateOldSboms(product);
+        //
+        // Skipped for the Unassigned bucket (M1a): its SBOMs are unrelated documents that happened
+        // to arrive untagged, not versions of one another, so there is no "old version" to
+        // deactivate — every bucket SBOM stays active. See Product's class Javadoc and
+        // CorrelationService/CompromiseDetectionService, which correlate a bucket SBOM at its own
+        // scope rather than the whole-product scope this deactivation exists to serve.
+        if (!product.isUnassigned()) {
+            deactivateOldSboms(product);
+        }
         sbom.setActive(true);
 
         return sbomRepository.saveAndFlush(sbom);

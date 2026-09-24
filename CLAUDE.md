@@ -20,8 +20,11 @@ items: KEV-listed OR EPSS > 0.1.
   - `host.docker.internal:8080` when `DEVCONTAINER=true` (frontend in container, backend on host), else
   - `localhost:8080`.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
-  `/osv`, `/osv/ingest`, `/cve-list/ingest`, `/products`, `/sbom/{id}/vulnerabilities`,
-  `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
+  `/osv`, `/osv/ingest`, `/cve-list/ingest`, `/products`, `POST /sbom` (tag-driven upload — M1a;
+  resolves its product from repeated `tag=key=value` params via the tenant's configured product
+  tag key, default `secy:product`; untagged/unresolved lands in the "Unassigned" bucket),
+  `/sbom/{id}/vulnerabilities`, `/settings/product-tagging` (GET/PUT the tenant's product tag key
+  — M1a), `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
   `/assets`, `/assets/scan/{trivy,grype}`, `/compliance/reports` (+ `/{id}`, `/{id}/scan`,
   `/{id}/misconfigurations`), `/connectors` (+ `/{id}`, `/{id}/sync` — Phase 6b agentless source
   connectors, GitHub only for now).

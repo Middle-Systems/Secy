@@ -23,6 +23,7 @@ import {
   prioritizeAlerts,
   sbomsByRecency,
   sbomStatusLabel,
+  sortProductsUnassignedFirst,
 } from './product.derive';
 
 /* ------------------------------------------------------------------ */
@@ -257,6 +258,80 @@ describe('deriveProducts', () => {
     const input = [product({ id: 'a' }), product({ id: 'b' })];
     deriveProducts(input);
     expect(input.map((p) => p.id)).toEqual(['a', 'b']);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* the "Unassigned" bucket (M1a)                                       */
+/* ------------------------------------------------------------------ */
+
+describe('deriveProduct — the Unassigned bucket', () => {
+  it('aggregates counters across every active SBOM, not just one', () => {
+    const activeA = sbom({
+      id: 'a',
+      active: true,
+      status: 'SCANNED',
+      lastScannedAt: '2026-03-01T00:00:00',
+      components: [component('c1', [alert('a1', { kev: kev('CVE-1') })])],
+    });
+    const activeB = sbom({
+      id: 'b',
+      active: true,
+      status: 'PROCESSING',
+      lastScannedAt: '2026-04-01T00:00:00',
+      components: [component('c2', [alert('a2', { epss: epss(0.5) }), alert('a3', {})])],
+    });
+    const inactive = sbom({ id: 'c', active: false, components: [component('c3', [alert('a4', {})])] });
+
+    const derived = deriveProduct(
+      product({ unassigned: true, sboms: [activeA, activeB, inactive] }),
+    );
+
+    // Both active SBOMs count; the inactive one does not.
+    expect(derived.vulnerabilityCount).toBe(3);
+    expect(derived.actionableCount).toBe(2);
+    // Any active SBOM still scanning outranks a completed one.
+    expect(derived.activeSbomStatusDisplay).toBe('Scanning');
+    // The most recent lastScannedAt across the active set.
+    expect(derived.lastScanned).toBe('2026-04-01T00:00:00');
+    // No single "the" active SBOM exists for the bucket.
+    expect(derived.activeSbomId).toBeUndefined();
+  });
+
+  it('zeroes out with no active SBOMs at all', () => {
+    const derived = deriveProduct(
+      product({ unassigned: true, sboms: [sbom({ active: false })] }),
+    );
+    expect(derived.vulnerabilityCount).toBe(0);
+    expect(derived.actionableCount).toBe(0);
+    expect(derived.activeSbomStatusDisplay).toBe('Unknown');
+    expect(derived.lastScanned).toBeUndefined();
+  });
+});
+
+describe('sortProductsUnassignedFirst', () => {
+  it('moves the unassigned bucket to the front, keeping the rest in order', () => {
+    const a = product({ id: 'a' });
+    const bucket = product({ id: 'bucket', unassigned: true });
+    const b = product({ id: 'b' });
+
+    expect(sortProductsUnassignedFirst([a, bucket, b]).map((p) => p.id)).toEqual([
+      'bucket',
+      'a',
+      'b',
+    ]);
+  });
+
+  it('is a no-op when there is no bucket', () => {
+    const a = product({ id: 'a' });
+    const b = product({ id: 'b' });
+    expect(sortProductsUnassignedFirst([a, b]).map((p) => p.id)).toEqual(['a', 'b']);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [product({ id: 'a' }), product({ id: 'bucket', unassigned: true })];
+    sortProductsUnassignedFirst(input);
+    expect(input.map((p) => p.id)).toEqual(['a', 'bucket']);
   });
 });
 

@@ -118,15 +118,24 @@ public class CompromiseDetectionService {
     /* SBOM                                                               */
     /* ------------------------------------------------------------------ */
 
-    /** Detect over every component of an SBOM and reconcile the findings for its <b>product</b>. */
+    /**
+     * Detect over every component of an SBOM and reconcile the findings for its <b>product</b>.
+     *
+     * <p>Except the Unassigned bucket (M1a): a bucket SBOM has no sibling versions of "the product"
+     * to reconcile against — every upload landing there is an unrelated document that happened to
+     * arrive untagged — so, exactly like {@link CorrelationService#correlate(SBOM)}, detection stays
+     * scoped to the SBOM itself rather than the whole bucket product. An SBOM with no product at all
+     * (only ever a test fixture) gets the same treatment for the same reason.
+     */
     @Transactional
     public DetectionSummary detect(SBOM sbom) {
         UUID sbomId = sbom.getId();
+        boolean productScoped = sbom.getProduct() != null && !sbom.getProduct().isUnassigned();
         UUID productId = sbom.getProduct() == null ? null : sbom.getProduct().getId();
 
-        List<CompromiseFinding> prior = productId == null
-                ? findingRepository.findAllBySbomIdForDetection(sbomId)
-                : findingRepository.findAllByProductIdForDetection(productId);
+        List<CompromiseFinding> prior = productScoped
+                ? findingRepository.findAllByProductIdForDetection(productId)
+                : findingRepository.findAllBySbomIdForDetection(sbomId);
 
         Map<String, SBOMComponent> componentsByIdentity = new LinkedHashMap<>();
         Map<String, UUID> rowIds = new LinkedHashMap<>();
