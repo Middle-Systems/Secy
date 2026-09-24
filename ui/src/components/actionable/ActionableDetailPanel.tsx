@@ -1,9 +1,33 @@
-import type { ReactNode } from 'react';
-import { ExternalLink, Info, Loader2, ShieldAlert } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ExternalLink, Info, Loader2, MessageSquarePlus, ShieldAlert } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { useActionableDetail, useCompromiseFindingDetail } from '@/api/queries';
-import type { ActionableDetail, ActionableItemType, CompromiseFinding } from '@/api/types';
+import {
+  useActionableDetail,
+  useCompromiseFindingDetail,
+  useTriageComment,
+  useTriageHistory,
+  useTriagePatch,
+  useUsers,
+} from '@/api/queries';
+import type {
+  ActionableDetail,
+  ActionableItemType,
+  CompromiseFinding,
+  TriagePatchPayload,
+  TriageSnapshot,
+  TriageState,
+} from '@/api/types';
 import { SeverityBadge } from '@/components/common/SeverityBadge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Sheet,
   SheetContent,
@@ -11,21 +35,35 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { EM_DASH, formatDate, formatDateTime, formatPercent, formatPercentile } from '@/lib/format';
+import { Textarea } from '@/components/ui/textarea';
+import { EM_DASH, formatDate, formatDateTime, formatPercent, formatPercentile, formatRelativeDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import {
   componentLabel,
   COMPROMISE_TYPE_LABELS,
+  datetimeLocalToIso,
   EXPLOIT_MATURITY_LABELS,
   isKevOverdue,
+  isoToDatetimeLocal,
   REASON_LABELS,
+  TRIAGE_STATE_LABELS,
+  TRIAGE_STATES,
+  userLabel,
 } from './actionable.helpers';
 import { CompromiseConfidenceBadge } from './CompromiseConfidenceBadge';
 import { ExploitBadge } from './ExploitBadge';
 import { FixBadge } from './FixBadge';
 import { MaliciousBadge } from './MaliciousBadge';
 import { MatchConfidenceBadge } from './MatchConfidenceBadge';
+import { TriageStateBadge } from './TriageStateBadge';
+
+const DEFAULT_TRIAGE: TriageSnapshot = {
+  triageState: 'OPEN',
+  assigneeId: null,
+  assigneeName: null,
+  snoozedUntil: null,
+};
 
 interface ActionableDetailPanelProps {
   /** Alert id (VULNERABILITY) or finding id (COMPROMISE) to load, or `null` when closed. */
@@ -37,6 +75,15 @@ interface ActionableDetailPanelProps {
    * existing caller (e.g. a deep link with no row context) keeps working.
    */
   itemType?: ActionableItemType | null;
+  /**
+   * Seed for the triage controls (state/assignee/snooze), from the row that
+   * opened this panel (Phase 7). Neither `GET /actionable/:id` nor
+   * `GET /compromise/:id` echo the triage fields back — they live on the
+   * `/actionable` list row and on a triage mutation's response only — so the
+   * caller passes what it already has. Defaults to `OPEN`/unassigned when
+   * omitted (e.g. a deep link with no row context).
+   */
+  initialTriage?: TriageSnapshot | null;
   onOpenChange: (open: boolean) => void;
   /**
    * Called when the user activates an asset reference in "Affected
@@ -382,12 +429,231 @@ function Body({
 }
 
 /**
+ * Triage controls + history/comment timeline (Phase 7) — shared identically
+ * between a `VULNERABILITY` and a `COMPROMISE` item, since the backend
+ * contract is explicitly type-agnostic for every endpoint this touches
+ * (`PATCH /actionable/:id`, `POST /actionable/:id/comments`,
+ * `GET /actionable/:id/history` all accept either id type).
+ *
+ * State/assignee/snooze changes apply immediately on change (no separate
+ * "Save"), matching every other inline control in this view (the toggle
+ * switches and filter selects in `ActionableView` both apply on change).
+ */
+function TriageSection({
+  id,
+  triage,
+  onTriageChange,
+}: {
+  id: string;
+  triage: TriageSnapshot;
+  onTriageChange: (next: TriageSnapshot) => void;
+}) {
+  const patchMutation = useTriagePatch();
+  const commentMutation = useTriageComment();
+  const historyQuery = useTriageHistory(id);
+  const usersQuery = useUsers();
+
+  const [comment, setComment] = useState('');
+  const [snoozeInput, setSnoozeInput] = useState(isoToDatetimeLocal(triage.snoozedUntil));
+
+  // Keep the date input in sync when the server value changes out from under it
+  // (a fresh item selected, or a patch response comes back).
+  useEffect(() => {
+    setSnoozeInput(isoToDatetimeLocal(triage.snoozedUntil));
+  }, [triage.snoozedUntil]);
+
+  const applyPatch = async (patch: TriagePatchPayload, successMessage: string) => {
+    try {
+      const result = await patchMutation.mutateAsync({ id, patch });
+      onTriageChange({
+        triageState: result.triageState,
+        assigneeId: result.assigneeId,
+        assigneeName: result.assigneeName,
+        snoozedUntil: result.snoozedUntil,
+      });
+      toast.success(successMessage);
+    } catch {
+      toast.error('Failed to update triage.');
+    }
+  };
+
+  const handleStateChange = (value: TriageState) => {
+    void applyPatch({ state: value }, `Marked ${TRIAGE_STATE_LABELS[value]}.`);
+  };
+
+  const handleSnoozeCommit = () => {
+    const iso = datetimeLocalToIso(snoozeInput);
+    // The backend can't distinguish an explicit null from an omitted field (a
+    // plain PATCH record), so it treats both as "leave unchanged" — clearing
+    // the date here would silently no-op rather than clear it. Only commit a
+    // real date.
+    if (!iso || iso === triage.snoozedUntil) return;
+    void applyPatch({ snoozedUntil: iso }, 'Snooze date updated.');
+  };
+
+  const handleAssigneeChange = (value: string) => {
+    // No "Unassign" option: the backend has no way to clear an assignee
+    // through this endpoint (same null-vs-omitted limitation as the snooze
+    // date above) — this select only ever assigns to a real user.
+    void applyPatch({ assigneeId: value }, 'Assignee updated.');
+  };
+
+  const handleCommentSubmit = async () => {
+    const trimmed = comment.trim();
+    if (!trimmed) return;
+    try {
+      await commentMutation.mutateAsync({ id, comment: trimmed });
+      setComment('');
+      toast.success('Comment added.');
+    } catch {
+      toast.error('Failed to post comment.');
+    }
+  };
+
+  const users = usersQuery.data ?? [];
+  // API returns oldest-first; newest-first reads better in a timeline.
+  const history = [...(historyQuery.data ?? [])].reverse();
+
+  return (
+    <Section title="Triage">
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">State</span>
+            <Select
+              value={triage.triageState}
+              onValueChange={(v) => handleStateChange(v as TriageState)}
+              disabled={patchMutation.isPending}
+            >
+              <SelectTrigger className="h-9 w-[170px]" aria-label="Triage state">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TRIAGE_STATES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {TRIAGE_STATE_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Assignee</span>
+            {/* No "Unassigned" item — the backend has no way to clear an assignee
+                through PATCH /actionable/:id, only to set one (see handleAssigneeChange).
+                An empty `value` just shows the placeholder until someone is picked. */}
+            <Select
+              value={triage.assigneeId ?? ''}
+              onValueChange={handleAssigneeChange}
+              disabled={patchMutation.isPending}
+            >
+              <SelectTrigger className="h-9 w-[200px]" aria-label="Assignee">
+                <SelectValue placeholder="Unassigned" />
+              </SelectTrigger>
+              <SelectContent>
+                {users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {userLabel(u)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {triage.triageState === 'SNOOZED' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Snoozed until</span>
+              <Input
+                type="datetime-local"
+                className="h-9 w-[210px]"
+                value={snoozeInput}
+                onChange={(e) => setSnoozeInput(e.target.value)}
+                onBlur={handleSnoozeCommit}
+                aria-label="Snoozed until"
+              />
+            </div>
+          )}
+        </div>
+
+        <div>
+          <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            History
+          </h4>
+          {historyQuery.isPending ? (
+            <p className="text-sm text-muted-foreground">Loading history…</p>
+          ) : historyQuery.isError ? (
+            <p className="text-sm text-muted-foreground">Could not load history.</p>
+          ) : history.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No triage activity yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {history.map((event) => (
+                <li key={event.id} className="rounded border border-border bg-card p-2 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {event.fromState && event.toState ? (
+                      <span className="flex items-center gap-1.5">
+                        <TriageStateBadge state={event.fromState} />
+                        <span className="text-xs text-muted-foreground" aria-hidden="true">
+                          →
+                        </span>
+                        <TriageStateBadge state={event.toState} />
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                        <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" />
+                        Comment
+                      </span>
+                    )}
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">
+                      {formatRelativeDate(event.createdAt)}
+                    </span>
+                  </div>
+                  {event.comment && (
+                    <p className="mt-1.5 whitespace-pre-line text-sm text-foreground">
+                      {event.comment}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    — {event.changedByName ?? 'Unknown user'}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Textarea
+            placeholder="Add a comment…"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+            maxLength={4096}
+            aria-label="Add a comment"
+          />
+          <Button
+            size="sm"
+            className="self-end"
+            disabled={!comment.trim() || commentMutation.isPending}
+            onClick={() => void handleCommentSubmit()}
+          >
+            {commentMutation.isPending ? 'Posting…' : 'Post comment'}
+          </Button>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/**
  * Right-hand detail sheet for one actionable item, driven by
  * {@link useActionableDetail}. Open state is derived from `id != null`.
  */
 export function ActionableDetailPanel({
   id,
   itemType,
+  initialTriage,
   onOpenChange,
   onOpenAsset,
 }: ActionableDetailPanelProps) {
@@ -397,6 +663,11 @@ export function ActionableDetailPanel({
   const alertQuery = useActionableDetail(!isCompromise ? (id ?? undefined) : undefined);
   const findingQuery = useCompromiseFindingDetail(isCompromise ? (id ?? undefined) : undefined);
   const query = isCompromise ? findingQuery : alertQuery;
+
+  const [triage, setTriage] = useState<TriageSnapshot>(initialTriage ?? DEFAULT_TRIAGE);
+  useEffect(() => {
+    setTriage(initialTriage ?? DEFAULT_TRIAGE);
+  }, [id, initialTriage]);
 
   const title = isCompromise ? (findingQuery.data?.iocId ?? 'Compromise finding') : (alertQuery.data?.cve.id ?? 'Actionable item');
   const description = isCompromise
@@ -429,6 +700,11 @@ export function ActionableDetailPanel({
           <CompromiseBody finding={findingQuery.data!} onOpenAsset={onOpenAsset} />
         ) : (
           <Body detail={alertQuery.data!} onOpenAsset={onOpenAsset} />
+        )}
+
+        {/* Triage (Phase 7) — shared identically across both item types, per contract. */}
+        {id != null && !query.isPending && !query.isError && query.data && (
+          <TriageSection id={id} triage={triage} onTriageChange={setTriage} />
         )}
       </SheetContent>
     </Sheet>

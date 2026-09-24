@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { RowSelectionState } from '@tanstack/react-table';
 import { RefreshCw, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { useActionablePage, useAssets } from '@/api/queries';
+import { useActionablePage, useAssets, useBulkTriagePatch, useUsers } from '@/api/queries';
 import type {
   ActionableFilters,
   ActionableItemType,
   ActionableReason,
+  BulkTriagePatchPayload,
   CompromiseConfidence,
   MatchConfidence,
+  TriageSnapshot,
+  TriageState,
 } from '@/api/types';
 import { DataTable } from '@/components/common/DataTable';
 import { ListPageHeader } from '@/components/common/ListPageHeader';
@@ -29,6 +33,10 @@ import { cn } from '@/lib/utils';
 import { actionableColumns, actionableRowClassName } from './actionable.columns';
 import {
   readTogglePrefs,
+  TRIAGE_STATE_LABELS,
+  TRIAGE_STATES,
+  triageSnapshotOf,
+  userLabel,
   writeTogglePrefs,
   type ActionableTogglePrefs,
 } from './actionable.helpers';
@@ -70,6 +78,15 @@ const CONFIDENCE_OPTIONS: { value: CompromiseConfidence | 'ALL'; label: string }
   { value: 'INVESTIGATE', label: 'Investigate only' },
 ];
 
+/** `ALL` maps to omitting `state` entirely — the backend's own "default view" (Phase 7). */
+const TRIAGE_FILTER_OPTIONS: { value: TriageState | 'ALL'; label: string }[] = [
+  { value: 'ALL', label: 'Default view' },
+  ...TRIAGE_STATES.map((s) => ({ value: s, label: TRIAGE_STATE_LABELS[s] })),
+];
+
+/** Sentinel for "leave this field alone" in the bulk-action bar's selects. */
+const NO_CHANGE = 'NO_CHANGE';
+
 /**
  * Actionable Items — the funnel output (KEV-listed OR EPSS > threshold), the
  * home screen. Server-driven via `useActionablePage`; sort is fixed server-side
@@ -80,6 +97,7 @@ export function ActionableView() {
   const [size, setSize] = useState(15);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedItemType, setSelectedItemType] = useState<ActionableItemType | null>(null);
+  const [selectedTriage, setSelectedTriage] = useState<TriageSnapshot | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
 
   const [prefs, setPrefs] = useState<ActionableTogglePrefs>(() => readTogglePrefs());
@@ -89,6 +107,13 @@ export function ActionableView() {
   const [assetId, setAssetId] = useState<string>('ALL');
   const [itemType, setItemType] = useState<ActionableItemType | 'ALL'>('ALL');
   const [confidence, setConfidence] = useState<CompromiseConfidence | 'ALL'>('ALL');
+  const [triageStateFilter, setTriageStateFilter] = useState<TriageState | 'ALL'>('ALL');
+
+  // Row selection for the bulk-action bar (Phase 7) — keyed by `ActionableItem.id`,
+  // same convention `getRowId` already uses below.
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [bulkState, setBulkState] = useState<TriageState | typeof NO_CHANGE>(NO_CHANGE);
+  const [bulkAssigneeId, setBulkAssigneeId] = useState<string>(NO_CHANGE);
 
   useEffect(() => {
     writeTogglePrefs(prefs);
@@ -98,6 +123,10 @@ export function ActionableView() {
   // mirrors the other filter selects' static option lists, just sourced from the API.
   const assetsQuery = useAssets({ size: 100 });
   const assetOptions = assetsQuery.data?.content ?? [];
+
+  // Populates the bulk-action bar's assignee select.
+  const usersQuery = useUsers();
+  const users = usersQuery.data ?? [];
 
   const filters: ActionableFilters = useMemo(
     () => ({
@@ -109,11 +138,49 @@ export function ActionableView() {
       assetId: assetId === 'ALL' ? undefined : assetId,
       itemType: itemType === 'ALL' ? undefined : itemType,
       confidence: confidence === 'ALL' ? undefined : confidence,
+      state: triageStateFilter === 'ALL' ? undefined : triageStateFilter,
     }),
-    [prefs, reason, minCvss, matchConfidence, assetId, itemType, confidence],
+    [prefs, reason, minCvss, matchConfidence, assetId, itemType, confidence, triageStateFilter],
   );
 
   const query = useActionablePage({ page, size, ...filters });
+
+  // A new page/filter combination invalidates whatever was selected against the old one.
+  useEffect(() => {
+    setRowSelection({});
+  }, [page, size, filters]);
+
+  const selectedIds = useMemo(
+    () => Object.keys(rowSelection).filter((id) => rowSelection[id]),
+    [rowSelection],
+  );
+
+  const bulkPatch = useBulkTriagePatch();
+
+  const handleApplyBulk = async () => {
+    if (selectedIds.length === 0) return;
+    const patch: BulkTriagePatchPayload = { ids: selectedIds };
+    if (bulkState !== NO_CHANGE) patch.state = bulkState;
+    // No bulk "unassign": the backend has no way to clear an assignee through
+    // this endpoint (a null/omitted assigneeId both mean "leave unchanged"),
+    // so this select only ever assigns to a real user.
+    if (bulkAssigneeId !== NO_CHANGE) patch.assigneeId = bulkAssigneeId;
+
+    if (patch.state === undefined && patch.assigneeId === undefined) {
+      toast.error('Pick a state or an assignee to apply.');
+      return;
+    }
+
+    try {
+      const result = await bulkPatch.mutateAsync(patch);
+      toast.success(`Updated ${result.updated} item${result.updated === 1 ? '' : 's'}.`);
+      setRowSelection({});
+      setBulkState(NO_CHANGE);
+      setBulkAssigneeId(NO_CHANGE);
+    } catch {
+      toast.error('Failed to apply the bulk update.');
+    }
+  };
 
   useEffect(() => {
     if (query.isError) toast.error('Failed to load actionable items.');
@@ -290,8 +357,76 @@ export function ActionableView() {
                 </SelectContent>
               </Select>
             )}
+
+            <Select
+              value={triageStateFilter}
+              onValueChange={(v) => {
+                setTriageStateFilter(v as TriageState | 'ALL');
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="h-9 w-[170px]" aria-label="Filter by triage state">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TRIAGE_FILTER_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
+
+        {selectedIds.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <span className="text-sm font-medium text-foreground">
+              {selectedIds.length} selected
+            </span>
+
+            <Select value={bulkState} onValueChange={(v) => setBulkState(v as TriageState | typeof NO_CHANGE)}>
+              <SelectTrigger className="h-9 w-[180px]" aria-label="Bulk set triage state">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CHANGE}>Leave state as-is</SelectItem>
+                {TRIAGE_STATES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    Set to {TRIAGE_STATE_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={bulkAssigneeId} onValueChange={setBulkAssigneeId}>
+              <SelectTrigger className="h-9 w-[200px]" aria-label="Bulk set assignee">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CHANGE}>Leave assignee as-is</SelectItem>
+                {users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    Assign to {userLabel(u)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button size="sm" onClick={() => void handleApplyBulk()} disabled={bulkPatch.isPending}>
+              {bulkPatch.isPending ? 'Applying…' : 'Apply'}
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto text-muted-foreground"
+              onClick={() => setRowSelection({})}
+            >
+              Clear selection
+            </Button>
+          </div>
+        )}
 
         {showInlineError ? (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-border py-16 text-center">
@@ -315,9 +450,13 @@ export function ActionableView() {
               onRowClick={(entry) => {
                 setSelectedId(entry.id);
                 setSelectedItemType(entry.itemType);
+                setSelectedTriage(triageSnapshotOf(entry));
               }}
               rowClassName={actionableRowClassName}
               emptyMessage="Nothing actionable right now. Ingest KEV / EPSS and scan an SBOM to populate the funnel."
+              enableRowSelection
+              rowSelection={rowSelection}
+              onRowSelectionChange={setRowSelection}
             />
 
             {query.data && (
@@ -340,10 +479,12 @@ export function ActionableView() {
         <ActionableDetailPanel
           id={selectedId}
           itemType={selectedItemType}
+          initialTriage={selectedTriage}
           onOpenChange={(open) => {
             if (!open) {
               setSelectedId(null);
               setSelectedItemType(null);
+              setSelectedTriage(null);
             }
           }}
           onOpenAsset={(id) => setSelectedAssetId(id)}

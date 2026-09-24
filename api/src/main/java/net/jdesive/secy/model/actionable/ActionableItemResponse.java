@@ -7,6 +7,7 @@ import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixSource;
 import net.jdesive.secy.persistence.entity.FixState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
+import net.jdesive.secy.persistence.entity.TriageState;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -53,6 +54,10 @@ import java.util.UUID;
  *           {@code iocId}, {@code matchedOn}, {@code iocFirstSeen}, {@code iocLastSeen},
  *           {@code iocConfidence}</td>
  *       <td><b>null</b></td><td>set</td></tr>
+ *   <tr><td>{@code triageState}, {@code assigneeId}, {@code assigneeName}, {@code snoozedUntil}
+ *           (Phase 7)</td>
+ *       <td>set — what a person decided, independent of the funnel</td>
+ *       <td>set — the same triage columns, same meaning</td></tr>
  * </table>
  *
  * <h2>The detail hop</h2>
@@ -103,6 +108,12 @@ import java.util.UUID;
  * @param iocLastSeen          when the feed last saw it — what IOC aging measures against
  * @param iocConfidence        the feed's own 0–1 conviction about the indicator, when it states one
  * @param createdAt            when the row was generated — the UI's "age" column
+ * @param triageState          what a person decided about this item (Phase 7) — {@code OPEN} unless
+ *                             someone has triaged it. Populated for both arms
+ * @param assigneeId           who is on it, or null. Populated for both arms
+ * @param assigneeName         that assignee's display name, falling back to their email, or null
+ * @param snoozedUntil         when a {@code SNOOZED} item reappears on the default list; meaningless
+ *                             (and typically null) otherwise
  */
 public record ActionableItemResponse(
         UUID id,
@@ -138,5 +149,9 @@ public record ActionableItemResponse(
         LocalDateTime iocFirstSeen,
         LocalDateTime iocLastSeen,
         Double iocConfidence,
-        LocalDateTime createdAt) {
+        LocalDateTime createdAt,
+        TriageState triageState,
+        UUID assigneeId,
+        String assigneeName,
+        LocalDateTime snoozedUntil) {
 }

@@ -239,7 +239,7 @@ Each phase is independently shippable and leaves `master` green
 - **IOC aging**: a nightly job re-checks `iocLastSeen` / confidence; findings whose IOC has decayed below a threshold move to `INVESTIGATE` rather than disappearing.
 - **Tests**: malicious-package match on a crafted SBOM; hash match; funnel-promotion test; aging-transition test.
 
-### Phase 6b — Source & cloud connectors (agentless discovery)  🔄 GitHub slice shipped 2026-09-20
+### Phase 6b — Source & cloud connectors (agentless discovery)  ✅ shipped 2026-09-24
 
 > **GitHub connector landed** on `feat/phase-1-actionable-core` (commits `b94fe5a`+`95a61fd`
 > backend, `d3ba37a` UI). `SourceConnector` (type `GITHUB` only), one instance-wide
@@ -250,9 +250,18 @@ Each phase is independently shippable and leaves `master` green
 > /connectors` + `/{id}/sync` (202 + a per-invocation `CONNECTOR_SYNC` job) + `GET`/`DELETE`; a
 > real Connectors settings view. Deleting a connector does not cascade to the `Product`s/SBOMs it
 > created. Liquibase `013`.
-> **Still open, tracked here — not yet built:** AWS and Azure adapters on the same
-> `SourceConnector` shape (the next slice); the host agent stays in Phase 10, deliberately
-> deferred. Not merged to `master`.
+> **AWS and Azure adapters landed** (commit `4deb69e`, on top of scaffolding commit `209cddc`):
+> `AwsSyncService` enumerates EC2/ECR/Lambda via the AWS SDK v2 (SigV4 signing) and pulls Inspector2
+> findings; `AzureSyncService` enumerates VMs/ACR registries via plain OAuth2 + REST against Azure
+> Resource Manager and pulls Defender for Cloud sub-assessments. Both funnel through
+> `AssetService#applyScan`, the same shared ingestion path Trivy/Grype/Compliance already use. A
+> clean empty/no-findings sync completes normally (not a failure) — only a real auth failure or
+> exception fails the sync, same "nothing to sync is not a failure" rule the GitHub connector
+> bug-fix established. Fixed two pre-existing latent test-isolation bugs surfaced by the new test
+> classes shifting execution order (a `Vulnerability.alerts` missing collection initializer, and two
+> non-`@Transactional` test classes permanently littering the shared H2 instance) — see the commit
+> message for detail. The host agent stays in Phase 10, deliberately deferred. Not merged to
+> `master`.
 *Goal: manual upload stays (CI/CD keeps working the same way), but Secy can also be pointed at a
 source and pull its own inventory — no agent to install, no pipeline step to add.*
 
@@ -284,11 +293,10 @@ inventory + host-level IOC checks) stays deferred, tracked below under Phase 10.
 - **Scheduling**: manual trigger only in this pass (`POST /connectors/{id}/sync`); folding
   connector syncs into Phase 8's cron scheduler is a small addition once that phase lands, not a
   reason to block this one.
-- **AWS / Azure**: not built in this pass. The `SourceConnector` shape and job pattern are
-  designed so each is "write an adapter that enumerates targets and produces `NormalizedComponent`s
-  or scanner-shaped findings", reusing Phase 4's `Asset`/Trivy-Grype pipeline for cloud resources
-  (EC2/ECR/Lambda, Azure VMs/ACR) rather than SBOM ingest — tracked as the next slice of this
-  phase, not re-litigated from scratch.
+- **AWS / Azure**: ✅ built — `AwsSyncService`/`AzureSyncService` each "enumerate targets and
+  produce scanner-shaped findings", reusing Phase 4's `Asset`/Trivy-Grype pipeline for cloud
+  resources (EC2/ECR/Lambda via Inspector2, Azure VMs/ACR via Defender for Cloud) rather than SBOM
+  ingest.
 
 ### Phase 7 — Triage workflow
 - **State machine** on every alert / compromise finding: `OPEN → ACKNOWLEDGED → SNOOZED(until) → RESOLVED | FALSE_POSITIVE`, plus `assignee` and free-text `notes` / comment thread with an append-only history table.
@@ -343,6 +351,7 @@ Phase 3  ──▶            (can overlap tail of 2)
 Phase 4  ──▶            (needs 3's normalized model)
 Phase 5  ──▶            (independent of 3/4; slot when convenient)
 Phase 6  ──▶            (needs 2's OSV ingester + 3's normalized model)
+Phase 6b ──▶            (needs 4's Asset/scan pipeline; independent of 6)
 Phase 7  ──▶            (needs 1 + 6; independent of 2–5)
 Phase 8  ──▶            (needs 1; email/report need 4–6 for full value)
 Phase 9  ─────────────▶ (start compose/CI early, finish last)

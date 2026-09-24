@@ -3,8 +3,9 @@ import { Loader2, ShieldAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAssetDetail, useDeleteAsset } from '@/api/queries';
-import type { ActionableItemType, AssetDetail } from '@/api/types';
+import type { ActionableItemType, AssetDetail, TriageSnapshot } from '@/api/types';
 import { actionableColumns, actionableRowClassName } from '@/components/actionable/actionable.columns';
+import { triageSnapshotOf } from '@/components/actionable/actionable.helpers';
 import { ActionableDetailPanel } from '@/components/actionable/ActionableDetailPanel';
 import { DataTable } from '@/components/common/DataTable';
 import {
@@ -61,6 +62,8 @@ function Body({ detail, onDeleted }: { detail: AssetDetail; onDeleted: () => voi
   const [selectedActionableId, setSelectedActionableId] = useState<string | null>(null);
   const [selectedActionableType, setSelectedActionableType] =
     useState<ActionableItemType | null>(null);
+  const [selectedActionableTriage, setSelectedActionableTriage] =
+    useState<TriageSnapshot | null>(null);
   const deleteAsset = useDeleteAsset();
   const actionColumns = actionableColumns();
   const items = detail.actionableItems.content;
@@ -132,6 +135,7 @@ function Body({ detail, onDeleted }: { detail: AssetDetail; onDeleted: () => voi
             onRowClick={(entry) => {
               setSelectedActionableId(entry.id);
               setSelectedActionableType(entry.itemType);
+              setSelectedActionableTriage(triageSnapshotOf(entry));
             }}
             rowClassName={actionableRowClassName}
             emptyMessage="Nothing actionable on this asset right now."
@@ -168,10 +172,12 @@ function Body({ detail, onDeleted }: { detail: AssetDetail; onDeleted: () => voi
       <ActionableDetailPanel
         id={selectedActionableId}
         itemType={selectedActionableType}
+        initialTriage={selectedActionableTriage}
         onOpenChange={(open) => {
           if (!open) {
             setSelectedActionableId(null);
             setSelectedActionableType(null);
+            setSelectedActionableTriage(null);
           }
         }}
       />

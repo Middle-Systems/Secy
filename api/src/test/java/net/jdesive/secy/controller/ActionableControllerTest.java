@@ -1,5 +1,7 @@
 package net.jdesive.secy.controller;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import net.jdesive.secy.persistence.*;
 import net.jdesive.secy.persistence.entity.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,9 +31,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>Alerts are seeded with their enrichment already written, the way
  * {@code EnrichmentService} would have left them — this is a test of the query surface, not of the
  * funnel (see {@code EnrichmentServiceTest} for that).
+ *
+ * <p>{@code @Transactional}: the H2 database is shared across every {@code @SpringBootTest} context
+ * in the run, and without per-test rollback this class's fixtures would leak into whatever runs next
+ * — the same fix already applied to {@code CompromiseFunnelTest} and {@code AzureSyncServiceTest}.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class ActionableControllerTest {
 
     /**
@@ -69,6 +77,13 @@ class ActionableControllerTest {
     @Autowired
     private AssetRepository assetRepository;
 
+    /** Cleared first: a {@code TriageEvent} holds a FK into both alert tables below (Phase 7). */
+    @Autowired
+    private TriageEventRepository eventRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
     private UUID batchProductId;
     private UUID topAlertId;
     private UUID nonActionableAlertId;
@@ -80,6 +95,7 @@ class ActionableControllerTest {
     @BeforeEach
     void seed() {
         // The H2 database is shared by every @SpringBootTest context in the run.
+        eventRepository.deleteAll();
         findingRepository.deleteAll();
         alertRepository.deleteAll();
         assetRepository.deleteAll();
@@ -183,6 +199,17 @@ class ActionableControllerTest {
             a.setEpssScore(0.02d);
             a.setEpssPercentile(0.30d);
         });
+
+        // Now that the whole class is @Transactional (Phase 7), every request handled below shares
+        // this same persistence context with the seeding above. Vulnerability.kev/epss are an
+        // unidirectional optional @OneToOne with no mappedBy, which Hibernate cannot truly lazy-load
+        // without bytecode enhancement — it resolves them (to null, at the time) the moment each CVE
+        // row above was first merged, before its KEV/EPSS rows existed. Left uncleared, the identity
+        // map would hand the controller that same stale null back instead of re-querying. flush()
+        // first — save() alone only schedules the writes, and clear() without a flush would detach
+        // (and so silently drop) every one of them before they ever reached the database.
+        entityManager.flush();
+        entityManager.clear();
     }
 
     /* ------------------------------------------------------------------ */
@@ -347,12 +374,78 @@ class ActionableControllerTest {
 
     @Test
     @WithMockUser
-    void stateIsStillAcceptedAndIgnored() throws Exception {
-        // `state` exists so the UI's filter contract survives Phase 7's triage state machine
-        // unchanged; there is no state column yet, so it must narrow nothing.
+    void stateFiltersToTheExactTriageState() throws Exception {
+        // Phase 7: every seeded row defaults to OPEN, so an exact-match filter on OPEN returns all
+        // five and every other state returns none.
         mockMvc.perform(get("/actionable").param("state", "OPEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(5));
+
+        mockMvc.perform(get("/actionable").param("state", "RESOLVED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    @WithMockUser
+    void defaultListingHidesAResolvedRow() throws Exception {
+        VulnerabilityAlert alert = alertRepository.findById(topAlertId).orElseThrow();
+        alert.setTriageState(TriageState.RESOLVED);
+        alertRepository.save(alert);
+
+        mockMvc.perform(get("/actionable"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.content[?(@.id == '" + topAlertId + "')]", hasSize(0)));
+    }
+
+    @Test
+    @WithMockUser
+    void defaultListingHidesAFalsePositiveRow() throws Exception {
+        VulnerabilityAlert alert = alertRepository.findAll().stream()
+                .filter(a -> a.getId().equals(topAlertId))
+                .findFirst().orElseThrow();
+        alert.setTriageState(TriageState.FALSE_POSITIVE);
+        alertRepository.save(alert);
+
+        mockMvc.perform(get("/actionable"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.content[?(@.id == '" + topAlertId + "')]", hasSize(0)));
+    }
+
+    @Test
+    @WithMockUser
+    void defaultListingShowsAnAcknowledgedRow() throws Exception {
+        VulnerabilityAlert alert = alertRepository.findById(topAlertId).orElseThrow();
+        alert.setTriageState(TriageState.ACKNOWLEDGED);
+        alertRepository.save(alert);
+
+        mockMvc.perform(get("/actionable"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5))
+                .andExpect(jsonPath("$.content[?(@.id == '" + topAlertId + "')]", hasSize(1)));
+    }
+
+    @Test
+    @WithMockUser
+    void defaultListingHidesAnUnexpiredSnoozeButShowsAnExpiredOne() throws Exception {
+        VulnerabilityAlert stillSnoozed = alertRepository.findById(topAlertId).orElseThrow();
+        stillSnoozed.setTriageState(TriageState.SNOOZED);
+        stillSnoozed.setSnoozedUntil(LocalDateTime.now().plusDays(1));
+        alertRepository.save(stillSnoozed);
+
+        VulnerabilityAlert expiredSnooze = alertRepository.findById(nonActionableAlertId).orElseThrow();
+        expiredSnooze.setActionable(true);
+        expiredSnooze.setActionableReason(ActionableReason.EPSS_HIGH);
+        expiredSnooze.setTriageState(TriageState.SNOOZED);
+        expiredSnooze.setSnoozedUntil(LocalDateTime.now().minusHours(1));
+        alertRepository.save(expiredSnooze);
+
+        mockMvc.perform(get("/actionable"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.id == '" + topAlertId + "')]", hasSize(0)))
+                .andExpect(jsonPath("$.content[?(@.id == '" + nonActionableAlertId + "')]", hasSize(1)));
     }
 
     @Test

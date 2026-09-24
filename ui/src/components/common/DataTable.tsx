@@ -4,10 +4,13 @@ import {
   getCoreRowModel,
   useReactTable,
   type ColumnDef,
+  type OnChangeFn,
   type Row,
+  type RowSelectionState,
 } from '@tanstack/react-table';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
+import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -49,6 +52,16 @@ export interface DataTableProps<TData> {
   renderSubRow?: (row: TData) => ReactNode;
   /** Extra classes on the scroll wrapper. */
   className?: string;
+  /**
+   * Prepends a checkbox selection column (header = select-all-on-page, each
+   * row = select-this-row) when set. Controlled — pass `rowSelection` +
+   * `onRowSelectionChange`; `getRowId` supplies the keys, same as everywhere
+   * else in this component. Uses `@tanstack/react-table`'s built-in row
+   * selection state rather than a bespoke implementation.
+   */
+  enableRowSelection?: boolean;
+  rowSelection?: RowSelectionState;
+  onRowSelectionChange?: OnChangeFn<RowSelectionState>;
 }
 
 /**
@@ -85,6 +98,9 @@ export function DataTable<TData>({
   rowClassName,
   renderSubRow,
   className,
+  enableRowSelection = false,
+  rowSelection,
+  onRowSelectionChange,
 }: DataTableProps<TData>) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -93,11 +109,14 @@ export function DataTable<TData>({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getRowId,
+    enableRowSelection,
+    state: enableRowSelection ? { rowSelection: rowSelection ?? {} } : undefined,
+    onRowSelectionChange,
   });
 
   const expandable = Boolean(renderSubRow);
   const leafCount = table.getAllLeafColumns().length;
-  const totalCols = leafCount + (expandable ? 1 : 0);
+  const totalCols = leafCount + (expandable ? 1 : 0) + (enableRowSelection ? 1 : 0);
 
   const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -111,6 +130,21 @@ export function DataTable<TData>({
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/50 hover:bg-muted/50">
+            {enableRowSelection && (
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={
+                    table.getIsAllPageRowsSelected()
+                      ? true
+                      : table.getIsSomePageRowsSelected()
+                        ? 'indeterminate'
+                        : false
+                  }
+                  onCheckedChange={(checked) => table.toggleAllPageRowsSelected(checked === true)}
+                  aria-label="Select all rows"
+                />
+              </TableHead>
+            )}
             {expandable && <TableHead className="w-10" aria-label="Expand" />}
             {table.getFlatHeaders().map((header) => (
               <TableHead
@@ -157,6 +191,15 @@ export function DataTable<TData>({
                     className={cn(interactive && 'cursor-pointer', rowClassName?.(row.original))}
                     onClick={interactive ? () => handleRowActivate(row) : undefined}
                   >
+                    {enableRowSelection && (
+                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={row.getIsSelected()}
+                          onCheckedChange={(checked) => row.toggleSelected(checked === true)}
+                          aria-label="Select row"
+                        />
+                      </TableCell>
+                    )}
                     {expandable && (
                       <TableCell className="w-10">
                         <button

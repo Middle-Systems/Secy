@@ -33,6 +33,8 @@ import type {
   AssetDetail,
   AssetSummary,
   AssetType,
+  BulkTriagePatchPayload,
+  BulkTriageResponse,
   ComplianceMisconfiguration,
   ComplianceReportDetail,
   ComplianceReportSummary,
@@ -52,6 +54,11 @@ import type {
   PageParams,
   Product,
   SourceConnector,
+  TriageCommentPayload,
+  TriageEvent,
+  TriagePatchPayload,
+  TriageStatusResponse,
+  User,
   Vulnerability,
   VulnerabilityAlert,
 } from './types';
@@ -81,6 +88,7 @@ export const queryKeys = {
     all: ['actionable'] as const,
     page: (params: ActionablePageParams) => [...queryKeys.actionable.all, 'page', params] as const,
     detail: (id: string) => [...queryKeys.actionable.all, 'detail', id] as const,
+    history: (id: string) => [...queryKeys.actionable.all, 'history', id] as const,
   },
   compromise: {
     all: ['compromise'] as const,
@@ -119,6 +127,10 @@ export const queryKeys = {
     all: ['connectors'] as const,
     list: (params: ConnectorListParams) => [...queryKeys.connectors.all, 'list', params] as const,
     detail: (id: string) => [...queryKeys.connectors.all, 'detail', id] as const,
+  },
+  users: {
+    all: ['users'] as const,
+    list: () => [...queryKeys.users.all, 'list'] as const,
   },
 } as const;
 
@@ -428,6 +440,105 @@ export function useActionableDetail(
     queryFn: () => api.get<ActionableDetail>(`/actionable/${id}`),
     enabled: Boolean(id),
     ...options,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Triage workflow (Phase 7)                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Every cache a triage write on one item can affect: the list, that item's own detail (whichever arm it is) and its history. */
+function invalidateTriageCaches(queryClient: ReturnType<typeof useQueryClient>, id: string) {
+  // `actionable.all` is the shared prefix of both `page(...)` and `detail(...)` keys, so
+  // invalidating it covers every cached list page and this item's detail in one call —
+  // same trick `FEED_KEYS` relies on elsewhere in this file.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.actionable.all });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.actionable.history(id) });
+  // The id may belong to either arm of the union — invalidate the compromise detail
+  // cache too on the chance it's a compromise finding id; a miss here is a no-op.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.compromise.detail(id) });
+}
+
+export interface TriagePatchVariables {
+  id: string;
+  patch: TriagePatchPayload;
+}
+
+/**
+ * PATCH /api/actionable/:id — partial update of one item's triage state,
+ * assignee and/or snooze date, optionally with a comment attached to the same
+ * history event. Works for a `vulnerability_alert` id or a
+ * `compromise_finding` id alike (PHASE7 contract). Invalidates the actionable
+ * list, this item's detail (either arm) and its history on success.
+ */
+export function useTriagePatch(options?: MutationOverrides<TriageStatusResponse, TriagePatchVariables>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: TriagePatchVariables) =>
+      api.patch<TriageStatusResponse>(`/actionable/${id}`, patch),
+    ...options,
+    onSuccess: (...args) => {
+      invalidateTriageCaches(queryClient, args[1].id);
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+export interface TriageCommentVariables {
+  id: string;
+  comment: string;
+}
+
+/**
+ * POST /api/actionable/:id/comments — appends a pure comment (no state
+ * change) to an item's triage history. Works for either id type, same as
+ * {@link useTriagePatch}. Invalidates the same caches.
+ */
+export function useTriageComment(options?: MutationOverrides<TriageEvent, TriageCommentVariables>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, comment }: TriageCommentVariables) =>
+      api.post<TriageEvent>(`/actionable/${id}/comments`, { comment } satisfies TriageCommentPayload),
+    ...options,
+    onSuccess: (...args) => {
+      invalidateTriageCaches(queryClient, args[1].id);
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * GET /api/actionable/:id/history — an item's triage timeline, oldest first.
+ * Disabled until `id` is truthy, same convention as {@link useActionableDetail}.
+ */
+export function useTriageHistory(id: string | undefined, options?: QueryOverrides<TriageEvent[]>) {
+  return useQuery({
+    queryKey: queryKeys.actionable.history(id ?? ''),
+    queryFn: () => api.get<TriageEvent[]>(`/actionable/${id}/history`),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+/**
+ * PATCH /api/actionable (bulk, no id) — applies a state and/or assignee
+ * change to every id in `ids` at once, for the row-selection bulk-action bar.
+ * Invalidates the whole actionable cache (list + every cached detail/history)
+ * since any of the patched ids could be showing in an open detail panel.
+ */
+export function useBulkTriagePatch(
+  options?: MutationOverrides<BulkTriageResponse, BulkTriagePatchPayload>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: BulkTriagePatchPayload) =>
+      api.patch<BulkTriageResponse>('/actionable', payload),
+    ...options,
+    onSuccess: (...args) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.actionable.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.compromise.all });
+      options?.onSuccess?.(...args);
+    },
   });
 }
 
@@ -993,5 +1104,28 @@ export function useDeleteConnector(options?: MutationOverrides<void, string>) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.connectors.all });
       options?.onSuccess?.(...args);
     },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Users (Phase 7 — assignee picker)                                          */
+/* -------------------------------------------------------------------------- */
+
+/** How long the enabled-users list is considered fresh — it changes rarely (account provisioning), not on every mutation. */
+const USERS_STALE_TIME_MS = 5 * 60_000;
+
+/**
+ * GET /api/users — every enabled user, for the triage assignee picker. Not
+ * paged; the account is expected to have few enough users that a flat list is
+ * fine at MVP scale, same assumption {@link useProducts} makes. A longer
+ * `staleTime` than the 60s app default (see `query-client.ts`) is reasonable
+ * here — the list barely changes — but still overridable per call.
+ */
+export function useUsers(options?: QueryOverrides<User[]>) {
+  return useQuery({
+    queryKey: queryKeys.users.list(),
+    queryFn: () => api.get<User[]>('/users'),
+    staleTime: USERS_STALE_TIME_MS,
+    ...options,
   });
 }

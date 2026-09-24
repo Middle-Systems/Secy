@@ -4,25 +4,43 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.model.actionable.ActionableDetailResponse;
 import net.jdesive.secy.model.actionable.ActionableFilter;
 import net.jdesive.secy.model.actionable.ActionableItemResponse;
 import net.jdesive.secy.model.actionable.ActionableItemType;
+import net.jdesive.secy.model.actionable.AddCommentRequest;
+import net.jdesive.secy.model.actionable.BulkTriagePatchRequest;
+import net.jdesive.secy.model.actionable.TriageEventResponse;
+import net.jdesive.secy.model.actionable.TriagePatchRequest;
+import net.jdesive.secy.model.actionable.TriageStatusResponse;
+import net.jdesive.secy.persistence.AppUserRepository;
 import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.CompromiseConfidence;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
+import net.jdesive.secy.persistence.entity.User;
+import net.jdesive.secy.security.AppUserPrincipal;
 import net.jdesive.secy.service.ActionableService;
+import net.jdesive.secy.service.TriageService;
 import org.springframework.data.domain.Page;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 
 /**
@@ -40,6 +58,10 @@ import java.util.UUID;
 public class ActionableController {
 
     private final ActionableService actionableService;
+
+    private final TriageService triageService;
+
+    private final AppUserRepository userRepository;
 
     @Operation(
             summary = "List actionable items, paged and filtered",
@@ -87,7 +109,9 @@ public class ActionableController {
             @Parameter(description = "CVSS base score at or above this; unscored CVEs are excluded. "
                     + "Excludes every compromise row, which has no CVSS score.")
             @RequestParam(required = false) Double minCvss,
-            @Parameter(description = "Accepted and ignored until the Phase 7 triage state machine lands")
+            @Parameter(description = "Exact Phase 7 triage state (OPEN/ACKNOWLEDGED/SNOOZED/RESOLVED/"
+                    + "FALSE_POSITIVE), for both arms. Omit for the default: RESOLVED, FALSE_POSITIVE "
+                    + "and not-yet-expired SNOOZED rows are hidden; an expired snooze reappears on its own.")
             @RequestParam(required = false) String state,
             @Parameter(description = "Exact fix state. Excludes every compromise row — malware is removed, not fixed.")
             @RequestParam(required = false) FixState fixState,
@@ -125,6 +149,79 @@ public class ActionableController {
         return actionableService.findDetail(id)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Phase 7 — triage                                                   */
+    /* ------------------------------------------------------------------ */
+
+    @Operation(
+            summary = "Update the triage state, assignee and/or snooze of one actionable item",
+            description = """
+                    Resolves against EITHER table — a `VulnerabilityAlert` id or a `CompromiseFinding` \
+                    id — unlike `GET /actionable/{id}`, which is vulnerability-only. Triage is a \
+                    cross-cutting concern over the whole union; the CVE-detail hop is not.
+
+                    A PATCH, not a PUT: every field is optional, and a null one is left untouched. \
+                    Every call appends one entry to the item's triage history, whether or not the \
+                    state actually moved.""")
+    @ApiResponse(responseCode = "404", description = "No vulnerability alert or compromise finding with that id")
+    @PatchMapping("/{id}")
+    public ResponseEntity<TriageStatusResponse> patchTriage(@PathVariable UUID id,
+                                                              @RequestBody TriagePatchRequest request,
+                                                              @AuthenticationPrincipal AppUserPrincipal principal) {
+        User actingUser = actingUser(principal);
+        return triageService.updateState(id, request.state(), request.assigneeId(), request.snoozedUntil(),
+                        request.comment(), actingUser)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @Operation(
+            summary = "Add a free-text triage comment to one actionable item",
+            description = "A history entry with no state change — `fromState`/`toState` are both null "
+                    + "on the resulting event. Resolves against either table, like `PATCH /actionable/{id}`.")
+    @ApiResponse(responseCode = "201", description = "Comment recorded")
+    @ApiResponse(responseCode = "404", description = "No vulnerability alert or compromise finding with that id")
+    @PostMapping("/{id}/comments")
+    public ResponseEntity<TriageEventResponse> addComment(@PathVariable UUID id,
+                                                            @Valid @RequestBody AddCommentRequest request,
+                                                            @AuthenticationPrincipal AppUserPrincipal principal) {
+        User actingUser = actingUser(principal);
+        return triageService.addComment(id, request.comment(), actingUser)
+                .map(event -> ResponseEntity.status(HttpStatus.CREATED).body(event))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @Operation(
+            summary = "Update the triage state and/or assignee of several actionable items at once",
+            description = "Ids of either kind, mixed freely. An id that resolves to neither table is "
+                    + "silently skipped rather than failing the whole batch — the same per-item "
+                    + "tolerance a GitHub connector sync applies per-repo.")
+    @PatchMapping
+    public ResponseEntity<Map<String, Integer>> bulkPatchTriage(@RequestBody BulkTriagePatchRequest request,
+                                                                  @AuthenticationPrincipal AppUserPrincipal principal) {
+        User actingUser = actingUser(principal);
+        int updated = triageService.bulkUpdateState(request.ids(), request.state(), request.assigneeId(), actingUser);
+        return ResponseEntity.ok(Map.of("updated", updated));
+    }
+
+    @Operation(
+            summary = "One actionable item's triage history, oldest first",
+            description = "State transitions and standalone comments interleaved in one chronological "
+                    + "timeline. Resolves against either table, like `PATCH /actionable/{id}`.")
+    @ApiResponse(responseCode = "404", description = "No vulnerability alert or compromise finding with that id")
+    @GetMapping("/{id}/history")
+    public ResponseEntity<List<TriageEventResponse>> history(@PathVariable UUID id) {
+        return triageService.history(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /** The authenticated account behind the JWT, as the {@link User} entity {@code TriageService} attributes events to. */
+    private User actingUser(AppUserPrincipal principal) {
+        return userRepository.findById(principal.getId())
+                .orElseThrow(() -> new NoSuchElementException("Authenticated user not found: " + principal.getId()));
     }
 
 }

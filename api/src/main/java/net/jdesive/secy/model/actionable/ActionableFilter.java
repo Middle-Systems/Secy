@@ -47,10 +47,16 @@ import java.util.UUID;
  *                           {@code COMPROMISE} is equivalent to {@code itemType=COMPROMISE}.
  * @param minCvss            CVSS base score at or above this. Items whose CVE has no score are
  *                           excluded, since "unscored" is not "below the bar".
- * @param state              <b>accepted and ignored.</b> Reserved for the Phase 7 triage state
- *                           machine (OPEN / ACKNOWLEDGED / SNOOZED / RESOLVED / FALSE_POSITIVE);
- *                           there is no state column yet. <b>Not</b> the lifecycle state — both arms
- *                           already restrict to {@code ACTIVE} unconditionally.
+ * @param state              exact {@link net.jdesive.secy.persistence.entity.TriageState} name
+ *                           (OPEN / ACKNOWLEDGED / SNOOZED / RESOLVED / FALSE_POSITIVE), for both
+ *                           arms. Null (the default) applies the Phase 7 default-list behavior
+ *                           instead of an exact match: hide {@code RESOLVED}, hide
+ *                           {@code FALSE_POSITIVE}, and hide {@code SNOOZED} rows whose snooze has
+ *                           not yet expired — a snooze past its expiry reappears automatically. This
+ *                           is a string, not a {@code TriageState}, so an old client that always sends
+ *                           it still round-trips a value the server does not recognise. <b>Not</b> the
+ *                           lifecycle state — both arms already restrict to {@code ACTIVE}
+ *                           unconditionally regardless of this filter.
  * @param fixState           exact {@link FixState}
  * @param minExploitMaturity {@link ExploitMaturity} at or above this, by the enum's declaration
  *                           order. {@code NONE} is a no-op since everything is at least NONE.

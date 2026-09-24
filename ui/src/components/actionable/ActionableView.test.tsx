@@ -9,12 +9,22 @@ const useActionablePage = vi.fn();
 const useActionableDetail = vi.fn();
 const useCompromiseFindingDetail = vi.fn();
 const useAssets = vi.fn();
+const useUsers = vi.fn();
+const useBulkTriagePatch = vi.fn();
+const useTriagePatch = vi.fn();
+const useTriageComment = vi.fn();
+const useTriageHistory = vi.fn();
 
 vi.mock('@/api/queries', () => ({
   useActionablePage: (...args: unknown[]) => useActionablePage(...args),
   useActionableDetail: (...args: unknown[]) => useActionableDetail(...args),
   useCompromiseFindingDetail: (...args: unknown[]) => useCompromiseFindingDetail(...args),
   useAssets: (...args: unknown[]) => useAssets(...args),
+  useUsers: (...args: unknown[]) => useUsers(...args),
+  useBulkTriagePatch: (...args: unknown[]) => useBulkTriagePatch(...args),
+  useTriagePatch: (...args: unknown[]) => useTriagePatch(...args),
+  useTriageComment: (...args: unknown[]) => useTriageComment(...args),
+  useTriageHistory: (...args: unknown[]) => useTriageHistory(...args),
 }));
 
 // The asset drilldown panel is exercised by its own component tests; stub it
@@ -61,6 +71,10 @@ function item(overrides: Partial<ActionableItem> = {}): ActionableItem {
     iocLastSeen: null,
     iocConfidence: null,
     createdAt: '2026-09-05T14:22:31.118',
+    triageState: 'OPEN',
+    assigneeId: null,
+    assigneeName: null,
+    snoozedUntil: null,
     ...overrides,
   };
 }
@@ -189,6 +203,14 @@ function mockPage(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   useAssets.mockReturnValue({ data: { content: [] }, isPending: false, isError: false });
+  useUsers.mockReturnValue({ data: [], isPending: false, isError: false });
+  useBulkTriagePatch.mockReturnValue({
+    mutateAsync: vi.fn().mockResolvedValue({ updated: 0 }),
+    isPending: false,
+  });
+  useTriagePatch.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+  useTriageComment.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+  useTriageHistory.mockReturnValue({ data: [], isPending: false, isError: false });
 });
 
 afterEach(() => {

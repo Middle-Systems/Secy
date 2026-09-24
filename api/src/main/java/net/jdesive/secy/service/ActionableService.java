@@ -1,8 +1,10 @@
 package net.jdesive.secy.service;
 
+import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.model.actionable.ActionableDetailResponse;
 import net.jdesive.secy.model.actionable.ActionableFilter;
@@ -24,11 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -107,7 +111,7 @@ public class ActionableService {
         Pageable pageable = PageRequest.of(page, size);
 
         Specification<CompromiseFinding> compromiseSpec = filter.includesCompromises()
-                ? CompromiseService.specification(compromiseFilterFrom(filter))
+                ? CompromiseService.specification(compromiseFilterFrom(filter)).and(triageSpecification(filter))
                 : null;
         Specification<VulnerabilityAlert> alertSpec = filter.includesVulnerabilities()
                 ? specification(filter)
@@ -198,6 +202,9 @@ public class ActionableService {
             predicates.add(cb.isTrue(root.get("actionable")));
             predicates.add(cb.equal(root.get("lifecycleState"), AlertLifecycleState.ACTIVE));
 
+            // Phase 7: the triage half of "what is still work" — see triagePredicate.
+            predicates.add(triagePredicate(root, cb, filter));
+
             if (filter.reason() != null) {
                 predicates.add(cb.equal(root.get("actionableReason"), filter.reason()));
             }
@@ -230,9 +237,6 @@ public class ActionableService {
                         root.join("assetComponent", JoinType.INNER);
                 predicates.add(cb.equal(assetComponent.get("asset").get("id"), filter.assetId()));
             }
-            // filter.state() is accepted for forward compatibility and has nothing to bind to yet —
-            // see ActionableFilter.
-
             // Spring Data only overwrites the ORDER BY when the Pageable carries a Sort, and the
             // service always passes an unsorted one; the count query must not get an ORDER BY at all.
             if (!isCountQuery(query.getResultType())) {
@@ -248,6 +252,44 @@ public class ActionableService {
 
     private static boolean isCountQuery(Class<?> resultType) {
         return Long.class.equals(resultType) || long.class.equals(resultType);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Phase 7 — triage filtering, shared by both arms                    */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The compromise arm's triage predicate, composed onto {@code CompromiseService.specification}
+     * with {@link Specification#and}. Kept as a separately-composed specification rather than edited
+     * into {@code CompromiseService.specification} itself, since that method is shared with the
+     * dedicated {@code GET /compromise} endpoint — whose default listing is intentionally untouched by
+     * Phase 7 triage state, only the {@code /actionable} union's default is.
+     */
+    private static Specification<CompromiseFinding> triageSpecification(ActionableFilter filter) {
+        return (root, query, cb) -> triagePredicate(root, cb, filter);
+    }
+
+    /**
+     * Whichever triage predicate {@link ActionableFilter#state()} asks for.
+     *
+     * <p>Null (the default): hide what is not work any more — {@code RESOLVED}, {@code FALSE_POSITIVE},
+     * or a {@code SNOOZED} row whose snooze has not yet expired. A snooze past its expiry reappears
+     * automatically, with no cron job: the same {@code snoozedUntil <= now} half of this predicate
+     * runs on every request.
+     *
+     * <p>A real value: exact match on that {@link TriageState} instead of the default hide-behavior.
+     */
+    private static <T> Predicate triagePredicate(Root<T> root, CriteriaBuilder cb, ActionableFilter filter) {
+        if (filter.state() != null) {
+            TriageState state = TriageState.valueOf(filter.state().toUpperCase(Locale.ROOT));
+            return cb.equal(root.get("triageState"), state);
+        }
+        Predicate resolved = cb.equal(root.get("triageState"), TriageState.RESOLVED);
+        Predicate falsePositive = cb.equal(root.get("triageState"), TriageState.FALSE_POSITIVE);
+        Predicate stillSnoozed = cb.and(
+                cb.equal(root.get("triageState"), TriageState.SNOOZED),
+                cb.greaterThan(root.<LocalDateTime>get("snoozedUntil"), LocalDateTime.now()));
+        return cb.not(cb.or(resolved, falsePositive, stillSnoozed));
     }
 
     /* ------------------------------------------------------------------ */
@@ -297,7 +339,11 @@ public class ActionableService {
                 component == null ? null : component.getPurl(),
                 // The compromise arm, absent on a vulnerability row.
                 null, null, null, null, null, null, null, null,
-                alert.getCreatedAt());
+                alert.getCreatedAt(),
+                alert.getTriageState(),
+                alert.getAssignee() == null ? null : alert.getAssignee().getId(),
+                alert.getAssignee() == null ? null : assigneeName(alert.getAssignee()),
+                alert.getSnoozedUntil());
     }
 
     /**
@@ -342,7 +388,16 @@ public class ActionableService {
                 finding.getIocFirstSeen(),
                 finding.getIocLastSeen(),
                 finding.getIocConfidence(),
-                finding.getCreatedAt());
+                finding.getCreatedAt(),
+                finding.getTriageState(),
+                finding.getAssignee() == null ? null : finding.getAssignee().getId(),
+                finding.getAssignee() == null ? null : assigneeName(finding.getAssignee()),
+                finding.getSnoozedUntil());
+    }
+
+    /** Falls back to email when a user has set no display name — the same rule {@code TriageService} uses. */
+    private static String assigneeName(User user) {
+        return user.getDisplayName() != null ? user.getDisplayName() : user.getEmail();
     }
 
     /** The id of whichever component row the alert cites. */

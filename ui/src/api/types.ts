@@ -321,6 +321,21 @@ export interface ActionableItem {
 
   /** ISO-8601 date-time string. */
   createdAt: string;
+
+  /* ------------------------------------------------------------------ */
+  /* Triage fields (Phase 7). Orthogonal to the KEV/EPSS/compromise      */
+  /* funnel logic above — populated identically on both arms of the      */
+  /* union. Absent only on a payload from before Phase 7 shipped.        */
+  /* ------------------------------------------------------------------ */
+
+  /** Person-driven triage state. Defaults to `OPEN` for a row that has never been touched. */
+  triageState: TriageState;
+  /** UUID of the assigned user, or null when unassigned. */
+  assigneeId: string | null;
+  /** The assignee's display name (falls back to email server-side), or null when unassigned. */
+  assigneeName: string | null;
+  /** ISO-8601 date-time string. Set only while `triageState === 'SNOOZED'`. */
+  snoozedUntil: string | null;
 }
 
 /** The CVE block nested in an `ActionableDetail`. */
@@ -437,6 +452,12 @@ export interface ActionableFilters {
   itemType?: ActionableItemType;
   /** Exact match on a compromise finding's confidence (Phase 6). Excludes every vulnerability row. */
   confidence?: CompromiseConfidence;
+  /**
+   * Exact match on the person-driven triage state (Phase 7). Omit for the
+   * default view: hides `RESOLVED`, `FALSE_POSITIVE`, and a `SNOOZED` row
+   * whose `snoozedUntil` hasn't passed yet. Applies to both arms of the union.
+   */
+  state?: TriageState;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -883,3 +904,104 @@ export interface SourceConnector {
 export type CreateSourceConnectorPayload = Pick<SourceConnector, 'type' | 'name' | 'scope'> & {
   repoAllowlist?: string[];
 };
+
+/* -------------------------------------------------------------------------- */
+/* Triage workflow — PATCH /api/actionable(/:id), POST /api/actionable/:id/   */
+/* comments, GET /api/actionable/:id/history, GET /api/users (Phase 7)        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Person-driven triage state, orthogonal to the KEV/EPSS/compromise funnel
+ * logic that decides whether an item is actionable in the first place — an
+ * item can be actionable and sit at any of these. Applies identically to both
+ * arms of the `/actionable` union.
+ */
+export type TriageState = 'OPEN' | 'ACKNOWLEDGED' | 'SNOOZED' | 'RESOLVED' | 'FALSE_POSITIVE';
+
+/**
+ * One entry of `GET /api/actionable/:id/history`, oldest first on the wire
+ * (reverse client-side to show newest-first). `fromState`/`toState` both null
+ * means a pure comment with no state change.
+ */
+export interface TriageEvent {
+  id: string;
+  fromState: TriageState | null;
+  toState: TriageState | null;
+  comment: string | null;
+  /** Null on an event with no attributable user (defensive — every event from a live PATCH/comment has one). */
+  changedById: string | null;
+  changedByName: string | null;
+  /** ISO-8601 date-time string. */
+  createdAt: string;
+}
+
+/**
+ * Response of `PATCH /api/actionable/:id` — the triage fields alone, echoed
+ * back after the patch, not the full item.
+ */
+export interface TriageStatusResponse {
+  id: string;
+  itemType: ActionableItemType;
+  triageState: TriageState;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  snoozedUntil: string | null;
+}
+
+/**
+ * Body of `PATCH /api/actionable/:id` — a partial patch. The backend
+ * (`TriageService.updateState`) treats an **omitted or `null`** field as
+ * "leave unchanged", not "clear it" — a plain Java record can't tell the two
+ * apart on the wire — so there is deliberately no way to unassign or clear a
+ * snooze date through this endpoint, only to set one. Works for both a
+ * `vulnerability_alert` id and a `compromise_finding` id (unlike
+ * `GET /actionable/:id`, which is vulnerability-only).
+ */
+export interface TriagePatchPayload {
+  state?: TriageState;
+  assigneeId?: string;
+  /** ISO-8601 date-time string. */
+  snoozedUntil?: string;
+  comment?: string;
+}
+
+/** Body of `POST /api/actionable/:id/comments`. `comment` is required, max 4096 characters. */
+export interface TriageCommentPayload {
+  comment: string;
+}
+
+/**
+ * Body of the bulk `PATCH /api/actionable` (no id in the path). Same
+ * set-only-no-clear contract as {@link TriagePatchPayload} — omitting
+ * `assigneeId` leaves every id's current assignee unchanged; there is no bulk
+ * unassign.
+ */
+export interface BulkTriagePatchPayload {
+  ids: string[];
+  state?: TriageState;
+  assigneeId?: string;
+}
+
+/** Response of the bulk `PATCH /api/actionable`. */
+export interface BulkTriageResponse {
+  updated: number;
+}
+
+/** `GET /api/users` — every enabled user, for the assignee picker. */
+export interface User {
+  id: string;
+  email: string;
+  displayName: string | null;
+}
+
+/**
+ * The triage-only slice of an `ActionableItem` — what `ActionableDetailPanel`
+ * seeds its triage controls with. Neither `GET /actionable/:id` nor
+ * `GET /compromise/:id` echo these back (they live on the `/actionable` list
+ * row and on {@link TriageStatusResponse} only), so the panel's caller passes
+ * the row it already has.
+ */
+export type TriageSnapshot = Pick<
+  ActionableItem,
+  'triageState' | 'assigneeId' | 'assigneeName' | 'snoozedUntil'
+>;

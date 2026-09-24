@@ -71,7 +71,8 @@ import java.util.UUID;
                 @Index(name = "idx_compromise_finding_component", columnList = "component_id"),
                 @Index(name = "idx_compromise_finding_asset_component", columnList = "asset_component_id"),
                 @Index(name = "idx_compromise_finding_state", columnList = "lifecycle_state"),
-                @Index(name = "idx_compromise_finding_ioc", columnList = "ioc_id")
+                @Index(name = "idx_compromise_finding_ioc", columnList = "ioc_id"),
+                @Index(name = "idx_compromise_finding_triage_state", columnList = "triage_state")
         })
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class CompromiseFinding {
@@ -258,5 +259,27 @@ public class CompromiseFinding {
         }
         return createdAt;
     }
+
+    /* ------------------------------------------------------------------ */
+    /* Phase 7 — triage                                                   */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * What a person decided about this finding. Orthogonal to {@link #lifecycleState} — see
+     * {@link AlertLifecycleState}'s Javadoc for why the two never merge.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "triage_state", nullable = false, length = 16)
+    private TriageState triageState = TriageState.OPEN;
+
+    /** When a {@link TriageState#SNOOZED} finding should reappear on the default list. Meaningless otherwise. */
+    @Column(name = "snoozed_until")
+    private LocalDateTime snoozedUntil;
+
+    /** Who is on this, if anyone. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assignee_id")
+    @ToString.Exclude
+    private User assignee;
 
 }

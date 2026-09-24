@@ -30,6 +30,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -48,9 +49,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>Alerts are seeded with their enrichment already written, the way {@code EnrichmentService} would
  * have left them: this pins the query surface, not the funnel. The SBOM-derived alert in the seed is
  * there on purpose — it is what proves the two estates do not bleed into each other's filters.
+ *
+ * <p>{@code @Transactional}: the H2 database is shared across every {@code @SpringBootTest} context in
+ * the run, and without per-test rollback this class's last test to run leaves its {@code Asset}/
+ * {@code Product} fixtures permanently committed — the same leak already fixed on
+ * {@code CompromiseFunnelTest} and {@code AzureSyncServiceTest}, found here while verifying Phase 7:
+ * with those two already fixed, this was the next class whose leftover {@code Asset} row (FK'd to a
+ * {@code Product}) breaks {@code SourceConnectorControllerTest}'s {@code productRepository.deleteAll()}
+ * whenever this class happens to run first.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class AssetControllerTest {
 
     /**

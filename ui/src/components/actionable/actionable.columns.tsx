@@ -12,6 +12,7 @@ import { ExploitBadge } from './ExploitBadge';
 import { FixBadge } from './FixBadge';
 import { MaliciousBadge } from './MaliciousBadge';
 import { MatchConfidenceBadge } from './MatchConfidenceBadge';
+import { TriageStateBadge } from './TriageStateBadge';
 
 const DASH = <span className="text-xs text-muted-foreground">—</span>;
 
@@ -172,6 +173,23 @@ export function actionableColumns(): ColumnDef<ActionableItem, unknown>[] {
           {formatRelativeDate(row.original.createdAt)}
         </span>
       ),
+    },
+    {
+      id: 'triage',
+      header: 'Triage',
+      cell: ({ row }) => {
+        const { triageState, assigneeName } = row.original;
+        return (
+          <div className="flex flex-col items-start gap-1">
+            <TriageStateBadge state={triageState} />
+            {assigneeName && (
+              <span className="truncate text-xs text-muted-foreground" title={assigneeName}>
+                {assigneeName}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
   ];
 }
