@@ -1,16 +1,21 @@
 package net.jdesive.secy.service;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.persistence.entity.CPEMatch;
 import net.jdesive.secy.persistence.entity.CPEOperator;
+import net.jdesive.secy.persistence.entity.NvdIngestCursor;
 import net.jdesive.secy.persistence.entity.Reference;
 import net.jdesive.secy.persistence.entity.Vulnerability;
 import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.model.nvd.*;
+import net.jdesive.secy.persistence.NvdIngestCursorRepository;
 import net.jdesive.secy.persistence.VulnerabilityRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.*;
@@ -21,6 +26,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,13 +40,55 @@ import java.util.concurrent.CancellationException;
 @Service
 public class NVDService {
 
+    /** The one {@link NvdIngestCursor} row. */
+    private static final String CURSOR_ID = "nvd";
+
+    /**
+     * NVD's own cap on {@code lastModEndDate - lastModStartDate}, minus a one-day safety margin —
+     * see {@link #ingestData(JobProgress)}.
+     */
+    private static final int WINDOW_DAYS = 119;
+
+    /**
+     * Where a from-scratch sweep starts when no {@link NvdIngestCursor} row exists yet. CVE ids
+     * predate this (there are {@code CVE-1999-*} entries), but nothing meaningfully affecting
+     * software still in use does, and starting here keeps the very first sweep to a bounded, known
+     * number of windows rather than guessing at NVD's true earliest record.
+     */
+    private static final LocalDateTime EPOCH = LocalDateTime.of(1999, 1, 1, 0, 0);
+
+    private static final DateTimeFormatter NVD_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+
     private VulnerabilityRepository vulnerabilityRepository;
+
+    private final NvdIngestCursorRepository cursorRepository;
 
     private final RestTemplate restTemplate;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    /**
+     * A self-reference through the Spring proxy, {@code @Lazy} to sidestep the circular-bean-creation
+     * this would otherwise be. {@link #ingestWindow} calls {@link #saveVulnerabilities} through this
+     * rather than directly — a direct {@code this.saveVulnerabilities(...)} call from another method
+     * on the same bean bypasses the proxy {@code @Transactional} relies on entirely, so
+     * {@code saveVulnerabilities}'s own transaction would silently never start and its
+     * {@code entityManager.persist(...)} calls would throw {@code TransactionRequiredException}. The
+     * method still needs {@code @Transactional} for its own sake, since it is also called directly
+     * (through the proxy, correctly) by anything ingesting a single already-fetched page, including
+     * {@code NVDServiceTest}.
+     */
     @Autowired
-    public NVDService(VulnerabilityRepository vulnerabilityRepository, RestTemplate restTemplate) {
+    @Lazy
+    private NVDService self;
+
+    @Autowired
+    public NVDService(VulnerabilityRepository vulnerabilityRepository,
+                       NvdIngestCursorRepository cursorRepository, RestTemplate restTemplate) {
         this.vulnerabilityRepository = vulnerabilityRepository;
+        this.cursorRepository = cursorRepository;
         this.restTemplate = restTemplate;
     }
 
@@ -70,56 +119,113 @@ public class NVDService {
     }
 
     /**
-     * Pull every CVE page from the NVD 2.0 feed, reporting the running count to {@code progress}
-     * after each page — this is the long one, so the job row needs to move.
+     * Sweep NVD for CVEs modified since the last successful ingest, reporting the running count to
+     * {@code progress} after each page.
      *
-     * @throws CancellationException if {@code progress} asks to stop between pages
+     * <p>NVD's CVE API accepts {@code lastModStartDate}/{@code lastModEndDate} to pull only records
+     * modified in a window, capped at 120 days per request. This walks from {@link NvdIngestCursor}
+     * (or {@link #EPOCH}, on the very first ever ingest — there is no cursor yet, so there is
+     * nothing narrower to ask NVD for) to now in {@value #WINDOW_DAYS}-day windows, one full paged
+     * crawl of {@code resultsPerPage} each per window.
+     *
+     * <p>The cursor is persisted after <b>each window completes</b>, not just once at the end of the
+     * whole sweep. That is the entire point: a run interrupted partway — by a redeploy, a crash,
+     * anything — only has to redo the window it was on when it stopped, not the whole feed. Before
+     * this, every interrupted ingest restarted from CVE #1, and since NVD returns undated results in
+     * roughly ascending-CVE-id order, a run that never reaches the end never ingests anything from
+     * roughly the last decade — which is why every product's actionable list could come back empty
+     * even with an ingest that "completed" several times.
+     *
+     * @throws CancellationException if {@code progress} asks to stop between pages or windows
      */
     public IngestResult ingestData(JobProgress progress) {
+        NvdIngestCursor cursor = cursorRepository.findById(CURSOR_ID).orElse(null);
+        LocalDateTime windowStart = (cursor != null && cursor.getLastModified() != null)
+                ? cursor.getLastModified() : EPOCH;
+        LocalDateTime now = LocalDateTime.now();
 
-       NVDCVEResult result = this.getDataAtOffset(0);
-       int processed = this.saveVulnerabilities(result);
-       int total = result.getTotalResults();
-       int offset = this.resultsPerPage;
-       progress.report(processed, "Ingested " + processed + " of " + total + " CVE records…");
+        int totalProcessed = 0;
+        while (windowStart.isBefore(now)) {
+            if (progress.isCancelled()) {
+                throw new CancellationException("NVD ingest cancelled after " + totalProcessed + " records");
+            }
 
-       while(offset < total) {
+            LocalDateTime windowEnd = windowStart.plusDays(WINDOW_DAYS);
+            if (windowEnd.isAfter(now)) {
+                windowEnd = now;
+            }
 
-           if (progress.isCancelled()) {
-               throw new CancellationException("NVD ingest cancelled after " + processed + " records");
-           }
+            totalProcessed += ingestWindow(windowStart, windowEnd, progress, totalProcessed);
+            advanceCursor(windowEnd);
+            windowStart = windowEnd;
+        }
 
-           NVDCVEResult nestedResult = this.getDataAtOffset(offset);
-           offset = this.resultsPerPage + offset;
-           processed += this.saveVulnerabilities(nestedResult);
-           progress.report(processed, "Ingested " + processed + " of " + total + " CVE records…");
-       }
+        return IngestResult.of(totalProcessed, "CVE records");
+    }
 
-       return IngestResult.of(processed, "CVE records");
+    /** One {@code lastModStartDate}/{@code lastModEndDate} window, fully paged. */
+    private int ingestWindow(LocalDateTime windowStart, LocalDateTime windowEnd, JobProgress progress,
+                              int alreadyProcessed) {
+        NVDCVEResult result = this.getDataAtOffset(0, windowStart, windowEnd);
+        int processed = self.saveVulnerabilities(result);
+        int total = result.getTotalResults();
+        int offset = this.resultsPerPage;
+        progress.report(alreadyProcessed + processed,
+                "Ingested " + (alreadyProcessed + processed) + " CVE records…");
+
+        while (offset < total) {
+            if (progress.isCancelled()) {
+                throw new CancellationException(
+                        "NVD ingest cancelled after " + (alreadyProcessed + processed) + " records");
+            }
+
+            NVDCVEResult nestedResult = this.getDataAtOffset(offset, windowStart, windowEnd);
+            offset = this.resultsPerPage + offset;
+            processed += self.saveVulnerabilities(nestedResult);
+            progress.report(alreadyProcessed + processed,
+                    "Ingested " + (alreadyProcessed + processed) + " CVE records…");
+        }
+
+        return processed;
+    }
+
+    private void advanceCursor(LocalDateTime windowEnd) {
+        NvdIngestCursor cursor = cursorRepository.findById(CURSOR_ID).orElseGet(() -> {
+            NvdIngestCursor fresh = new NvdIngestCursor();
+            fresh.setId(CURSOR_ID);
+            return fresh;
+        });
+        cursor.setLastModified(windowEnd);
+        cursor.setLastIngestedAt(LocalDateTime.now());
+        cursorRepository.save(cursor);
     }
 
     /**
      * @return how many vulnerabilities were written
      *
-     * <p>Upserts against the existing managed row rather than constructing a fresh detached
-     * {@link Vulnerability} and blind-{@code saveAll}ing it. That used to be safe only because
-     * nothing ever populated {@code Vulnerability.alerts} before Phase 1's correlation existed to
-     * write real {@link net.jdesive.secy.persistence.entity.VulnerabilityAlert} rows against a CVE.
-     * Once a CVE has real alerts, a re-ingest that builds a brand-new object (whose {@code alerts}
-     * field is Java {@code null} — it has no field initializer, unlike its sibling collections
-     * {@code references}/{@code cpeOperators}, which default to an empty list) and saves it makes
-     * Spring Data fall through to {@code entityManager.merge(...)}, since this entity's
-     * {@code @Id} is manually assigned rather than {@code @GeneratedValue} and so is never "new" by
-     * Spring Data's default check. Merging a {@code null} collection onto a managed entity that
-     * already has a real, tracked {@code orphanRemoval=true} collection for that role is exactly
-     * what Hibernate refuses at flush time with "A collection with cascade=all-delete-orphan was no
-     * longer referenced by the owning entity instance" — it cannot tell "leave it alone" from "the
-     * caller means to delete everything in it" from a bare {@code null}, and correctly declines to
-     * guess. See the KEV/OSV/malicious-package ingesters for the same upsert-onto-a-managed-row
-     * pattern; {@code references}/{@code cpeOperators} are cleared and rebuilt <em>in place</em> on
-     * the managed instance below for the identical reason — replacing the field with a new
-     * {@code ArrayList} would risk the same disconnect the moment either of them ever needs an
-     * {@code orphanRemoval} child of its own.
+     * <p>Writes a genuinely new CVE with {@link EntityManager#persist} rather than
+     * {@code vulnerabilityRepository.save(...)}. {@code Vulnerability}'s {@code @Id} is manually
+     * assigned (a CVE id, not {@code @GeneratedValue}), so Spring Data's default "is this new?"
+     * check always answers no — {@code save()} on an object with a non-null id it has never seen
+     * routes through {@code entityManager.merge(...)}, which for an <em>unmanaged</em> instance
+     * first runs a {@code SELECT} to find out whether a row with that id already exists before it
+     * can decide {@code INSERT} vs {@code UPDATE}. On a feed where most of every ingest is brand-new
+     * CVEs, that is one wasted round trip per row. {@code persist()} skips it: we already know it is
+     * new (nothing in {@code existing}, loaded just above), so tell Hibernate directly and let it
+     * batch a plain {@code INSERT} (see {@code hibernate.jdbc.batch_size} in
+     * {@code application.properties}).
+     *
+     * <p>A CVE already in {@code existing} needs no save call at all — {@code findAllById} loaded it
+     * into this (transactional) persistence context, so it is already the exact managed instance
+     * Hibernate is tracking, and the field mutations below are picked up by ordinary dirty checking
+     * at flush/commit. This is also why {@code alerts} is safe to leave completely untouched:
+     * mutating a managed instance in place never risks the {@code cascade=all-delete-orphan}
+     * collection-replacement problem a {@code merge()} of a detached object with a null
+     * {@code alerts} field used to hit (see {@code NVDServiceTest} for that regression).
+     * {@code references}/{@code cpeOperators} are still cleared and rebuilt <em>in place</em> below,
+     * for the same reason: NVD is the source of truth for both on every ingest, and replacing the
+     * field with a new {@code ArrayList} rather than clearing the existing one risks the identical
+     * disconnect the moment either ever needs an {@code orphanRemoval} child of its own.
      */
     @Transactional
     public int saveVulnerabilities(NVDCVEResult result) {
@@ -132,8 +238,11 @@ public class NVDService {
             existing.put(v.getId(), v);
         }
 
-        List<Vulnerability> vulns = new ArrayList<>();
+        int written = 0;
         for (NVDVulnerability nvdVulnerability : result.getVulnerabilities()) {
+
+            String cveId = nvdVulnerability.getCve().getId();
+            boolean isNew = !existing.containsKey(cveId);
 
             Optional<NVDCVEDescription> descriptionOptional = nvdVulnerability.getCve().getDescriptions().stream().filter(desc -> Objects.equals(desc.getLang(), "en")).findFirst();
             String description = "N/A";
@@ -142,11 +251,8 @@ public class NVDService {
                 description = descriptionOptional.get().getValue();
             }
 
-            // Reuse the managed row when one exists. `alerts` is never read or written here — it
-            // is exclusively owned by CorrelationService — so whatever Hibernate already tracks for
-            // it on a managed instance is simply never touched, never dirtied, never at risk.
-            Vulnerability vulnerability = existing.getOrDefault(nvdVulnerability.getCve().getId(), new Vulnerability());
-            vulnerability.setId(nvdVulnerability.getCve().getId());
+            Vulnerability vulnerability = existing.getOrDefault(cveId, new Vulnerability());
+            vulnerability.setId(cveId);
             // references/cpeOperators are fully re-derived from NVD on every ingest -- clear the
             // managed collection in place (not a field replacement) so a re-ingest of an existing
             // CVE correctly drops stale entries via orphanRemoval instead of accumulating duplicates.
@@ -236,16 +342,18 @@ public class NVDService {
                 }
             }
 
+            if (isNew) {
+                entityManager.persist(vulnerability);
+            }
             log.debug("Saving vuln {}", vulnerability);
-            vulns.add(vulnerability);
+            written++;
         }
-        this.vulnerabilityRepository.saveAll(vulns);
-        return vulns.size();
+        return written;
     }
 
-    private NVDCVEResult getDataAtOffset(int offset) {
+    private NVDCVEResult getDataAtOffset(int offset, LocalDateTime windowStart, LocalDateTime windowEnd) {
 
-        log.debug("Fetching NVD Vulnerability data from offset {}", offset);
+        log.debug("Fetching NVD Vulnerability data from offset {} for window [{}, {}]", offset, windowStart, windowEnd);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE);
@@ -255,6 +363,8 @@ public class NVDService {
         String urlTemplate = UriComponentsBuilder.fromHttpUrl(this.cveApiUrl)
                 .queryParam("resultsPerPage", this.resultsPerPage)
                 .queryParam("startIndex", offset)
+                .queryParam("lastModStartDate", formatForNvd(windowStart))
+                .queryParam("lastModEndDate", formatForNvd(windowEnd))
                 .encode()
                 .toUriString();
 
@@ -265,6 +375,11 @@ public class NVDService {
         }
 
         return result.getBody();
+    }
+
+    /** NVD requires an explicit UTC offset on {@code lastModStartDate}/{@code lastModEndDate}. */
+    private static String formatForNvd(LocalDateTime dateTime) {
+        return ZonedDateTime.of(dateTime, ZoneId.systemDefault()).format(NVD_DATE_FORMAT);
     }
 
 }

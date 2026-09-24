@@ -1,5 +1,7 @@
 package net.jdesive.secy.service;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.epss.EPSSData;
 import net.jdesive.secy.model.epss.EPSSResponse;
@@ -8,19 +10,22 @@ import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.EPSSRepository;
 import net.jdesive.secy.persistence.entity.EPSS;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 
 @Slf4j
@@ -34,6 +39,19 @@ public class EPSSService {
     private final EPSSRepository epssRepository;
 
     private final RestTemplate restTemplate;
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    /**
+     * A self-reference through the Spring proxy — see {@code NVDService}'s identical field for why:
+     * {@link #ingestEPSSData} calls {@link #saveEPSS} through this rather than directly, since a
+     * direct same-class call bypasses the proxy {@code @Transactional} needs to actually start a
+     * transaction, which {@code entityManager.persist(...)} inside {@code saveEPSS} requires.
+     */
+    @Autowired
+    @Lazy
+    private EPSSService self;
 
     @Autowired
     public EPSSService(EPSSRepository epssRepository, RestTemplate restTemplate) {
@@ -66,7 +84,7 @@ public class EPSSService {
         EPSSResponse result = this.getDataAtOffset(0);
         int total = result.getTotal();
         int offset = this.resultsPerPage;
-        int processed = this.saveEPSS(result);
+        int processed = self.saveEPSS(result);
         progress.report(processed, "Ingested " + processed + " of " + total + " EPSS scores…");
 
         while(offset < total) {
@@ -75,26 +93,56 @@ public class EPSSService {
             }
             EPSSResponse nestedResult = this.getDataAtOffset(offset);
             offset = this.resultsPerPage + offset;
-            processed += this.saveEPSS(nestedResult);
+            processed += self.saveEPSS(nestedResult);
             progress.report(processed, "Ingested " + processed + " of " + total + " EPSS scores…");
         }
 
         return IngestResult.of(processed, "EPSS scores");
     }
 
-    /** @return how many scores were written */
+    /**
+     * @return how many scores were written
+     *
+     * <p>Writes a genuinely new CVE with {@link EntityManager#persist} rather than
+     * {@code epssRepository.save(...)}/{@code saveAll(...)} — {@code EPSS}'s {@code @Id} is the CVE
+     * string itself, not {@code @GeneratedValue}, so Spring Data's "is this new?" check always says
+     * no and routes {@code save()} through {@code entityManager.merge(...)}, which for a row
+     * Hibernate has never seen runs a {@code SELECT} first to find out whether it already exists.
+     * FIRST publishes a full snapshot on every pull — hundreds of thousands of rows, almost all of
+     * them already existing — so skipping that select-before-insert only for the rows that are
+     * actually new, and leaving already-loaded rows to ordinary dirty checking, is the same fix
+     * {@code NVDService#saveVulnerabilities} applies for the identical reason.
+     *
+     * <p>{@code date} is written on every row regardless of whether the score changed — it backs
+     * {@code EPSSRepository}'s "score above X, updated in the last 7 days" query
+     * ({@code StatisticsService}'s "High Probability EPSS" dashboard stat), so a CVE whose score has
+     * simply stayed put must still count as current, not silently age out because nothing wrote to
+     * it. Unlike {@code KEVService}, there is no unwritten-if-unchanged fast path here for that
+     * reason — every row in the snapshot really is "touched" as of today.
+     */
+    @Transactional
     public int saveEPSS(EPSSResponse response) {
-        List<EPSS> epsses = new ArrayList<>();
+        List<String> ids = response.getData().stream().map(EPSSData::getCve).toList();
+        Map<String, EPSS> existing = new HashMap<>();
+        for (EPSS e : epssRepository.findAllById(ids)) {
+            existing.put(e.getCve(), e);
+        }
+
+        int written = 0;
         for (EPSSData epssData : response.getData()) {
-            EPSS epss = new EPSS();
+            boolean isNew = !existing.containsKey(epssData.getCve());
+            EPSS epss = existing.getOrDefault(epssData.getCve(), new EPSS());
             epss.setCve(epssData.getCve());
             epss.setEpss(epssData.getEpss());
             epss.setPercentile(epssData.getPercentile());
             epss.setDate(LocalDateTime.ofInstant(epssData.getDate().toInstant(), ZoneId.systemDefault()));
-            epsses.add(epss);
+
+            if (isNew) {
+                entityManager.persist(epss);
+            }
+            written++;
         }
-        this.epssRepository.saveAll(epsses);
-        return epsses.size();
+        return written;
     }
 
     private EPSSResponse getDataAtOffset(int offset) {

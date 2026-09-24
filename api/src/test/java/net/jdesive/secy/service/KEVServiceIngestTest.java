@@ -132,6 +132,26 @@ class KEVServiceIngestTest {
                 .isInstanceOf(org.springframework.web.client.RestClientException.class);
     }
 
+    /**
+     * CISA republishes the whole catalog on every pull, and most entries don't change day to day —
+     * {@code saveKevChunk} skips a row entirely when nothing about it differs from what's already
+     * stored, so a second ingest of an unchanged catalog should write nothing at all.
+     */
+    @Test
+    void reIngestingAnUnchangedCatalogWritesNothing() {
+        // Both expectations registered up front -- MockRestServiceServer refuses new expectations
+        // once actual requests have started arriving against earlier ones.
+        cisa.expect(requestTo(FEED_URL)).andRespond(withSuccess(CATALOG, MediaType.APPLICATION_JSON));
+        cisa.expect(requestTo(FEED_URL)).andRespond(withSuccess(CATALOG, MediaType.APPLICATION_JSON));
+
+        assertThat(kevService.ingest(JobProgress.NOOP).itemsProcessed()).isEqualTo(2);
+        IngestResult second = kevService.ingest(JobProgress.NOOP);
+
+        cisa.verify();
+        assertThat(second.itemsProcessed()).isZero();
+        assertThat(kevRepository.count()).isEqualTo(2);
+    }
+
     @Test
     void theNoArgOverloadStillWorks() {
         cisa.expect(requestTo(FEED_URL))

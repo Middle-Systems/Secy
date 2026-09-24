@@ -1,27 +1,45 @@
 package net.jdesive.secy.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.jdesive.secy.model.ingest.IngestResult;
+import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.model.nvd.NVDCVEResult;
+import net.jdesive.secy.persistence.NvdIngestCursorRepository;
 import net.jdesive.secy.persistence.ProductRepository;
 import net.jdesive.secy.persistence.SBOMComponentRepository;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.VulnerabilityRepository;
+import net.jdesive.secy.persistence.entity.NvdIngestCursor;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
 import net.jdesive.secy.persistence.entity.SBOMComponent;
 import net.jdesive.secy.persistence.entity.Vulnerability;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
  * The regression this pins: {@link NVDService#saveVulnerabilities} re-ingesting a CVE that already
@@ -66,6 +84,32 @@ class NVDServiceTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private NvdIngestCursorRepository cursorRepository;
+
+    @Autowired
+    private RestTemplate restTemplate;
+
+    private MockRestServiceServer nvd;
+
+    /**
+     * Not {@code @Transactional} — {@code ingestData}'s windowed sweep persists the cursor with its
+     * own {@code save()} call between windows, same as {@code KEVService}'s chunked writes, so a
+     * wrapping test transaction would hide exactly the "does the cursor actually land in the
+     * database" behaviour these tests exist to check. Clean up explicitly instead.
+     */
+    @BeforeEach
+    void setUp() {
+        cursorRepository.deleteAll();
+        nvd = MockRestServiceServer.bindTo(restTemplate).build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        cursorRepository.deleteAll();
+        vulnerabilityRepository.deleteAll();
+    }
 
     /**
      * A minimal, hand-built NVD 2.0 API response for one CVE. {@code metrics} must be present (even
@@ -155,6 +199,142 @@ class NVDServiceTest {
 
         assertThat(written).isEqualTo(1);
         assertThat(vulnerabilityRepository.findById(CVE_ID)).isPresent();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Windowed incremental ingest — the fix for "restart from CVE #1"    */
+    /* ------------------------------------------------------------------ */
+
+    private static final String WINDOW_CVE_ID = "CVE-2024-9001";
+
+    private static String nvdWindowResultJson() {
+        return """
+                {
+                  "resultsPerPage": 1, "startIndex": 0, "totalResults": 1,
+                  "vulnerabilities": [
+                    { "cve": {
+                        "id": "%s",
+                        "sourceIdentifier": "security@apache.org",
+                        "published": "2024-01-10T10:15:09.143",
+                        "lastModified": "2024-01-10T10:15:09.143",
+                        "vulnStatus": "Analyzed",
+                        "descriptions": [ { "lang": "en", "value": "A window-fetched CVE." } ],
+                        "metrics": {}
+                    } }
+                  ]
+                }
+                """.formatted(WINDOW_CVE_ID);
+    }
+
+    /**
+     * A cursor a few days old needs exactly one window to reach "now" — deliberately not testing a
+     * from-scratch sweep (no cursor row at all), which would need on the order of 80 mocked requests
+     * to walk from 1999 to today in 119-day steps. That sweep is the same code path run repeatedly;
+     * this pins the code path itself.
+     */
+    @Test
+    void ingestDataWithARecentCursorSweepsOneWindowAndAdvancesThePastIt() {
+        NvdIngestCursor cursor = new NvdIngestCursor();
+        cursor.setId("nvd");
+        cursor.setLastModified(LocalDateTime.now().minusDays(3));
+        cursorRepository.save(cursor);
+
+        nvd.expect(requestTo(startsWith("https://services.nvd.nist.gov/rest/json/cves/2.0")))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(queryParam("startIndex", "0"))
+                .andRespond(withSuccess(nvdWindowResultJson(), MediaType.APPLICATION_JSON));
+
+        IngestResult result = nvdService.ingestData(JobProgress.NOOP);
+
+        nvd.verify();
+        assertThat(result.itemsProcessed()).isEqualTo(1);
+        assertThat(vulnerabilityRepository.findById(WINDOW_CVE_ID)).isPresent();
+
+        NvdIngestCursor updated = cursorRepository.findById("nvd").orElseThrow();
+        assertThat(updated.getLastModified()).isAfter(LocalDateTime.now().minusMinutes(1));
+        assertThat(updated.getLastIngestedAt()).isNotNull();
+    }
+
+    /**
+     * A brand-new install has no cursor row at all, so the sweep starts from the fixed 1999 epoch —
+     * roughly 80-something windows to reach "now" from there, not one, so this cancels after the
+     * first window completes (the same technique as the cancellation test below) rather than mocking
+     * the whole sweep: the point here is only that a from-scratch sweep starts at the epoch, not that
+     * it can run to completion in a test.
+     */
+    @Test
+    void ingestDataWithNoCursorStartsSweepingFromTheFixedEpoch() {
+        assertThat(cursorRepository.findById("nvd")).isEmpty();
+
+        nvd.expect(requestTo(startsWith("https://services.nvd.nist.gov/rest/json/cves/2.0")))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(nvdWindowResultJson(), MediaType.APPLICATION_JSON));
+
+        AtomicBoolean firstWindowReported = new AtomicBoolean(false);
+        JobProgress cancelAfterFirstWindow = new JobProgress() {
+            @Override
+            public void report(int itemsProcessed, String message) {
+                firstWindowReported.set(true);
+            }
+
+            @Override
+            public boolean isCancelled() {
+                return firstWindowReported.get();
+            }
+        };
+
+        assertThatThrownBy(() -> nvdService.ingestData(cancelAfterFirstWindow))
+                .isInstanceOf(CancellationException.class);
+
+        nvd.verify();
+        NvdIngestCursor created = cursorRepository.findById("nvd").orElseThrow();
+        assertThat(created.getLastModified()).isEqualTo(LocalDateTime.of(1999, 1, 1, 0, 0).plusDays(119));
+    }
+
+    /**
+     * The regression this pins: before the windowed sweep, an ingest interrupted partway restarted
+     * from CVE #1 on the next attempt — with NVD returning undated results in roughly ascending-id
+     * order, a feed that never finished a run never reached anything from the last decade. Cancelling
+     * between windows must leave the cursor at the end of the last window that actually completed,
+     * not roll back past it and not skip ahead — the only assertion {@code MockRestServiceServer}
+     * having exactly one expectation registered doesn't already make: a second HTTP call (starting
+     * the next window anyway) would fail the test on its own.
+     */
+    @Test
+    void cancellationBetweenWindowsLeavesTheCursorAtTheLastCompletedWindow() {
+        LocalDateTime start = LocalDateTime.now().minusDays(150);
+        NvdIngestCursor cursor = new NvdIngestCursor();
+        cursor.setId("nvd");
+        cursor.setLastModified(start);
+        cursorRepository.save(cursor);
+
+        nvd.expect(requestTo(startsWith("https://services.nvd.nist.gov/rest/json/cves/2.0")))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(nvdWindowResultJson(), MediaType.APPLICATION_JSON));
+
+        AtomicBoolean firstWindowReported = new AtomicBoolean(false);
+        JobProgress cancelAfterFirstWindow = new JobProgress() {
+            @Override
+            public void report(int itemsProcessed, String message) {
+                firstWindowReported.set(true);
+            }
+
+            @Override
+            public boolean isCancelled() {
+                return firstWindowReported.get();
+            }
+        };
+
+        assertThatThrownBy(() -> nvdService.ingestData(cancelAfterFirstWindow))
+                .isInstanceOf(CancellationException.class);
+
+        nvd.verify();
+        NvdIngestCursor updated = cursorRepository.findById("nvd").orElseThrow();
+        // Truncated to millis on both sides: H2's TIMESTAMP column preserves microsecond precision,
+        // not the nanosecond precision LocalDateTime.now() (start's source) actually carries, so an
+        // exact isEqualTo here is comparing precision the database never round-trips.
+        assertThat(updated.getLastModified().truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
+                .isEqualTo(start.plusDays(119).truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
     }
 
 }
