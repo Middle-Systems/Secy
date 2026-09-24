@@ -26,8 +26,9 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
     /**
      * Reaper scan. Filtering on {@code status} in the query is what keeps the reaper from ever
      * touching — let alone resurrecting — a job that has already reached a terminal state.
+     * {@code lastProgressAt}, not {@code startedAt}, is the staleness signal — see {@link Job}.
      */
-    List<Job> findByStatusAndStartedAtBefore(JobStatus status, LocalDateTime cutoff);
+    List<Job> findByStatusAndLastProgressAtBefore(JobStatus status, LocalDateTime cutoff);
 
     /* Recent-first listings for GET /jobs, with the optional type/status filters. */
 

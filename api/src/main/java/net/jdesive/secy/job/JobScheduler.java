@@ -10,6 +10,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Every {@code @Scheduled} in the application, kept apart from the logic it triggers so tests can
@@ -66,8 +68,18 @@ public class JobScheduler {
     }
 
     /**
-     * Fail jobs stuck in {@code RUNNING} — a worker that died, or an app killed mid-ingest, would
+     * Fail jobs that have gone quiet — a worker that died, or an app killed mid-ingest, would
      * otherwise hold that feed's active slot forever and block every later enqueue.
+     *
+     * <p>{@code stale-timeout} bounds silence since the job's last reported progress, not its
+     * total time {@code RUNNING} — a feed pull whose legitimate runtime exceeds it (a rate-limited
+     * full historical crawl, say) is never reaped just for being slow. See
+     * {@link JobService#reapStale}.
+     *
+     * <p>Reaping a row here does not by itself stop the worker that (as far as this process is
+     * concerned) still owns it — {@link JobRunner#cancel} does that, so a job that turns out not
+     * to have actually died does not keep running invisibly under a row that now says
+     * {@code FAILED}.
      *
      * <p>The {@code fixedDelayString}/{@code initialDelayString} both reuse {@code stale-timeout}
      * deliberately — see {@link #reapStaleJobsOnStartup}, which exists precisely because that
@@ -78,9 +90,10 @@ public class JobScheduler {
     @Scheduled(fixedDelayString = "${secy.jobs.stale-timeout:PT30M}", initialDelayString = "${secy.jobs.stale-timeout:PT30M}")
     public void reapStaleJobs() {
         try {
-            int reaped = jobService.reapStale(properties.getStaleTimeout());
-            if (reaped > 0) {
-                log.warn("Reaped {} stalled ingestion job(s)", reaped);
+            List<UUID> reaped = jobService.reapStale(properties.getStaleTimeout());
+            if (!reaped.isEmpty()) {
+                log.warn("Reaped {} stalled ingestion job(s)", reaped.size());
+                reaped.forEach(jobRunner::cancel);
             }
         } catch (Exception e) {
             log.error("Stale ingestion job reaper failed", e);
@@ -108,9 +121,12 @@ public class JobScheduler {
             // guaranteed orphaned regardless of how recently it started, since this JVM has claimed
             // nothing yet -- unlike reapStaleJobs's periodic tick, which must tolerate a job that is
             // still legitimately in flight.
-            int reaped = jobService.reapStale(Duration.ZERO);
-            if (reaped > 0) {
-                log.warn("Reaped {} ingestion job(s) left RUNNING by a previous process", reaped);
+            List<UUID> reaped = jobService.reapStale(Duration.ZERO);
+            if (!reaped.isEmpty()) {
+                log.warn("Reaped {} ingestion job(s) left RUNNING by a previous process", reaped.size());
+                // No JobRunner.cancel() here: this fresh JVM has dispatched nothing yet, so none of
+                // these ids can be in its running map -- whatever thread orphaned them lived in a
+                // process that no longer exists.
             }
         } catch (Exception e) {
             log.error("Startup stale-job reap failed", e);

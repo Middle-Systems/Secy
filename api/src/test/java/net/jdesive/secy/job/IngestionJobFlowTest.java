@@ -298,12 +298,12 @@ class IngestionJobFlowTest {
     }
 
     @Test
-    void theReaperFailsAJobStuckInRunning() {
+    void theReaperFailsAJobWithNoProgressInAWhile() {
         Job stalled = jobService.enqueue(JobType.NVD, "alice@example.com");
         jobService.claim(stalled.getId());
-        backdateStart(stalled.getId(), LocalDateTime.now().minusHours(2));
+        backdateProgress(stalled.getId(), LocalDateTime.now().minusHours(2));
 
-        assertThat(jobService.reapStale(Duration.ofMinutes(30))).isEqualTo(1);
+        assertThat(jobService.reapStale(Duration.ofMinutes(30))).hasSize(1).containsExactly(stalled.getId());
 
         Job reaped = reload(stalled.getId());
         assertThat(reaped.getStatus()).isEqualTo(JobStatus.FAILED);
@@ -315,15 +315,29 @@ class IngestionJobFlowTest {
     void theReaperLeavesFinishedAndFreshJobsAlone() {
         Job done = jobService.enqueue(JobType.KEV, "alice@example.com");
         jobService.claim(done.getId());
-        backdateStart(done.getId(), LocalDateTime.now().minusHours(2));
+        backdateProgress(done.getId(), LocalDateTime.now().minusHours(2));
         jobService.finish(done.getId(), JobStatus.SUCCEEDED, 5, "5 KEV entries ingested");
 
         Job fresh = jobService.enqueue(JobType.EPSS, "alice@example.com");
         jobService.claim(fresh.getId());
 
-        assertThat(jobService.reapStale(Duration.ofMinutes(30))).isZero();
+        assertThat(jobService.reapStale(Duration.ofMinutes(30))).isEmpty();
         assertThat(reload(done.getId()).getStatus()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(reload(fresh.getId()).getStatus()).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    void theReaperLeavesALongRunningJobAloneIfItIsStillReportingProgress() {
+        // What today's stuck ingest actually was: a job whose total RUNNING time exceeds
+        // stale-timeout but that is still actively reporting -- a rate-limited full historical
+        // crawl, not a dead worker. Only silence since the last report should count as stale.
+        Job slowButAlive = jobService.enqueue(JobType.NVD, "alice@example.com");
+        jobService.claim(slowButAlive.getId());
+        backdateStartOnly(slowButAlive.getId(), LocalDateTime.now().minusHours(2));
+        jobService.progress(slowButAlive.getId(), 34_000, "Ingested 34000 CVE records…");
+
+        assertThat(jobService.reapStale(Duration.ofMinutes(30))).isEmpty();
+        assertThat(reload(slowButAlive.getId()).getStatus()).isEqualTo(JobStatus.RUNNING);
     }
 
     @Test
@@ -440,8 +454,16 @@ class IngestionJobFlowTest {
         return jobService.findActive(JobType.NVD).orElseThrow().getId();
     }
 
-    /** Pretend the job started long ago, so the reaper considers it stalled. */
-    private void backdateStart(UUID id, LocalDateTime startedAt) {
+    /** Pretend the job's last heartbeat was long ago, so the reaper considers it stalled. */
+    private void backdateProgress(UUID id, LocalDateTime at) {
+        Job job = reload(id);
+        job.setStartedAt(at);
+        job.setLastProgressAt(at);
+        jobRepository.save(job);
+    }
+
+    /** Pretend the job started long ago but keep its heartbeat fresh — still legitimately running. */
+    private void backdateStartOnly(UUID id, LocalDateTime startedAt) {
         Job job = reload(id);
         job.setStartedAt(startedAt);
         jobRepository.save(job);

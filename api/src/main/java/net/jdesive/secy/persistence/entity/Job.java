@@ -54,6 +54,14 @@ public class Job {
     /** Set when a worker claims the job. Null while {@code QUEUED}. */
     private LocalDateTime startedAt;
 
+    /**
+     * Set at claim and bumped on every {@link #itemsProcessed} update — the reaper's actual
+     * staleness signal. A long-running-but-progressing job (a full historical feed crawl, say)
+     * must never be judged stale by {@link #startedAt} alone; only silence since this timestamp
+     * means the worker that owned the job is gone.
+     */
+    private LocalDateTime lastProgressAt;
+
     /** Set on the transition to a terminal status. Null until then. */
     private LocalDateTime finishedAt;
 

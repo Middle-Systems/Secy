@@ -160,8 +160,10 @@ public class JobService {
         if (job == null || job.getStatus() != JobStatus.QUEUED) {
             return Optional.empty();
         }
+        LocalDateTime now = LocalDateTime.now();
         job.setStatus(JobStatus.RUNNING);
-        job.setStartedAt(LocalDateTime.now());
+        job.setStartedAt(now);
+        job.setLastProgressAt(now);
         job.setMessage("Starting…");
         try {
             // Flush inside the transaction so a lost version check surfaces here, not on commit.
@@ -181,6 +183,7 @@ public class JobService {
         }
         job.setItemsProcessed(itemsProcessed);
         job.setMessage(truncate(message));
+        job.setLastProgressAt(LocalDateTime.now());
         jobRepository.save(job);
     }
 
@@ -211,31 +214,37 @@ public class JobService {
     }
 
     /**
-     * Fail every job that has been {@code RUNNING} longer than {@code staleTimeout} — the worker
+     * Fail every job that has gone {@code staleTimeout} with no progress reported — the worker
      * that owned it died, or the whole app was killed mid-ingest.
+     *
+     * <p>Judged by silence since {@link Job#getLastProgressAt()}, not total time {@code RUNNING}
+     * since {@link Job#getStartedAt()}: a job whose legitimate runtime exceeds {@code staleTimeout}
+     * (a rate-limited full historical feed crawl, say) must never be reaped just for being slow —
+     * only for having gone quiet. The caller is responsible for actually stopping the worker
+     * thread once its job is reaped here; this only settles the database row.
      *
      * <p>The query only ever returns {@code RUNNING} rows, so this cannot touch a finished job. If
      * a worker commits its own result in between, the version check fails, this transaction rolls
      * back and the next tick sees the (now terminal) job and skips it.
      *
-     * @return how many jobs were failed
+     * @return the ids of the jobs that were failed
      */
     @Transactional
-    public int reapStale(java.time.Duration staleTimeout) {
+    public List<UUID> reapStale(java.time.Duration staleTimeout) {
         LocalDateTime cutoff = LocalDateTime.now().minus(staleTimeout);
-        List<Job> stale = jobRepository.findByStatusAndStartedAtBefore(JobStatus.RUNNING, cutoff);
+        List<Job> stale = jobRepository.findByStatusAndLastProgressAtBefore(JobStatus.RUNNING, cutoff);
         if (stale.isEmpty()) {
-            return 0;
+            return List.of();
         }
         for (Job job : stale) {
-            log.warn("Reaping job {} ({}) — RUNNING since {} with no completion", job.getId(), job.getType(),
-                    job.getStartedAt());
+            log.warn("Reaping job {} ({}) — no progress since {} (started {})", job.getId(), job.getType(),
+                    job.getLastProgressAt(), job.getStartedAt());
             job.setStatus(JobStatus.FAILED);
             job.setFinishedAt(LocalDateTime.now());
-            job.setMessage(truncate("Timed out after " + staleTimeout + " with no completion; the worker is presumed dead."));
+            job.setMessage(truncate("No progress for " + staleTimeout + "; the worker is presumed dead."));
         }
         jobRepository.saveAll(stale);
-        return stale.size();
+        return stale.stream().map(Job::getId).toList();
     }
 
     /* ---------------------------------------------------------------------- */
