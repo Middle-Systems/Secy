@@ -298,7 +298,32 @@ inventory + host-level IOC checks) stays deferred, tracked below under Phase 10.
   resources (EC2/ECR/Lambda via Inspector2, Azure VMs/ACR via Defender for Cloud) rather than SBOM
   ingest.
 
-### Phase 7 — Triage workflow
+### Phase 7 — Triage workflow  ✅ shipped 2026-09-24
+
+> Commit `ac7f9a3` on `feat/phase-1-actionable-core`. `TriageState`
+> (`OPEN`/`ACKNOWLEDGED`/`SNOOZED`/`RESOLVED`/`FALSE_POSITIVE`) + `snoozedUntil` + `assignee` added to
+> both `VulnerabilityAlert` and `CompromiseFinding` — orthogonal to `AlertLifecycleState` (what the
+> scanner observed) per that enum's own Javadoc, which reserved this column since Phase 2. New
+> `TriageEvent` append-only history table, same two-FK-XOR pattern as `component`/`assetComponent`.
+> `TriageService` resolves an id against either table (no shared entity interface, by design — see
+> `CompromiseFinding`'s class Javadoc). `PATCH /actionable/{id}` (state/assignee/snooze/comment,
+> works for either item type — unlike `GET /actionable/{id}`, which stays vulnerability-only),
+> `POST /actionable/{id}/comments`, bulk `PATCH /actionable`, `GET /actionable/{id}/history`,
+> `GET /users` for the assignee picker. The default `GET /actionable` list now really hides
+> `RESOLVED`/`FALSE_POSITIVE`/an-unexpired-`SNOOZED` row (wiring up the `state` filter param that
+> had sat as an accepted-and-ignored placeholder since Phase 6). UI: row multi-select + bulk
+> state/assignee action bar; a shared triage section (state, assignee, snooze date, history
+> timeline, comment box) in the detail drawer for both item types. Liquibase `014`.
+> Two Sonnet subagents built backend and UI in parallel off a fully pre-specified contract — the UI
+> agent caught two real contract bugs by reading the backend's actual source (an omitted
+> `assigneeId`/`snoozedUntil` means "leave unchanged", so there's no unassign via `PATCH`; and
+> `snoozedUntil` is a zone-less `LocalDateTime`, not UTC). The backend agent found and fixed a third
+> instance of the non-`@Transactional`-test-leaks-into-shared-H2 bug class (`AssetControllerTest`),
+> same shape as the two fixed in the AWS/Azure commit. 353/353 backend tests passing, verified
+> twice; UI verified via a clean `tsc --noEmit` — `npm test`/`npm run build` and browser end-to-end
+> testing didn't complete this session due to sustained sandbox memory/swap exhaustion from an
+> unrelated concurrent JetBrains RemoteDev session.
+
 - **State machine** on every alert / compromise finding: `OPEN → ACKNOWLEDGED → SNOOZED(until) → RESOLVED | FALSE_POSITIVE`, plus `assignee` and free-text `notes` / comment thread with an append-only history table.
 - **API**: `PATCH /actionable/{id}` (state, assignee), `POST /actionable/{id}/comments`, bulk `PATCH /actionable` for multi-select.
 - Default Actionable Items query hides `SNOOZED` (until expiry) and `RESOLVED` / `FALSE_POSITIVE`; a state filter shows them.
