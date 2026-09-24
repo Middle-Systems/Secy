@@ -1,463 +1,503 @@
-# Secy — Roadmap to MVP
+# Secy — Roadmap to v1
 
-> Working document. Updated as milestones land. Pairs with `CLAUDE.md` (how the repo
-> is laid out) and the session memory notes. Last revised 2026-09-05.
+> Working document. Updated as milestones land. Pairs with `CLAUDE.md` (how the repo is laid
+> out), the "Secy — Product Design Doc" (the product vision this roadmap now plans toward),
+> and the session memory notes. Last revised 2026-09-24 — **this is a full rewrite**, replacing
+> the earlier self-host-only, single-tenant MVP roadmap (see "What changed from the old
+> roadmap" below). The old roadmap's Phases 1-7 are not discarded — they're the substrate this
+> plan builds on.
 
-## What the MVP is
+## What Secy is now aiming to be
 
-**A self-hostable OSS security-posture platform that turns SBOMs, infra scans and
-compliance reports into a short, ranked list of vulnerabilities that actually matter.**
+**A software supply-chain security platform.** It correlates what a tenant declared, built,
+and deployed into one picture — SBOMs at every lifecycle stage, VEX statements, dependency
+graphs, cryptographic assets — then tells each role which risks matter and what to do about
+them. The core bet is correlation across the lifecycle: a CVE moves from "exists in a library
+somewhere" to "running in prod, not VEX'd out, on KEV, high EPSS, owned by team X"
+automatically, and every score is explainable.
 
-Someone clones the repo, runs `docker compose up`, registers the first (admin) user,
-points Secy at their assets, and gets an **Actionable Items** screen driven by the
-funnel: *KEV-listed **OR** EPSS > 0.1 **OR** a matched compromise indicator*.
+Deployment target is **multi-tenant SaaS by default, plus a self-hosted edition** — the
+reverse emphasis from the old roadmap, which was self-host-first with multi-tenancy explicitly
+post-MVP.
 
-### Decisions locked in (2026-09-05)
+### What changed from the old roadmap
+
+| | Old roadmap (Phases 1-10) | New roadmap (M0-M4) |
+|---|---|---|
+| Delivery model | Self-host OSS first, single tenant, multi-tenancy post-MVP | Multi-tenant SaaS by default + self-hosted edition, tenant-aware from M0 |
+| Product | Manually created, name + description | Tag-driven (`secy:product=...`), configurable tag key, "Unassigned" bucket |
+| Ownership | None | Inferred (CODEOWNERS, team perms, cloud tags) + manual override, source tracked |
+| Component identity | PURL-primary `identityKey` (Phase 3) | Same PURL-primary base, formalized with CPE/SWID/hash as secondary identifiers and confidence-flagged conflicts |
+| Lineage | None | Graph DB (Apache AGE on Postgres) for lifecycle → component → finding → action-item edges |
+| SBOM stages | None — one SBOM per product | Source / Build / Analyzed / Deployed, tagged at ingestion, diffed for drift findings |
+| VEX | Backlog item ("extends Phase 7") | In M1: CycloneDX VEX, OpenVEX, CSAF, configurable precedence |
+| CBOM (crypto assets) | Not planned | In M1: CycloneDX 1.6 crypto assets, quantum-vulnerable algorithm flagging |
+| Alert model | `VulnerabilityAlert` / `CompromiseFinding`, `TriageState` (ack/snooze/resolve/false-positive) | Broader `Finding` (vuln, drift, quantum-vuln, provenance, SBOM quality) + `ActionItem` grouping; status machine reconciled with the existing one |
+| Views | One view, ADMIN role only | Three role-based views (leadership / security engineer / software engineer) over one data model |
+| Connectors | GitHub (PAT) / AWS / Azure (static creds), agentless SBOM/scan pull only | Same providers, upgraded to GitHub App + cross-account IAM/workload-identity, plus ownership inference, plus Kubernetes + registry connectors |
+| Security of Secy | Not addressed as its own concern | Tenant isolation (RLS), per-tenant KMS-encrypted secrets, SSO, audit log — own hardening milestone |
+| Feeds | 8 feeds, all already shipped | Unchanged — reused as-is, just gain per-tenant toggles |
+
+The **8 feeds already in the codebase answer the design doc's own open question** ("which
+feeds exist today?"): NVD, KEV, EPSS, OSV, CVE List v5 + CISA Vulnrichment, an exploit index
+(merged Nuclei templates + Metasploit modules + PoC-in-GitHub), OpenSSF Malicious Packages, and
+abuse.ch MalwareBazaar. No new feed engineering is needed for M1 — only per-tenant enable/
+disable toggles and score-snapshot semantics.
+
+### Decisions locked in (2026-09-24)
 
 | Question | Decision |
 |---|---|
-| Delivery model | **Self-host OSS first.** One-command Docker Compose, single tenant, local JWT. Helm chart + hosted multi-tenant SaaS are **post-MVP**. |
-| Actionable core | **Full build** — KEV/EPSS enrichment wired into scanning, `/actionable` endpoint, first-class Actionable Items view as the primary screen. |
-| Correlation quality | **Solid** — OSV-primary for open-source packages (PURL-native, ships the fix version), NVD CPE range matching (`versionStart/EndIncluding/Excluding`) as fallback and for non-package assets. Not the current `split(":")[5]` hack. |
-| Feeds (MVP) | NVD, KEV, EPSS, **OSV.dev**, **CISA Vulnrichment / CVE List v5**. OSV supplies package↔CVE matches + per-ecosystem fix versions; Vulnrichment/CVE-5.1 supplies SSVC decision points, current CVSS/CWE/CPE (NVD has a backlog) and `REJECTED`/`DISPUTED` status. KEV = exploitation, EPSS = probability — neither is replaceable. NVD stays canonical for non-package (OS/firmware/proprietary) CPE data. Further feeds tracked in **Feed backlog** below. |
-| Fix version | Every actionable item carries a fix state: `FIXED` (+ version(s)), `NO_FIX` (none published yet), `UNKNOWN`. Shown as a badge/column; opt-in "only with a fix" filter, remembered per-user. Sources in precedence order: OSV (packages) → scanner `FixedVersion` (assets) → NVD CPE-range-derived (approximate, flagged). |
-| Exploit signal | Beyond KEV membership, each alert carries `exploitMaturity` (`NONE` / `POC` / `WEAPONIZED` / `IN_THE_WILD`) derived from a merged public-exploit index (Nuclei templates + Metasploit modules + PoC-in-GitHub) and KEV. Plus `kevDueDate`, `knownRansomwareUse`, `epssPercentile` surfaced directly. |
-| Compromise detection | Supply-chain scope only (what Secy actually holds data for): match SBOM components + file hashes against **OpenSSF Malicious Packages** and **abuse.ch MalwareBazaar**. Produces a `CompromiseFinding` (separate from `VulnerabilityAlert`) — "you ship a known-malicious dependency/file", not "you have a vuln". IOC-vs-telemetry validation needs a data source Secy doesn't have → **vNext**, see below. |
-| SBOM formats | **CycloneDX + SPDX**, both normalized to one internal component model. |
-| Infra inventory | **Trivy / Grype JSON ingest** for MVP. **Cloud/agent discovery** is a stretch item (Phase 10) and may land as a fast-follow. |
-| Compliance | Docker / CIS: finish the backend, build the Compliance view. |
-| Triage | Alert state workflow (ack / snooze / resolve / false-positive) with history. |
-| Ingestion | Scheduled auto-refresh of every feed on a cron; NVD incremental pulls. |
-| Notifications | Email + generic webhook on new actionable items. |
-| Reporting | CSV + PDF export of the actionable list / posture summary. |
-| Capacity | Solo + Claude Code sessions. Milestone-paced, no hard date. |
-
-### Explicitly NOT in the MVP
-
-Multi-tenancy, billing, self-serve sign-up, OIDC/SSO, fine-grained RBAC, audit log
-(these are the planned open-core commercial add-ons), Helm chart, hosted SaaS,
-agent-based fleet discovery (unless Phase 10 finishes early), SPDX RDF/XML (JSON only),
-non-Docker CIS benchmarks, SIEM/EDR-backed IOC validation (vNext).
+| Tenancy sequencing | **Schema now, enforcement later.** `Tenant` + `tenant_id` land in M0 on every table the roadmap touches. Postgres row-level security, per-tenant KMS, SSO, and the audit log are a dedicated **Tenancy hardening** milestone, not M0 — M1 runs functionally as a single implicit tenant. |
+| Graph DB | **Apache AGE on Postgres.** No second stateful service, no Helm-chart addition for self-host, one backup/restore story, trivially rebuildable from Postgres (the system of record) as the design doc requires, no dependency on one cloud's managed graph service (rules out Neptune). |
+| Prior work | **Reuse as substrate.** `VulnerabilityAlert`, `CompromiseFinding`, `CorrelationService`, all 8 feeds, and the GitHub/AWS/Azure connectors are kept and extended, not rewritten. New work is scoped as deltas. |
+| Products | Tag-driven, tag key configurable per tenant (default `secy:product`, open question in the design doc — this is the recommended default, not yet locked). Untagged assets land in "Unassigned". Manual product assignment at upload time stays available until connectors exist. |
+| Component identity | PURL is the primary key; CPE, SWID, and content hashes are secondary identifiers. Conflicting identifiers flag a low-confidence link rather than guessing. |
+| VEX precedence | Configurable per tenant; default is tenant statements override vendor statements, conflicts flagged for review. |
+| Risk acceptance approval | **Still open** — the design doc leaves this unresolved (security-engineer approval vs. owner self-accept) and it's a policy call, not an engineering one. Decide before M1j (the Finding/Action-item status machine) ships the risk-acceptance flow. |
+| Test fixtures | Synthetic fixtures, extending the existing `api/src/test/resources/correlation/` golden-set pattern already used for correlation precision/recall testing — repeatable, no anonymized-real-SBOM sourcing problem. |
+| Capacity | Unchanged — solo + Claude sessions, milestone-paced, no hard date. |
 
 ---
 
-## Current state (baseline)
+## Current state (baseline going into M0)
 
-**Backend (`api/`)** — Spring Boot 3.3, Java 17, PostgreSQL, Liquibase, OpenAPI.
-- Feed ingestion NVD / KEV / EPSS via a DB-polled job queue (`job/`, `POST /{feed}/ingest` → 202 + Job, `GET /jobs`).
-- JWT auth, single tenant, first registered user → ADMIN (`auth/`, `security/`).
-- SBOM upload → async event → `VulnerabilityScanner` → `AlertService.generateAlerts(SBOM)` → `VulnerabilityAlert` rows.
-- CIS/Docker: `CISController` ingests a report and has a `GET /cis/docker/scan/{id}` alert generator. No pagination, not job-queued, no list endpoints.
-- `GET /stats/dashboard` roll-up.
+Everything below is real, shipped code on `feat/phase-1-actionable-core` (**not merged to
+`master`**) that the new roadmap builds on rather than replaces. See the design-doc mapping
+table above for what's reused as-is vs. extended.
+
+**Backend (`api/`)** — Spring Boot 3.3, Java 17, PostgreSQL, Liquibase (changesets `001`-`014`),
+OpenAPI.
+- **Funnel**: `VulnerabilityAlert` enriched with KEV/EPSS/exploit-maturity/fix-state;
+  `actionable` = KEV OR EPSS > threshold OR has a `CompromiseFinding`. `GET /actionable` is a
+  typed union of vulnerability + compromise rows.
+- **Correlation**: `CorrelationService`, OSV-primary with CPE-range fallback, per-ecosystem
+  `VersionScheme`, `matchConfidence`, alert lifecycle (auto-resolve/no-dupes), a 6-fixture
+  golden set at precision/recall ≥ 1.0.
+- **Feeds** (8, all job-queued, manual-trigger only today): NVD, KEV, EPSS, OSV, CVE List v5 +
+  Vulnrichment, exploit index, OpenSSF Malicious Packages, abuse.ch MalwareBazaar.
+- **SBOM**: `NormalizedComponent` shared CycloneDX/SPDX parse target, version-less-PURL
+  `identityKey` survives re-upload, job-queued upload with progress polling.
+- **Assets**: `Asset`/`AssetComponent` (CONTAINER_IMAGE/HOST/SERVICE), Trivy + Grype JSON
+  ingest, scanner-reported fix versions.
+- **Compliance**: Docker/CIS reports route through the same `Asset` pipeline as scanner ingest;
+  misconfigurations get their own control-breakdown model (deliberately outside the CVE funnel).
+- **Compromise detection**: `CompromiseFinding` (own table), malicious-package + malware-hash
+  matching, IOC aging.
+- **Connectors**: `SourceConnector` (GITHUB/AWS/AZURE), one instance-wide credential per
+  provider, agentless sync through the same `AssetService#applyScan` / SBOM ingest paths as
+  manual upload.
+- **Triage**: `TriageState` (OPEN/ACKNOWLEDGED/SNOOZED/RESOLVED/FALSE_POSITIVE) + `assignee` +
+  append-only `TriageEvent` history on both alert types, bulk actions, `PATCH /actionable/{id}`.
+- **Auth**: single-tenant JWT, first registered user → ADMIN. `User`/`Role` only — no `Tenant`
+  entity, no row-level scoping anywhere in the schema today.
+- **Product**: `id` / `name` / `description` / `sboms` only — no tags, no ownership, no
+  lifecycle-stage concept on `SBOM`.
 
 **Frontend (`ui/`)** — React 18, Vite 6, TanStack Router/Query/Table, Tailwind + shadcn.
-- Views at parity: Dashboard, KEV / EPSS / CVE database browsers, Product Catalog + SBOM upload/history/vuln-detail modals.
-- `Infrastructure` and `Compliance` are `PlaceholderPage` routes.
-- Auth shell (`ui/src/auth/`), code-split routes, ~160 KB gz initial bundle.
+Actionable Items (index), Dashboard, KEV/EPSS/CVE browsers, Product Catalog, Infrastructure,
+Compliance, Connectors settings — one view, no role differentiation.
 
-**Known weak points the roadmap must fix**
-1. `AlertService.generateAlerts(SBOM)` never consults KEV or EPSS — the funnel isn't applied anywhere. There is no "actionable" concept in the data model, only raw alerts.
-2. `CPEMatch` stores `criteria` only — no version-range columns. Version check is `criteria.split(":")[5]` + a loose numeric compare. High false-positive/negative rate.
-3. No PURL ecosystem awareness — one CPE name-pattern query for every component regardless of npm/maven/pypi/golang.
-4. No fix-version data anywhere — an alert can't say whether a patch exists.
-5. Only 3 feeds; no OSV (package matching leans entirely on NVD CPE guessing), no exploit-availability signal, and NVD's analysis backlog leaves recent CVEs with no CVSS/CWE.
-6. KEV is ingested but `dueDate` / `knownRansomwareCampaignUse` are unused; EPSS percentile isn't stored.
-7. No malicious-package / IOC detection — a backdoored dependency reads the same as a clean one.
-8. CycloneDX model is bespoke; no shared normalized component model; no SPDX.
-9. No app container images, no top-level compose, no CI.
-10. Feeds only refresh on a manual button press; NVD pull is a full re-pull.
+**Known gaps the new roadmap must close** (superset of the old roadmap's list, most of the
+original 10 are now closed):
+1. No `Tenant` concept anywhere — everything is implicitly single-tenant.
+2. `Product` has no tags, no ownership, is manually created only.
+3. No SBOM lifecycle stage — one upload replaces/adds to a product's component set with no
+   source/build/analyzed/deployed distinction, so lifecycle drift can't be detected.
+4. No VEX ingestion — `not_affected`/`fixed`/`under_investigation` statements aren't modeled.
+5. No CBOM / cryptographic-asset ingestion, no quantum-vulnerable-algorithm flagging.
+6. No graph DB — blast-radius and lineage queries aren't possible today.
+7. `NormalizedComponent` identity has no CPE/SWID/hash secondary resolution or
+   confidence-flagged conflict handling.
+8. Connectors use static, instance-wide credentials, not a GitHub App or cross-account
+   IAM/workload-identity model; no Kubernetes or registry connector; no ownership inference.
+9. One role (ADMIN) — no leadership/security-engineer/software-engineer view split.
+10. `TriageState` doesn't have risk-acceptance-with-expiry or a VEX-backed not-affected status,
+    and doesn't auto-reopen when a resolved component reappears.
+11. No Postgres row-level security, no per-tenant secret storage, no SSO, no audit log.
+12. No Helm chart for self-hosted multi-tenant-capable deployment.
 
 ---
 
 ## Milestones
 
-Each phase is independently shippable and leaves `master` green
+Each milestone is independently shippable and leaves `master` green
 (`cd api && ./gradlew build`; `cd ui && npm run build && npm test`).
 
-### Phase 1 — The actionable core  ✅ shipped 2026-09-06
-*Goal: the funnel exists end to end and is the first thing you see.*
+### M0 — Tenancy foundation (schema only)
+*Goal: nothing built from here on needs a tenancy retrofit.*
 
-> **Landed** on `feat/phase-1-actionable-core` (commits `40f1c67`, `f083d91`, `6441558`):
-> all 12 enrichment columns + Liquibase `004`; `EnrichmentService` funnel wired into SBOM
-> alert generation + `reEnrichAll()` on a `FeedIngestedEvent`; `SECY_ACTIONABLE_EPSS_THRESHOLD`
-> (strict `>`); `GET /actionable` + `/actionable/{id}`; 15 new `DashboardStats` counters;
-> exploit-index feed (`JobType.EXPLOIT`, `cve_exploit`, Liquibase `005`, `@Primary` resolver);
-> Actionable Items UI at `/` with Fix/Exploit/KEV badges, detail sheet, localStorage filter
-> toggles; dashboard → `/dashboard`. Backend 80 tests green; UI typecheck/lint/build green.
-> **Deferred:** Docker/CIS alerts stay outside the funnel (no CVE join — moved to Phase 5);
-> `fixState` is always `UNKNOWN` until Phase 2/4 supplies versions; `assetId`/`state`
-> `/actionable` params are accepted no-ops (Phases 4/7); Liquibase `004`/`005` not yet run
-> against a real PostgreSQL. Not merged to `master`.
+- **`Tenant` entity**: id, name, slug, created-at. `User` gains a tenant membership (many-to-many
+  if a user can belong to more than one tenant — decide during implementation; the design doc's
+  "a user can hold more than one role and switch views" is per-tenant, not cross-tenant).
+- **`tenant_id`** added to every table this roadmap touches: `Product`, `SBOM`, `Asset`,
+  `VulnerabilityAlert`, `CompromiseFinding`, the future `Finding`/`ActionItem`, `SourceConnector`,
+  and any new M1 tables (products-by-tag config, ownership links, VEX statements, CBOM findings).
+  Feed tables (`kev`, `epss`, `osv_advisory`, etc.) stay tenant-agnostic — they're global
+  intelligence, not tenant data.
+- **Migration**: backfill one default tenant for all existing rows so the branch keeps working
+  single-tenant through M1 without every query needing a tenant filter yet.
+- **Explicitly not in scope**: Postgres row-level security enforcement, per-tenant KMS, SSO,
+  audit log — see **Tenancy hardening** below. `tenant_id` existing on a row is not the same as
+  it being enforced; M0 just stops the schema from needing a second migration pass later.
 
-- **Data model**: enrichment join `VulnerabilityAlert → Vulnerability (CVE) → EPSS score + KEV membership`. Add a computed/persisted `actionable` flag + `actionableReason` (`KEV` / `EPSS_HIGH` / both) and denormalized `epssScore` / `epssPercentile` / `cvssScore` on the alert for sorting. Also add `fixState` (`FIXED` / `NO_FIX` / `UNKNOWN`), `fixedVersions` (text), `fixSource` (`OSV` / `SCANNER` / `CPE_RANGE`), `exploitMaturity` (`NONE` / `POC` / `WEAPONIZED` / `IN_THE_WILD`), `kevDueDate`, `knownRansomwareUse`. Liquibase changeset.
-- **Exploit index feed**: one ingester that merges Nuclei templates (`projectdiscovery/nuclei-templates`, `cves.json`), Metasploit modules (`rapid7/metasploit-framework`, `db/modules_metadata_base.json`) and PoC-in-GitHub (`nomi-sec/PoC-in-GitHub`) into a `cve_exploit` table (CVE → highest maturity + source links). `POST /exploits/ingest` + scheduled refresh. `exploitMaturity` = max(KEV ⇒ `IN_THE_WILD`, Metasploit/Nuclei ⇒ `WEAPONIZED`, PoC-in-GitHub ⇒ `POC`, else `NONE`).
-- **Threshold config**: `SECY_ACTIONABLE_EPSS_THRESHOLD` (default `0.1`), documented alongside the other env vars.
-- **Scanning**: `AlertService` (and the Docker path) set `actionable` + reason at alert-generation time; a re-enrichment job re-evaluates existing alerts after each EPSS / KEV / exploit-index ingest. `fixState` is populated from scanner `FixedVersion` where present, else `UNKNOWN` (OSV/CPE-range population arrives in Phase 2).
-- **API**: `GET /actionable` — paged, filter by `productId` / `assetId` / `reason` / `minCvss` / `state` / `fixState` / `minExploitMaturity`, sort by EPSS desc default. `GET /actionable/{id}` detail (CVE, affected components/assets, fix version(s), exploit links, KEV due date, feed evidence).
-- **Dashboard**: `DashboardStats` gains real actionable counts (open, by reason, by severity, with-fix vs. without, by exploit maturity, past-KEV-due-date, trend vs. 7d).
-- **UI**: new **Actionable Items** view becomes `/` (index). Table with severity, EPSS (score + percentile), KEV badge, **Exploit badge** (PoC / Weaponized / In-the-wild), **Fix badge** (version / "none yet" / "unknown"), affected product/asset, age; row → detail drawer reusing `CveDetailPanel`. Opt-in toggles for "only with a fix" and "only with a known exploit", persisted per-user (localStorage). Dashboard stays at `/dashboard`.
-- **Tests**: service-level funnel tests; `/actionable` filter/sort contract tests (incl. `fixState`, `minExploitMaturity`); exploit-index merge tests; a UI view test.
+### M1 — Ingestion core to action items
+*Goal: the design doc's M1 — SBOMs at every lifecycle stage, VEX, CBOM, canonical identity,
+scoring, findings/action items, and all three role views, with no external integrations yet.*
 
-### Phase 2 — Correlation engine rework (OSV-primary)  ✅ shipped 2026-09-10
-*Goal: the actionable list is trustworthy, and it knows whether a fix exists.*
+This is the bulk of the new work. It's broken into lettered sub-phases so it can ship
+incrementally rather than as one giant branch; the dependency order below is a starting
+suggestion, not a hard requirement.
 
-> **Landed** on `feat/phase-1-actionable-core` (commits `63f6094` correlation core,
-> `882639a` UI, `efcdfb0` OSV feed, `5d6f09a` CVE-List-v5/Vulnrichment feed): `CorrelationService`
-> runs OSV-primary with real range evaluation, CPE fallback only for OSV-uncovered packages
-> (a clean OSV verdict short-circuits CPE), proper CPE 2.3 parsing, `VersionScheme` per ecosystem
-> (SemVer/PEP440/Maven/Go/Generic), `matchConfidence` + alert lifecycle (auto-resolve, no dupes),
-> `osv_advisory`/`osv_ecosystem_cursor` mirror, `POST /osv/ingest`, `POST /cve-list/ingest`
-> (`cveStatus`/`cvssSource`/SSVC), REJECTED/DISPUTED funnel veto, a 6-fixture golden set at
-> precision/recall ≥ 1.0, `matchConfidence` + approximate-fix caveat in the UI. Backend 194+
-> tests green (81 new across the four commits); UI typecheck/lint/build green.
-> **Deferred:** GHSA-only advisories with no CVE alias are skipped (funnel is CVE-keyed);
-> CPE AND/OR nesting not evaluated; CVE List is a full re-pull with no incremental delta;
-> existing `cpe_match` rows need a fresh `POST /nvd/ingest` to pick up version ranges; `006`/`007`
-> (`004`/`005` from Phase 1 too) not yet run against a real PostgreSQL. Not merged to `master`.
+**M1a — Tag-driven products.** Configurable tag key (default `secy:product`, per-tenant
+override — see the open decisions table). Anything untagged lands in an "Unassigned" bucket
+visible to security engineers. Manual product assignment at SBOM-upload time stays as the path
+until M2/M3's connectors exist to apply tags automatically.
 
-- **OSV feed** (feed #4): mirror OSV's per-ecosystem exports (`gs://osv-vulnerabilities/<ecosystem>/all.zip`) into Postgres via the job queue, same pattern as NVD/KEV/EPSS. New `osv_advisory` table: ecosystem, package, aliases (CVE/GHSA), affected `introduced`/`fixed`/`last_affected` ranges, severity/CVSS vector, references. `POST /osv/ingest` + scheduled refresh. Store a per-ecosystem high-water mark.
-- **CVE List v5 + Vulnrichment feed** (feed #5): ingest CVE JSON 5.1 records (bulk from `CVEProject/cvelistV5`, hourly deltas) including the CISA-ADP **Vulnrichment** container. Populate on `Vulnerability`: `cveStatus` (`PUBLISHED` / `REJECTED` / `DISPUTED`), best-available CVSS + `cvssSource` (NVD → CNA → ADP precedence), CWE, and SSVC decision points (`ssvcExploitation`, `ssvcAutomatable`, `ssvcTechnicalImpact`). `POST /cve/ingest` + scheduled refresh. `REJECTED` / `DISPUTED` CVEs are excluded from the actionable funnel (still visible in the CVE browser, flagged).
-- **Primary correlation path** — for every `NormalizedComponent` with a PURL: look up `osv_advisory` by ecosystem + package, evaluate the component version against each affected range using the ecosystem's version scheme. A hit → alert, resolved to a CVE via OSV aliases, with `fixState`/`fixedVersions` taken straight from the OSV `fixed` events (`fixSource = OSV`).
-- **Fallback / non-package path** — NVD CPE matching for components OSV doesn't cover and for infra/OS assets:
-  - **Schema**: extend `CPEMatch` with `versionStartIncluding/Excluding`, `versionEndIncluding/Excluding`; populate from the NVD `configurations[].nodes[].cpeMatch[]` payload during ingest (`NVDService`). Liquibase + a re-ingest note.
-  - **Matching**: replace `split(":")[5]` with proper CPE 2.3 parsing (vendor, product, version, update) and range evaluation.
-  - **Fix guess**: derive an approximate fix version from the vulnerable range's `versionEndExcluding` when present; `fixSource = CPE_RANGE`, flagged approximate in the UI.
-- **PURL → CPE bridge** (fallback only): map PURL `type` → vendor/product heuristics (`maven` groupId/artifactId, `npm`/`pypi`/`golang`/`nuget`/`gem` ecosystem name). Unknown type → broad name-pattern fallback, lowest confidence.
-- **Version comparison**: pluggable `VersionScheme` per ecosystem (SemVer, PEP 440, Maven, Go, generic); one shared implementation used by both the OSV and CPE paths. Replaces the single `util/Version` class.
-- **Alert lifecycle**: on re-scan, alerts whose match no longer holds are marked `RESOLVED (auto)` rather than deleted; new matches added; no duplicates. Re-enrichment refreshes `fixState` when OSV/NVD data changes.
-- **Confidence**: each alert carries `matchConfidence` (`EXACT` / `RANGE` / `HEURISTIC`) and `fixSource`; both surfaced in the UI.
-- **Golden set**: `api/src/test/resources/correlation/` — 4–6 real SBOMs with hand-verified expected CVEs *and* expected fix versions; a test asserts precision/recall stays above a documented bar.
+**M1b — Ownership model.** Manual mapping only in this sub-phase — inference needs M2/M3's
+connectors (CODEOWNERS, GitHub team permissions, cloud resource tags). Each ownership link
+records its source (`INFERRED` / `MANUAL`) even though only `MANUAL` is populated yet, so M2/M3
+don't need a schema change to add inference.
 
-### Phase 3 — SBOM breadth (SPDX) + ingest hardening  ✅ shipped 2026-09-11
+**M1c — Canonical component identity.** Extend the existing `NormalizedComponent`/`identityKey`
+(PURL-primary, built in the old roadmap's Phase 3) with CPE, SWID tag, and content hash as
+secondary identifiers. When identifiers conflict across sources, flag the link low-confidence
+instead of guessing a merge. Keep per-instance provenance (which SBOM, which stage, which
+ingestion) — already partially present, formalize it as a first-class field.
 
-> **Landed** on `feat/phase-1-actionable-core` (commits `d5bb772` core, `7378307` job queue,
-> `e859c05` UI): `NormalizedComponent` as the shared CycloneDX/SPDX parse target; a version-less
-> PURL `identityKey` on `SBOMComponent` so a component's identity survives a re-upload — this
-> also fixed a real bug where Phase 2's auto-resolve/revive lifecycle only ever worked within
-> one SBOM's own re-correlation, never across a genuine new upload; SPDX 2.2/2.3 JSON parsing
-> (flat `packages[]`, no relationship-graph traversal); format sniffed from the raw body with a
-> 400 on an unrecognized shape; `POST /sbom/{id}/sboms` now returns 202 + a `SBOM_UPLOAD` Job
-> (breaking response-shape change) instead of blocking on ingest, with UI progress polling.
-> Backend 224 tests green (+28 across three commits); UI green.
-> **Deferred:** SPDX relationship graph / files / snippets not read; a pre-existing quirk where
-> `SBOM.components` includes the CycloneDX root/metadata component alongside real dependencies
-> (documented, not introduced by this phase); Liquibase `007`/`008` (like `004`-`006`) not yet
-> run against a real PostgreSQL. Not merged to `master`.
-- Introduce `model/component/NormalizedComponent` (name, version, purl, ecosystem, licenses, scope).
-- Refactor CycloneDX parsing → `NormalizedComponent`; scan pipeline consumes only the normalized model.
-- Add SPDX (JSON, 2.2 + 2.3) parser → `NormalizedComponent`. Detect format on upload; reject unknown with a clear 400.
-- SBOM upload goes through the job queue (consistent with feeds) with progress + failure surfacing in the UI.
-- Component de-dup within a product across SBOM versions so history diffs are meaningful.
+**M1d — Lineage graph (Apache AGE).** Stand up Apache AGE as a Postgres extension (no new
+service). Write lineage edges Product → Repo → Build → Image/Artifact → Workload/Cloud Asset,
+and Build → Component (PURL) → Vulnerability → Finding → Action item, mirroring the design
+doc's `flowchart LR`. Graph writes are derived from Postgres and must be rebuildable from it —
+Postgres stays the system of record, the graph is a queryable index over it, not a second
+source of truth.
 
-### Phase 4 — Infrastructure / asset inventory  ✅ shipped 2026-09-11
+**M1e — SBOM lifecycle stages + diffing.** Every SBOM is tagged with its stage (Source / Build /
+Analyzed / Deployed) at ingestion, by upload metadata or API field. A diff engine runs
+automatically whenever a new SBOM for a stage arrives and a comparable SBOM exists for the
+adjacent stage:
+  - Source vs Build mismatch → possible dependency confusion / build injection finding.
+  - Build vs Deployed mismatch → runtime drift / unauthorized change finding.
+  - Build vs Analyzed mismatch → incomplete SBOM / tampering finding.
 
-> **Landed** on `feat/phase-1-actionable-core` (commits `c87ce81` backend, `db3c8bb` UI):
-> `VulnerabilityAlert` widened via two nullable FKs (`component_id` / `asset_component_id`) with
-> a DB-level XOR check and a shared `CorrelatableComponent` interface — not a parallel alert table
-> (`DockerVulnerabilityAlert` is the standing example of why that path was rejected). `Asset` +
-> `AssetComponent` (CONTAINER_IMAGE/HOST/SERVICE), Trivy + Grype JSON ingest via the Phase-3
-> job-queue-upload pattern (`POST /assets/scan/{trivy,grype}`, `JobType.ASSET_SCAN`), same
-> version-less-PURL identity scheme as SBOM components but scoped *within* the asset, not its
-> optional product. Scanner fixes route through `EnrichmentService`'s existing
-> OSV→SCANNER→CPE_RANGE precedence unchanged. `GET/DELETE /assets`, `/assets/{id}`. Real
-> Infrastructure UI (list, drilldown, scan upload, delete with cascade confirmation).
-> **Breaking:** `GET /actionable?assetId=` is upgraded from Phase 1's no-op to a real filter.
-> Backend 254 tests green (+30); UI green.
-> **Deferred:** a scanner-reported CVE with no NVD row yet is dropped (run `POST /nvd/ingest`
-> first on a fresh install); no dedicated `declaredCpe` write endpoint; a scan reports only
-> vulnerable packages, not full inventory; Liquibase `009` (like `004`-`008`) not yet run against
-> a real PostgreSQL. Docker/CIS alerts remain outside the funnel — Phase 5. Not merged to `master`.
-- **Domain**: `Asset` (type: `CONTAINER_IMAGE` / `HOST` / `SERVICE`), optional link to `Product`, holds `NormalizedComponent`s and/or declared CPEs, `lastScannedAt`.
-- **Ingest**: `POST /assets/scan/trivy` and `.../grype` — parse scanner JSON (image + filesystem), create/update the asset, import its components, and capture each finding's `FixedVersion` → alert `fixState`/`fixedVersions` (`fixSource = SCANNER`).
-- **Correlation**: scanner-reported CVEs become alerts immediately; Secy also re-correlates (OSV + KEV/EPSS) so scanner output flows through the same funnel and picks up an OSV fix version when the scanner didn't supply one.
-- **API**: `GET /assets` paged + filter, `GET /assets/{id}` with its actionable items, `DELETE /assets/{id}`.
-- **UI**: build the **Infrastructure** view — asset list, per-asset drilldown, "scan output" upload modal (mirrors SBOM upload). Actionable Items view gains an asset filter.
+**M1f — VEX ingestion.** CycloneDX VEX (embedded or standalone), OpenVEX, and CSAF VEX parsers
+into a `VexStatement` model: status (`not_affected` with justification, `affected`, `fixed`,
+`under_investigation`), precedence resolved per the tenant's configured rule (default: tenant
+overrides vendor, conflicts flagged for review). Every finding shows which statements applied
+and which one won.
 
-### Phase 5 — Compliance (Docker / CIS)  ✅ shipped 2026-09-15
+**M1g — CBOM ingestion.** CycloneDX 1.6 cryptographic-asset ingestion: algorithms, keys,
+certificates, protocols. Quantum-vulnerable algorithms (RSA, ECC) become their own finding
+category. Confirm the current CycloneDX parser's version ceiling during implementation — the
+design doc requires 1.6 specifically for this.
 
-> **Landed** on `feat/phase-1-actionable-core` (commits `3017217` backend, `819ed48` UI): CIS-report
-> vulnerabilities now route through the *same* `Asset → AssetComponent → VulnerabilityAlert`
-> pipeline Phase 4 built for Trivy/Grype image scans — `DockerVulnerabilityAlert` and
-> `DockerMisconfigurationAlert` (dead since before Phase 1, written by one endpoint, read by
-> nothing) are **deleted**, tables dropped. Misconfigurations deliberately stay out of the funnel
-> (no CVE ⇒ no EPSS/KEV/exploit-maturity/CVSS to rank on) and get their own control-breakdown +
-> remediation model. `POST /compliance/reports` merges ingest+scan into one job (202 + a
-> `COMPLIANCE_SCAN` job), replacing the old two-call `/cis/docker/*` path entirely; `POST
-> /compliance/reports/{id}/scan` replays stored findings for a re-scan. `GET /compliance/reports`
-> + real Compliance UI (report list, pass/fail/skip breakdown, misconfig list with remediation,
-> linked actionable items). A latent PK bug fixed en route (two reports naming the same CVE
-> collided on `DockerComplianceReportVulnerability`'s id). Backend 263 tests green (+9 — including
-> the one that matters, compliance-sourced alerts now appearing in `GET /actionable`); UI green.
-> **Deferred:** misconfiguration triage/dismissal has no replacement (Phase 7 — needs keying on
-> `(asset, check)` to persist across snapshot-per-upload reports); a compliance report and an
-> image scan of the same `(type, name)` share one asset scope (give an audit its own name to
-> separate them); Liquibase `010` (like `004`-`009`) not yet run against a real PostgreSQL. Not
-> merged to `master`.
-- Job-queue the report scan; replace `GET /cis/docker/scan/{id}` with `POST /compliance/reports/{id}/scan`.
-- **API**: `GET /compliance/reports` paged, `GET /compliance/reports/{id}` (pass/fail summary, misconfig + vuln alerts paged), remediation text included.
-- Docker vuln alerts feed the same enrichment/funnel as SBOM alerts where a CVE is present.
-- **UI**: build the **Compliance** view — report list, per-report control breakdown (pass/fail/skip), misconfiguration list with remediation, linked vuln actionable items.
+**M1h — SBOM quality scoring.** Score each ingested SBOM against the NTIA minimum elements
+(supplier, name, version, unique ID, dependency relationships, author, timestamp). A low score
+becomes its own finding category, surfaced per product.
 
-### Phase 6 — Supply-chain compromise detection  ✅ shipped 2026-09-20
+**M1i — Scoring engine rework.** Scores exist at three levels — finding, asset, product — with
+asset/product rolling up from their findings. Finding-score inputs: base CVSS severity,
+exploitation signals (KEV, EPSS — already computed by the existing funnel), lifecycle presence
+(source-only vs. confirmed-deployed, from M1e), VEX status (M1f), dependency depth (direct vs.
+transitive, from M1l), fix availability (already tracked as `fixState`). Every finding shows a
+per-input breakdown of how each signal moved the score. Weights live in one place so they can
+become tenant-configurable later (future-expansion item, not M1 scope).
 
-> **Landed** on `feat/phase-1-actionable-core` (commits `509a931` backend, `d0f7514` UI):
-> `CompromiseFinding` gets its own table (not a row in `vulnerability_alert` — no CVE means no
-> EPSS/KEV/exploit-maturity/fix-state for that funnel to evaluate). Two feeds: OpenSSF Malicious
-> Packages pulled from the `ossf/malicious-packages` repo archive directly (measured, not
-> assumed — the OSV per-ecosystem export already silently carries 97% of these as `MAL-*` records
-> `OsvMatcher` discards for having no CVE alias); abuse.ch MalwareBazaar via its keyless CSV
-> exports (the documented JSON API needs a key, the CSVs don't). `GET /actionable` becomes a
-> typed union (`itemType: VULNERABILITY | COMPROMISE`) — every Phase 1-5 field keeps its exact
-> JSON path, compromise findings sort in their own tier above every vulnerability row (no
-> synthetic score invented to make "probability of future exploitation" and "already in your
-> build" commensurable). IOC aging demotes stale `CONFIRMED`/`LIKELY` findings to `INVESTIGATE`,
-> never deletes. UI: Malicious badge + red row treatment in Actionable Items, a branching detail
-> panel routing to `GET /compromise/{id}`, and a dashboard tile. Backend 298 tests green (+35);
-> UI green.
-> **Note on this phase's cost:** the backend core agent used over 1M tokens across its runs —
-> 2-3x any other phase — because it did real external research (verifying actual feed formats
-> against live sources rather than assuming) and found/fixed two pre-existing self-invocation
-> transaction bugs unprompted. The UI agent was interrupted mid-task by the usage limit; rather
-> than re-running it, the remaining wiring (view filters, detail-panel branching, dashboard tile)
-> was finished directly in the session instead of via a fresh subagent.
-> **Deferred:** no retro-scan on a feed ingest (findings appear on the next correlation of a
-> scope, not immediately — flagged as the most likely thing an operator notices first);
-> `evidence_files[]` hashes and scanner-reported digests not ingested; two pre-existing
-> self-invocation transaction bugs found but left unfixed outside this phase's own code;
-> Liquibase `011` (like `004`-`010`) not yet run against a real PostgreSQL. Not merged to
-> `master`.
-*Goal: distinguish "you have a vulnerability" from "you are shipping something known-bad."*
+**M1j — Finding & Action-item model.** Broaden the alert model beyond `VulnerabilityAlert` /
+`CompromiseFinding` to a `Finding` supertype covering: vulnerable component, lifecycle drift
+(M1e), quantum-vulnerable algorithm (M1g), failed provenance check (stub until M4), and
+low-quality SBOM (M1h). Add `ActionItem`: the concrete remediation task for one or more
+findings, assigned to an owner — upgrades are grouped, so one action item can close many
+findings. Status machine: Open → In progress / Risk accepted (with expiry) / Not affected
+(backed by a VEX statement) → Resolved, with automatic reopen if the component reappears in a
+later SBOM. Reconcile with the existing `TriageState` (OPEN/ACKNOWLEDGED/SNOOZED/RESOLVED/
+FALSE_POSITIVE) rather than discarding it — decide during implementation whether ACKNOWLEDGED/
+SNOOZED become sub-states of "In progress" or stay as-is alongside the new statuses. Risk
+acceptance requires resolving the still-open approval-policy question first (see decisions
+table).
 
-- **Feeds**: **OpenSSF Malicious Packages** (`ossf/malicious-packages`, OSV-format — reuses the Phase 2 OSV ingester almost verbatim) into `malicious_package` (ecosystem, name, affected versions, category, origin, references); **abuse.ch MalwareBazaar** SHA-256 hashes into `malware_hash` (hash, family, first/last seen, confidence). `POST /threat/ingest` + scheduled refresh.
-- **Matching**:
-  - SBOM / asset components → `malicious_package` by ecosystem + name + version range.
-  - CycloneDX component `hashes` and any scanner-reported file digests → `malware_hash`.
-- **Data model**: `CompromiseFinding` — `type` (`MALICIOUS_PACKAGE` / `MALWARE_HASH`), `confidence` (`CONFIRMED` / `LIKELY` / `INVESTIGATE`), `source`, `matchedOn` (purl / hash), `iocFirstSeen` / `iocLastSeen` / `iocConfidence`, links to the affected `Asset` / `SBOM` / component. Severity defaults to `CRITICAL`.
-- **Funnel**: third promotion path — an item is actionable if `KEV` **OR** `EPSS > threshold` **OR** it has a `CompromiseFinding`. Compromise findings sort above everything.
-- **API**: `GET /compromise` paged + filter; `CompromiseFinding` also appears inline in `GET /actionable` (typed union) so the primary screen shows both.
-- **UI**: Actionable Items view renders compromise findings with a distinct **Malicious** badge and a red row treatment; detail drawer shows the IOC, its source, freshness, and the matched component. Dashboard gains a "compromise findings" tile.
-- **IOC aging**: a nightly job re-checks `iocLastSeen` / confidence; findings whose IOC has decayed below a threshold move to `INVESTIGATE` rather than disappearing.
-- **Tests**: malicious-package match on a crafted SBOM; hash match; funnel-promotion test; aging-transition test.
+**M1k — Role-based views.** One correlated data model, three views chosen by role:
+  - **Leadership**: metrics and charts only (risk trend, findings by severity, MTTR, KEV
+    exposure, SBOM-stage coverage per product) — no row-level drill-down by default.
+  - **Security engineer**: today's Actionable Items experience (score per product/asset, ranked
+    action items, triage) plus VEX authoring, risk acceptance, owner assignment/reassignment,
+    and feed/policy tuning.
+  - **Software engineer**: only action items for products/repos they own, each with a concrete
+    fix; can mark in-progress, fix, or dispute with a VEX justification.
 
-### Phase 6b — Source & cloud connectors (agentless discovery)  ✅ shipped 2026-09-24
+  Roles are assigned per tenant by tenant admins; a user can hold more than one role and switch
+  views. Tenant admin (connectors, feeds, VEX precedence, role assignment) is a separate
+  permission, not a view. Every view links down to the same finding detail page.
 
-> **GitHub connector landed** on `feat/phase-1-actionable-core` (commits `b94fe5a`+`95a61fd`
-> backend, `d3ba37a` UI). `SourceConnector` (type `GITHUB` only), one instance-wide
-> `SECY_GITHUB_TOKEN`, `GitHubSyncService` pulls each repo's real GitHub-generated SPDX SBOM
-> (`GET .../dependency-graph/sbom`) through the *exact* manual-upload ingest path — verified
-> directly against the live GitHub API (the SPDX doc nests under `"sbom"`, pagination is a real
-> `Link` header, `/orgs/{user}/repos` 404s and falls back to `/users/{login}/repos`). `POST
-> /connectors` + `/{id}/sync` (202 + a per-invocation `CONNECTOR_SYNC` job) + `GET`/`DELETE`; a
-> real Connectors settings view. Deleting a connector does not cascade to the `Product`s/SBOMs it
-> created. Liquibase `013`.
-> **AWS and Azure adapters landed** (commit `4deb69e`, on top of scaffolding commit `209cddc`):
-> `AwsSyncService` enumerates EC2/ECR/Lambda via the AWS SDK v2 (SigV4 signing) and pulls Inspector2
-> findings; `AzureSyncService` enumerates VMs/ACR registries via plain OAuth2 + REST against Azure
-> Resource Manager and pulls Defender for Cloud sub-assessments. Both funnel through
-> `AssetService#applyScan`, the same shared ingestion path Trivy/Grype/Compliance already use. A
-> clean empty/no-findings sync completes normally (not a failure) — only a real auth failure or
-> exception fails the sync, same "nothing to sync is not a failure" rule the GitHub connector
-> bug-fix established. Fixed two pre-existing latent test-isolation bugs surfaced by the new test
-> classes shifting execution order (a `Vulnerability.alerts` missing collection initializer, and two
-> non-`@Transactional` test classes permanently littering the shared H2 instance) — see the commit
-> message for detail. The host agent stays in Phase 10, deliberately deferred. Not merged to
-> `master`.
-*Goal: manual upload stays (CI/CD keeps working the same way), but Secy can also be pointed at a
-source and pull its own inventory — no agent to install, no pipeline step to add.*
+**M1l — Dependency graph preserved.** Keep the full dependency tree from each SBOM, not
+flattened as today. Each finding records whether its component is direct or transitive, plus
+the path from the product root — feeds both M1i's scoring input and the M1d lineage graph.
 
-Pulled forward from Phase 10's stretch bullet and expanded, per direction locked in
-2026-09-20: **GitHub first**, **agentless only** for this pass — a real host agent (package
-inventory + host-level IOC checks) stays deferred, tracked below under Phase 10.
+**M1 feeds wiring.** No new feed engineering — reuse all 8 existing feeds as-is. Add: a
+per-tenant enable/disable toggle per feed; rescore-going-forward semantics (existing findings
+keep their score when a feed is toggled, new/re-evaluated findings use current config, each
+finding stores a snapshot of the feed configuration that scored it); toggle changes go into the
+M1j-era audit trail once the audit log exists (Tenancy hardening) — track them in `TriageEvent`-
+style history in the meantime if useful sooner; feed health (last successful sync, record
+count, stale-feed surfacing to admins) and licensing/redistribution-terms metadata per feed.
 
-- **`SourceConnector`** — `type` (`GITHUB` first; `AWS`/`AZURE` are later adapters on the same
-  shape), a name, scope (org/user + optional repo allowlist for GitHub), `lastSyncedAt`, `status`.
-  Credential is a single env-var token per provider (`SECY_GITHUB_TOKEN`, PAT with `repo` +
-  `read:org` scope) — the same "env var, never in a tracked file" pattern `NVD_API_KEY` already
-  uses, not a new secrets-at-rest system. A `SourceConnector` row holds *where to look*, not the
-  credential itself.
-- **GitHub sync**: enumerate repos for the configured org/user (respecting an allowlist), and for
-  each repo pull `GET /repos/{owner}/{repo}/dependency-graph/sbom` — GitHub's own **SPDX SBOM per
-  repo**, which is exactly Phase 3's `SpdxNormalizer` input. No new parser: one repo → one
-  `Product` (created/reused by repo full name) → the *exact* `SbomParser`/`SBOMService` ingest
-  path a manual SPDX upload already takes, including the Phase 3 cross-version component identity
-  and the Phase 2 correlation pass. A repo with no dependency graph enabled (or none supported)
-  logs and is skipped, not failed.
-- **Job-queue wiring**: `JobType.CONNECTOR_SYNC`, per-invocation (not singleton — same
-  non-dedup pattern as `SBOM_UPLOAD`/`ASSET_SCAN`), so multiple connectors can sync concurrently.
-  `POST /connectors` (create), `GET /connectors` (list + `lastSyncedAt`/status), `POST
-  /connectors/{id}/sync` (202 + Job, mirrors the SBOM/asset upload contract), `DELETE
-  /connectors/{id}`.
-- **UI**: a Connectors settings view — add a connector (provider + org/repo scope; the token is
-  read from the env var server-side, never entered in the UI), list with last-sync status, a Sync
-  Now button with the same queue→poll→settle UX as SBOM/asset upload, delete.
-- **Scheduling**: manual trigger only in this pass (`POST /connectors/{id}/sync`); folding
-  connector syncs into Phase 8's cron scheduler is a small addition once that phase lands, not a
-  reason to block this one.
-- **AWS / Azure**: ✅ built — `AwsSyncService`/`AzureSyncService` each "enumerate targets and
-  produce scanner-shaped findings", reusing Phase 4's `Asset`/Trivy-Grype pipeline for cloud
-  resources (EC2/ECR/Lambda via Inspector2, Azure VMs/ACR via Defender for Cloud) rather than SBOM
-  ingest.
+**M1 acceptance criteria** (from the design doc):
+- [ ] A fixture set of SBOMs, one per stage for one sample product, ingests with zero errors and
+      produces one deduplicated component inventory.
+- [ ] A deliberately injected Build-only component produces a Source-vs-Build drift finding.
+- [ ] A KEV-listed vulnerability in a deployed component outranks the same CVE present only in
+      source.
+- [ ] A tenant `not_affected` VEX statement moves the finding to Not affected with the
+      justification shown.
+- [ ] Disabling a feed does not change existing scores; a newly ingested SBOM is scored without
+      it.
+- [ ] A software engineer mapped to one product sees only that product's action items.
+- [ ] Malformed and oversized documents are rejected safely with a clear error.
 
-### Phase 7 — Triage workflow  ✅ shipped 2026-09-24
+### M2 — GitHub
+*Goal: upgrade the existing GitHub connector from "pull one SBOM export" to the design doc's
+full integration — this is an upgrade to Phase 6b's shipped connector, not a build from
+scratch, so it's cheaper than its position in the dependency order suggests.*
 
-> Commit `ac7f9a3` on `feat/phase-1-actionable-core`. `TriageState`
-> (`OPEN`/`ACKNOWLEDGED`/`SNOOZED`/`RESOLVED`/`FALSE_POSITIVE`) + `snoozedUntil` + `assignee` added to
-> both `VulnerabilityAlert` and `CompromiseFinding` — orthogonal to `AlertLifecycleState` (what the
-> scanner observed) per that enum's own Javadoc, which reserved this column since Phase 2. New
-> `TriageEvent` append-only history table, same two-FK-XOR pattern as `component`/`assetComponent`.
-> `TriageService` resolves an id against either table (no shared entity interface, by design — see
-> `CompromiseFinding`'s class Javadoc). `PATCH /actionable/{id}` (state/assignee/snooze/comment,
-> works for either item type — unlike `GET /actionable/{id}`, which stays vulnerability-only),
-> `POST /actionable/{id}/comments`, bulk `PATCH /actionable`, `GET /actionable/{id}/history`,
-> `GET /users` for the assignee picker. The default `GET /actionable` list now really hides
-> `RESOLVED`/`FALSE_POSITIVE`/an-unexpired-`SNOOZED` row (wiring up the `state` filter param that
-> had sat as an accepted-and-ignored placeholder since Phase 6). UI: row multi-select + bulk
-> state/assignee action bar; a shared triage section (state, assignee, snooze date, history
-> timeline, comment box) in the detail drawer for both item types. Liquibase `014`.
-> Two Sonnet subagents built backend and UI in parallel off a fully pre-specified contract — the UI
-> agent caught two real contract bugs by reading the backend's actual source (an omitted
-> `assigneeId`/`snoozedUntil` means "leave unchanged", so there's no unassign via `PATCH`; and
-> `snoozedUntil` is a zone-less `LocalDateTime`, not UTC). The backend agent found and fixed a third
-> instance of the non-`@Transactional`-test-leaks-into-shared-H2 bug class (`AssetControllerTest`),
-> same shape as the two fixed in the AWS/Azure commit. 353/353 backend tests passing, verified
-> twice; UI verified via a clean `tsc --noEmit` — `npm test`/`npm run build` and browser end-to-end
-> testing didn't complete this session due to sustained sandbox memory/swap exhaustion from an
-> unrelated concurrent JetBrains RemoteDev session.
+- Swap the instance-wide `SECY_GITHUB_TOKEN` PAT for a **GitHub App**, org-scoped,
+  least-privilege permissions.
+- Keep the existing dependency-graph SBOM pull (already shipped); add **Dependabot alerts** and
+  **code scanning alerts** ingestion.
+- **Ownership inference** (M1b's stub): parse CODEOWNERS files and GitHub team repo permissions
+  into ownership links with `source = INFERRED`.
+- **Product tagging** (M1a's stub): repo tags/topics feed the configured product tag key.
+- **Ticket sync**: two-way sync with GitHub Issues for action items — Secy creates an issue in
+  the owning repo, status changes flow both ways. Secy wins on finding data; the issue wins on
+  assignee and workflow state. (M1: no external sync — action items live in Secy only, per the
+  design doc; this lands the "next phase" the doc describes.)
 
-- **State machine** on every alert / compromise finding: `OPEN → ACKNOWLEDGED → SNOOZED(until) → RESOLVED | FALSE_POSITIVE`, plus `assignee` and free-text `notes` / comment thread with an append-only history table.
-- **API**: `PATCH /actionable/{id}` (state, assignee), `POST /actionable/{id}/comments`, bulk `PATCH /actionable` for multi-select.
-- Default Actionable Items query hides `SNOOZED` (until expiry) and `RESOLVED` / `FALSE_POSITIVE`; a state filter shows them.
-- **UI**: row multi-select + bulk actions; detail drawer shows state, assignee, history, comment box.
+### M3 — Cloud & runtime
+*Goal: upgrade the existing AWS/Azure connectors' auth model and add the two integrations the
+old roadmap never built (Kubernetes, container registries).*
 
-### Phase 8 — Scheduled ingestion, notifications, reporting
-- **Scheduler**: cron-triggered feed refresh for all feeds — NVD, KEV, EPSS, OSV, CVE-5.1/Vulnrichment, exploit index, malicious-packages, malware hashes (`SECY_INGEST_SCHEDULE_*`, default daily) via the job queue; disabled by default with a clear opt-in.
-- **NVD incremental**: use `lastModStartDate` / `lastModEndDate` windows instead of full re-pull; store the high-water mark.
-- **Notifications**: `notification/` module — on a new actionable item for a subscribed product/asset, deliver via SMTP email (`SECY_SMTP_*`) and/or a generic JSON webhook (`POST` with an HMAC signature header). Per-user + per-product subscriptions, managed in Settings.
-- **Reporting**: server-generated **CSV** and **PDF** (posture summary + actionable list) scoped to a product / asset / whole org. `GET /reports/actionable.{csv,pdf}`; UI download button on the Actionable and Product views.
+- **AWS**: replace static instance-wide credentials with a cross-account IAM role + external ID,
+  `SecurityAudit` or `ReadOnlyAccess` — keep the existing EC2/ECR/Lambda + Inspector2 pull.
+- **Azure**: replace the static service-principal secret with workload identity federation (or
+  a scoped service principal as a fallback) with Reader role — keep the existing VM/ACR +
+  Defender for Cloud pull.
+- **Kubernetes** (new): read-only service account against EKS/AKS/self-managed clusters — running
+  workloads, image digests, namespaces, labels.
+- **Container registries** (new): registry-native read credentials for ECR/ACR/GHCR — image
+  digests, tags, attached SBOMs and attestations.
+- **Linking**: image digests connect registries → K8s workloads → cloud assets, and connect
+  builds to their build SBOMs — feeds the M1d lineage graph.
+- **Ownership inference**: cloud resource owner tags, same pattern as M2's CODEOWNERS inference.
+- **Sync model**: scheduled polling per connector, same as today; event sources (EventBridge,
+  Event Grid, K8s watch) are explicitly out of v1 scope (see Non-goals).
 
-### Phase 9 — Packaging & release (the OSS deliverable)
+### M4 — Provenance
+*Goal: verify what M1-M3 ingested was actually built the way it claims to have been.*
 
-> **9a (compose + CI skeleton) shipped 2026-09-10**, commit `6cdaa5e` — done right after Phase 2
-> per the suggested order below, ahead of Phases 3-8. `api/Dockerfile` (JDK→JRE multi-stage),
-> `ui/Dockerfile` (Node→nginx, SPA fallback + `/api` reverse proxy), root `docker-compose.yml`
-> (postgres + api + ui, health-gated), `.env.example`, `.github/workflows/ci.yml` (parallel
-> api/ui build+test). **Not verified**: no Docker in the devcontainer, so `docker build` /
-> `docker compose up` actually succeeding, base-image tags resolving, and the health-gated
-> `depends_on` chain are all unverified — do a real pass before tagging MVP. 9b (first-run UX
-> polish, image publish on release, security pass, docs) is still ahead, later in the order.
-- **Images**: multi-stage `api/Dockerfile` (slim JRE 17) and `ui/Dockerfile` (build → nginx serving static + proxying `/api`).
-- **Top-level `docker-compose.yml`**: `postgres` + `api` + `ui`, single `docker compose up`, `.env.example` with every knob, healthchecks, named volume.
-- **First-run UX**: registration open until the first admin exists, then auto-locked unless `SECY_AUTH_REGISTRATION_ENABLED=true`; documented.
-- **CI** (GitHub Actions): build + test both halves on PR; build & push tagged images on release; Liquibase validate; `npm run lint` + `typecheck`.
-- **Ops**: actuator health/readiness wired into compose; structured JSON logging; Prometheus metrics endpoint; sensible connection-pool + JVM defaults.
-- **Security pass**: dependency scan (OWASP Dependency-Check / `npm audit` in CI), rate-limit `/auth/**`, review CORS, confirm no secret in a tracked file, JWT secret must be set in non-dev.
-- **Docs**: `docs/` — install & upgrade guide, full config reference, architecture overview, "how the funnel works", `CONTRIBUTING.md`, `SECURITY.md`.
-- **README**: update screenshots + quickstart to the compose flow.
+- Ingest and verify **SLSA provenance**, **in-toto attestations**, and **Sigstore/cosign
+  signatures**.
+- Unsigned or unverifiable artifacts become findings (feeding M1j's Finding model).
+- The design doc notes this could fold into M3 if preferred once M3 is scoped in detail — leave
+  that call for then, not now.
 
-### Phase 10 — Stretch: cloud & agent discovery
-*May ship as a fast-follow after the MVP tag.*
+### Tenancy hardening
+*Goal: the "Security of Secy itself" section of the design doc — Secy holds a map of every
+tenant's exploitable weaknesses plus read credentials to their code and cloud, so it has to be
+built as a high-value target, not bolted on at the end.*
 
-> The agentless cloud-connector half of this phase was pulled forward to **Phase 6b**
-> (GitHub shipped there; AWS/Azure adapters are 6b's next slice, same `SourceConnector` shape).
-> What's left here is specifically the **host agent** — deliberately deferred out of 6b.
-- A minimal agent that reports installed packages from a host, for environments a cloud API or a
-  CI-embedded scan can't reach.
-- Populates `Asset`s and their components; everything downstream already works.
-- The agent can also do host-level IOC checks (file-hash / path / YARA) — the local half of vNext IOC validation.
+Start once M1's functional core is demoable; finish before any real second tenant onboards
+(i.e. before this stops being a solo-dogfooding instance).
+
+- **Row-level security**: enforce Postgres RLS on every `tenant_id`-bearing table from M0.
+  Cross-tenant queries become impossible by construction, not by convention.
+- **Per-tenant credential storage**: connector secrets (GitHub App keys, AWS role ARNs, Azure
+  federation config) encrypted with per-tenant keys through a KMS abstraction — cloud KMS for
+  SaaS, pluggable for self-hosted. Replaces the M2/M3-era env-var-token pattern once this lands.
+  Secrets are never logged or returned by the API.
+- **AuthN/AuthZ**: SSO (OIDC/SAML), scoped API tokens, role-based access matching M1k's three
+  views plus tenant admin.
+- **Audit log**: all admin actions — connector changes, feed toggles, VEX precedence changes,
+  risk acceptances, role changes.
+
+### Packaging & self-hosted edition
+*Goal: the design doc's "no hard dependency on any one cloud's managed services" + "self-hosted
+ships as containers with a Helm chart."*
+
+Carries the old roadmap's Phase 9 forward — 9a (Docker images, top-level compose, CI skeleton)
+already shipped 2026-09-10 (commit `6cdaa5e`), unverified against a real `docker build`/
+`docker compose up` (no Docker in the devcontainer).
+
+- **Helm chart** for self-hosted multi-tenant-capable deployment.
+- **Object storage**: raw SBOM, VEX, and attestation documents stored behind an S3-compatible
+  interface (MinIO for self-host, S3/equivalent for SaaS) rather than only in Postgres.
+- Every external dependency swappable through configuration — this is the concrete reason
+  Apache AGE (M1d) won over Amazon Neptune.
+- First-run UX, CI, ops (health/readiness, structured logging, metrics), and a security pass
+  (dependency scanning, rate limiting, CORS, secret hygiene) carry forward unchanged from the
+  old roadmap's Phase 9 scope — see that phase's write-up in git history for the original
+  detail if needed.
 
 ---
 
 ## Suggested order & interleaving
 
 ```
-Phase 1  ─────────────▶ (unblocks everything; do first)
-Phase 2  ──────▶        (right after 1; correctness gate)
-Phase 3  ──▶            (can overlap tail of 2)
-Phase 4  ──▶            (needs 3's normalized model)
-Phase 5  ──▶            (independent of 3/4; slot when convenient)
-Phase 6  ──▶            (needs 2's OSV ingester + 3's normalized model)
-Phase 6b ──▶            (needs 4's Asset/scan pipeline; independent of 6)
-Phase 7  ──▶            (needs 1 + 6; independent of 2–5)
-Phase 8  ──▶            (needs 1; email/report need 4–6 for full value)
-Phase 9  ─────────────▶ (start compose/CI early, finish last)
-Phase 10 ──▶            (stretch)
+M0  ─────────────▶ (unblocks everything; do first)
+M1a ──▶ M1b ──▶ M1c        (product/ownership/identity — cheap, mostly additive)
+M1d ──▶ M1e                (graph DB + lifecycle diffing — needs M1c's identity model)
+M1f ──▶ M1g ──▶ M1h ──▶ M1i (VEX/CBOM/quality feed the scoring engine)
+M1j ──▶ M1k ──▶ M1l        (Finding/Action-item model + role views need scoring first)
+M2  ──▶                    (upgrade of an existing connector — cheap)
+M3  ──▶                    (mostly parallel with M2; K8s/registry are new builds)
+Tenancy hardening ──▶      (start once M1 is demoable; finish before a 2nd tenant)
+M4  ──▶                    (after M3 is scoped; may fold into M3)
+Packaging/Helm ──▶         (start early on compose/CI as before, Helm chart later)
 ```
 
-Recommended path: **1 → 2 → 9a (compose + CI skeleton) → 3 → 4 → 5 → 6 → 6b (connectors, GitHub
-first) → 7 → 8 → 9b (polish + docs) → tag MVP → 10 (host agent + remaining cloud adapters)**.
-
-The **feed ingesters** (OSV and CVE-5.1/Vulnrichment in Phase 2, the exploit index in Phase 1,
-malicious-packages + malware hashes in Phase 6) have no dependency on the alert model and can be
-built first or in parallel — only the logic that *consumes* them (OSV-primary correlation,
-`exploitMaturity` derivation, `CompromiseFinding` matching) needs the Phase 1–3 schema.
+M2 and M3's connector-auth upgrades are cheaper than their position in this diagram implies —
+they're extending Phase 6b's shipped code, not building from zero. Kubernetes and registry
+connectors inside M3 are the genuinely new work there.
 
 ---
 
-## Definition of done — MVP
+## Definition of done — v1
 
-- [ ] `docker compose up` from a clean checkout yields a working Secy (UI + API + DB).
-- [ ] First user registers as admin; subsequent registration locked by default.
-- [ ] All eight feeds (NVD / KEV / EPSS / OSV / CVE-5.1+Vulnrichment / exploit index / malicious-packages / malware hashes) ingest (manually and on schedule) and refresh incrementally.
-- [ ] Upload a CycloneDX **and** an SPDX SBOM → components correlated (OSV-primary) → actionable items appear with fix versions where known.
-- [ ] Ingest a Trivy/Grype scan → asset appears with its actionable items and scanner-reported fix versions.
-- [ ] Ingest a Docker CIS report → Compliance view shows controls + alerts.
-- [ ] An SBOM containing a known-malicious package produces a `CompromiseFinding` that surfaces above vuln alerts.
-- [ ] Actionable Items view: filter (incl. "only with a fix", "only with a known exploit"), sort by EPSS, Fix + Exploit + Malicious badges on rows, open a detail drawer, ack/snooze/resolve, bulk-action.
-- [ ] `REJECTED` / `DISPUTED` CVEs are kept out of the actionable funnel.
-- [ ] New actionable item on a watched product fires an email + webhook.
-- [ ] Export the actionable list as CSV and PDF.
-- [ ] Correlation golden-set test passes at the documented precision/recall bar.
+Supersedes the old roadmap's single-tenant DoD checklist.
+
+**M1**
+- [ ] A fixture set of SBOMs, one per stage for one sample product, ingests with zero errors and
+      produces one deduplicated component inventory.
+- [ ] A deliberately injected Build-only component produces a Source-vs-Build drift finding.
+- [ ] A KEV-listed vulnerability in a deployed component outranks the same CVE present only in
+      source.
+- [ ] A tenant `not_affected` VEX statement moves the finding to Not affected with the
+      justification shown.
+- [ ] Disabling a feed does not change existing scores; a newly ingested SBOM is scored without
+      it.
+- [ ] A software engineer mapped to one product sees only that product's action items.
+- [ ] Malformed and oversized documents are rejected safely with a clear error.
+- [ ] All three role views render off the same underlying finding data.
+
+**M2 / M3**
+- [ ] GitHub sync runs under a GitHub App, not a static PAT; ownership + product tags populate
+      from CODEOWNERS/teams/repo topics without manual mapping.
+- [ ] AWS/Azure sync runs under cross-account IAM / workload identity, not static keys.
+- [ ] A Kubernetes cluster and a container registry each sync into the asset inventory with
+      image-digest linking connecting them to their build SBOM.
+
+**Tenancy hardening**
+- [ ] A cross-tenant query is impossible at the database level (RLS), demonstrated by a test.
+- [ ] Connector credentials are encrypted at rest per tenant and never returned by the API.
+- [ ] SSO login works end to end; every API call carries a scoped token matching the caller's
+      role(s).
+- [ ] Every admin action (connector change, feed toggle, VEX precedence change, risk acceptance,
+      role change) appears in the audit log.
+
+**Packaging**
+- [ ] `docker compose up` from a clean checkout yields a working single-tenant Secy.
+- [ ] The Helm chart deploys a working Secy on a clean cluster.
 - [ ] CI green: both builds, both test suites, lint, typecheck, Liquibase validate.
-- [ ] `docs/` install + config + architecture pages complete; README quickstart matches reality.
 
 ---
 
-## Feed backlog (post-MVP)
+## Non-goals for v1
 
-Additional intelligence sources, roughly in priority order. Each improves one of the
-alert-decision dimensions: *is it exploited*, *how bad*, *can I fix it*, *does it apply to me*.
+Replaces the old roadmap's "explicitly not in MVP" list.
 
-| Feed | Decision dimension | What it adds | Effort | Suggested slot |
-|---|---|---|---|---|
-| **Distro security trackers** — Debian, Ubuntu (USN), **Red Hat CSAF/VEX**, SUSE, Alpine secdb | Can I fix it? | Distro-specific fixed package versions **and** lifecycle states OSV lacks: `will-not-fix`, `deferred`, `out-of-support`, `affected-no-fix-planned`. Essential to de-noise container base images. | Medium (one ingester per distro; OVAL/CSAF/JSON) | Alongside Phase 4 (asset/container correlation) |
-| **VEX ingestion + suppression** — OpenVEX / CSAF-VEX / CycloneDX-VEX | Does it apply to me? | Vendor/internal "not affected" statements → auto-suppress or downgrade alerts. Biggest noise reducer. Pairs with the triage model. | Medium (parser + suppression rules + provenance) | Extends Phase 7 |
-| **CVE→IOC enrichment + hunt-pack export** — AlienVault OTX pulses, MISP feeds, CISA/vendor advisories | Am I already hit? | For an actionable KEV item, list the IOCs seen when that CVE is exploited (webshell hashes, post-exploitation tooling, C2 infra) and export a **STIX 2.1 / Sigma / CSV** bundle for the user's own SIEM/EDR. Surfacing, not validation. | Medium (OTX/MISP ingester + STIX export) | vNext precursor — extends Phase 6 |
-| **GreyNoise** (community API) | Is it exploited *now*? | Tags CVEs with observed internet-wide mass-scanning / exploitation attempts — leads KEV/EPSS on fresh activity. | Low (API, rate-limited, needs key) | Enrichment polish |
-| **endoflife.date** | How bad / can I fix it? | Runtime/component EOL dates — past EOL ⇒ no fix will ever come ⇒ raise priority instead of leaving it `UNKNOWN`. | Low (one JSON API) | Enrichment polish |
-| **VulnCheck KEV** (community) | Is it exploited? | Superset of CISA KEV — exploited CVEs CISA hasn't catalogued, plus initial-access / ransomware tags and exploit refs. | Low (API + key) | Enrichment polish |
-| **GitHub Security Advisories** (GraphQL, direct) | Can I fix it? | Beyond what OSV mirrors: withdrawn/updated status, CVSS v4, richer affected ranges. | Low–medium | Only if OSV coverage proves thin |
-| **CWE / CAPEC taxonomy** (MITRE) | How bad / explain | Human-readable weakness + attack-pattern context; lets alerts be grouped by root cause. | Low (static import) | Reporting / UX polish |
-| **Reachability analysis** (not a feed — an engine) | Does it apply to me? | Static call-graph analysis to confirm the vulnerable symbol is actually invoked. Large; likely a separate initiative. | High | Long-term |
-
-**Commercial threat-intel** (Mandiant, Recorded Future, Flashpoint, etc.) is deliberately out
-of scope — closed feeds don't fit an OSS core, and would belong in the open-core commercial layer if ever.
+- **Generating** SBOMs, VEX, or attestations — Secy ingests only; a generator suite is future
+  expansion.
+- GitLab, Azure DevOps, and Bitbucket integrations.
+- GCP.
+- Jira, Azure Boards, and ServiceNow ticket sync (GitHub Issues only, M2).
+- Event-driven inventory sync (EventBridge, Event Grid, K8s watch) — scheduled polling only.
+- Write access to customer cloud environments, or automated remediation (auto-PRs).
+- Commercial threat-intel feeds (Mandiant, Recorded Future, Flashpoint) — closed feeds don't fit
+  the OSS core; would belong in an open-core commercial layer if ever added.
 
 ---
 
-## vNext direction — automatic IOC validation
+## Future expansion (post-v1)
 
-Post-MVP, and possibly its own initiative. The MVP does **supply-chain** compromise detection
-(Phase 6) because that's the data Secy holds. True "is this CVE being exploited against *my*
-environment right now" validation needs telemetry Secy is not a source of. Sketch:
+- A suite of SBOM generators (source, build, binary, runtime) feeding the same ingestion layer.
+- Tenant-configurable scoring weights (M1i centralizes them now so this is additive later).
+- Policy engine with pass/fail gates (e.g. no KEV in prod, minimum SBOM quality score).
+- Splitting modules into services in the best-fit language, per the modular-monolith module
+  boundaries defined below.
+- IOC-vs-telemetry validation (the old roadmap's vNext direction: CVE→IOC enrichment + hunt-pack
+  export, optional SIEM/EDR connectors, host-agent local checks) — still not in scope; needs
+  telemetry Secy isn't a source of.
+- Distro security trackers (Debian/Ubuntu/RHEL CSAF-VEX/SUSE/Alpine) for `will-not-fix`/
+  `deferred` lifecycle states OSV doesn't carry — still valuable, still deferred.
 
-1. **Enrich** actionable KEV items with linked IOCs (the "CVE→IOC enrichment" backlog row) and
-   expose them as an exportable hunt pack (STIX / Sigma / CSV).
-2. **Optional connectors** — the user connects Secy to a system that *does* have telemetry:
-   **Wazuh** (open-source, natural first target), Elastic, Splunk, or a **VirusTotal** API key.
-   Secy runs the linked IOCs as queries over a lookback window and reports hits.
-3. **Graded results** — `IOC_MATCH_INVESTIGATE` vs `CONFIRMED`; never auto-remediate; always
-   account for IOC aging (sinkholed domains, shared-hosting IPs, decayed confidence).
-4. **Host-level half** — the Phase 10 agent checks the local filesystem for IOC hashes / paths /
-   YARA matches, for environments with no SIEM.
+---
 
-Kept out of the MVP so "compromise detection" doesn't balloon into building half a SIEM.
+## Architecture & tech stack
+
+- **Frontend**: React (existing) — `ui/`.
+- **Backend**: Java Spring Boot (existing) as a **modular monolith** — `api/`. Expected module
+  boundaries: ingestion (parsers per format), identity resolution, feeds, correlation and
+  diffing, scoring, findings and action items, connectors, tenancy and auth. Modules talk only
+  through defined interfaces, not shared tables or internals, so any one can become a service
+  later without a rewrite.
+- **Data**: PostgreSQL as the system of record (unchanged); **Apache AGE** graph extension for
+  lineage/blast-radius traversal (M1d), derived from and rebuildable from Postgres.
+- **Raw documents**: original SBOM/VEX/attestation files stored in S3-compatible object storage
+  (Packaging & self-hosted edition), not just parsed into Postgres.
+- **Background work**: ingestion, feed sync, connector polling, and rescoring run as queued jobs
+  (existing `job/` module, unchanged pattern) — retried and observable, never inline in a
+  request.
+- **Deployment**: multi-tenant SaaS by default + self-hosted edition via Helm, no hard
+  dependency on any one cloud's managed services.
+
+---
+
+## Security of Secy itself
+
+Secy holds a map of every tenant's exploitable weaknesses plus read credentials to their code
+and cloud — it's a high-value target and has to be built like one.
+
+- **Tenant isolation**: every row and graph node carries a tenant ID (M0); Postgres RLS enforced
+  (Tenancy hardening). Cross-tenant queries impossible by construction.
+- **Credentials**: connector secrets encrypted with per-tenant keys through a KMS abstraction;
+  never logged or returned by the API (Tenancy hardening).
+- **Least privilege**: connectors request read-only scopes only; Secy never needs write access
+  to customer clouds; GitHub write is limited to Issues (M2).
+- **AuthN/AuthZ**: SSO (OIDC/SAML) + role-based access matching M1k's three views plus tenant
+  admin; scoped API tokens (Tenancy hardening).
+- **Audit log**: all admin actions (Tenancy hardening).
+- **Untrusted input**: every uploaded SBOM/VEX/attestation treated as hostile — size limits,
+  safe XML parsing (no XXE), bounded dependency-tree recursion. Applies from M1 onward, not
+  deferred to hardening.
+- **Supply chain**: Secy's own builds produce SBOMs and signed provenance, and Secy ingests them
+  about itself (once M4 exists).
+
+---
+
+## Open questions
+
+Carried forward from the design doc rather than silently decided:
+
+- **Product tag key default**: recommending `secy:product`, but this is not locked — confirm
+  before M1a ships, since it's cheap to change now and expensive once tenants have tagged
+  resources against it.
+- **Risk acceptance approval**: security-engineer approval vs. owner self-accept — genuinely
+  open, decide before M1j builds the risk-acceptance flow.
+- **Sample fixtures**: recommending synthetic fixtures extending the existing correlation
+  golden-set pattern (`api/src/test/resources/correlation/`) — real anonymized SBOMs are the
+  alternative if synthetic ones prove too easy to over-fit to.
 
 ---
 
 ## Cross-cutting / carried-over
 
-- **vitest OOMs in the devcontainer** (V8 heap / tinypool IPC). Full suite passes on a real machine. Add a CI job as the source of truth; consider raising devcontainer memory. Don't chase the local flaky exit code.
-- **NVD API key rotation** — still owed by the user at nvd.nist.gov (scrubbing hid it, rotation kills it). Old `jdesive/secy-api` GitHub repo history still contains it.
+- `feat/phase-1-actionable-core` is the base branch for M0 onward — it is **not** merged to
+  `master` yet and holds all of the "current state" substrate described above. A future session
+  should not assume this work has landed on `master`.
+- **vitest OOMs in the devcontainer** (V8 heap / tinypool IPC). Full suite passes on a real
+  machine. Add a CI job as the source of truth; consider raising devcontainer memory. Don't
+  chase the local flaky exit code.
+- **NVD API key rotation** — still owed by the user at nvd.nist.gov (scrubbing hid it, rotation
+  kills it). The old `jdesive/secy-api` GitHub repo history still contains it.
 - **Delete stale repos** — old `jdesive/secy-*` repos (user task) before anything goes public.
-- **Backend integration tests** need a DB; devcontainer has no Docker. Decide: Testcontainers in CI only, or keep H2 for tests and accept the fidelity gap.
-- Keep `CLAUDE.md` and the memory notes in sync as phases land.
+- **Backend integration tests** need a DB; devcontainer has no Docker. Decide: Testcontainers in
+  CI only, or keep H2 for tests and accept the fidelity gap.
+- Keep `CLAUDE.md` and the memory notes in sync as milestones land.
