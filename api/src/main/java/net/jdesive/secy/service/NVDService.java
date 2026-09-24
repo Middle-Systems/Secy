@@ -98,6 +98,25 @@ public class NVDService {
     @Value("${nvd.apikey}")
     private String apiKey;
 
+    /**
+     * Minimum milliseconds between consecutive NVD requests — NVD rate-limits at 429 past 5
+     * requests per rolling 30s without an API key, 50 with one; this defaults to the safe
+     * unauthenticated pace (6.5s, a margin over their documented 6s) since a blank {@code
+     * nvd.apikey} is silently accepted rather than rejected up front, so there is no reliable way
+     * to tell which tier applies from here. Override via {@code SECY_NVD_REQUEST_INTERVAL_MS} down
+     * to roughly 650ms if a real key is configured.
+     *
+     * <p>The old undated, unwindowed crawl never hit this in practice — each 2000-result page took
+     * long enough to parse and save that the next request was naturally spaced out. The windowed
+     * sweep breaks that accidental throttling: most windows before roughly the mid-2000s return few
+     * or zero results and complete almost instantly, so without an explicit floor here the sweep
+     * blasts through a dozen-plus requests in under a second and NVD cuts it off.
+     */
+    @Value("${nvd.request-interval-ms:6500}")
+    private long requestIntervalMs;
+
+    private volatile long lastRequestAtMillis = 0;
+
     public Vulnerability getVulnerabilityById(String id) {
         Optional<Vulnerability> optional = this.vulnerabilityRepository.findById(id);
 
@@ -351,6 +370,9 @@ public class NVDService {
         return written;
     }
 
+    /** How many times a single request retries after a 429 before giving up. */
+    private static final int MAX_RATE_LIMIT_RETRIES = 3;
+
     private NVDCVEResult getDataAtOffset(int offset, LocalDateTime windowStart, LocalDateTime windowEnd) {
 
         log.debug("Fetching NVD Vulnerability data from offset {} for window [{}, {}]", offset, windowStart, windowEnd);
@@ -368,13 +390,49 @@ public class NVDService {
                 .encode()
                 .toUriString();
 
-        ResponseEntity<NVDCVEResult> result = this.restTemplate.exchange(urlTemplate, HttpMethod.GET, entity, NVDCVEResult.class);
+        for (int attempt = 0; ; attempt++) {
+            throttle();
+            ResponseEntity<NVDCVEResult> result;
+            try {
+                result = this.restTemplate.exchange(urlTemplate, HttpMethod.GET, entity, NVDCVEResult.class);
+            } catch (org.springframework.web.client.HttpClientErrorException.TooManyRequests e) {
+                if (attempt >= MAX_RATE_LIMIT_RETRIES) {
+                    throw e;
+                }
+                // A belt-and-suspenders retry, not the primary defense -- see requestIntervalMs.
+                // NVD's exact limit isn't guaranteed, so back off harder than the normal pace
+                // rather than assume the next attempt will fare any better at the same spacing.
+                long backoffMs = requestIntervalMs * (attempt + 2);
+                log.warn("NVD rate-limited us (attempt {}/{}); backing off {}ms",
+                        attempt + 1, MAX_RATE_LIMIT_RETRIES, backoffMs);
+                sleep(backoffMs);
+                continue;
+            }
 
-        if (!result.getStatusCode().is2xxSuccessful()) {
-            throw new RuntimeException("Error processing NVD Data. API returned non success status code. [" + result.getStatusCode().value() + "]");
+            if (!result.getStatusCode().is2xxSuccessful()) {
+                throw new RuntimeException("Error processing NVD Data. API returned non success status code. [" + result.getStatusCode().value() + "]");
+            }
+
+            return result.getBody();
         }
+    }
 
-        return result.getBody();
+    /** Blocks until at least {@link #requestIntervalMs} has passed since the last NVD request. */
+    private synchronized void throttle() {
+        long waitMs = requestIntervalMs - (System.currentTimeMillis() - lastRequestAtMillis);
+        if (waitMs > 0) {
+            sleep(waitMs);
+        }
+        lastRequestAtMillis = System.currentTimeMillis();
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("NVD ingest interrupted while pacing requests");
+        }
     }
 
     /** NVD requires an explicit UTC offset on {@code lastModStartDate}/{@code lastModEndDate}. */
