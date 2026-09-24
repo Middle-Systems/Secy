@@ -142,25 +142,42 @@ public class NVDService {
      * {@code progress} after each page.
      *
      * <p>NVD's CVE API accepts {@code lastModStartDate}/{@code lastModEndDate} to pull only records
-     * modified in a window, capped at 120 days per request. This walks from {@link NvdIngestCursor}
-     * (or {@link #EPOCH}, on the very first ever ingest — there is no cursor yet, so there is
-     * nothing narrower to ask NVD for) to now in {@value #WINDOW_DAYS}-day windows, one full paged
-     * crawl of {@code resultsPerPage} each per window.
+     * modified in a window, capped at 120 days per request. Two phases, both windowed the same way
+     * — see {@link NvdIngestCursor}'s class Javadoc for the full reasoning:
      *
-     * <p>The cursor is persisted after <b>each window completes</b>, not just once at the end of the
-     * whole sweep. That is the entire point: a run interrupted partway — by a redeploy, a crash,
-     * anything — only has to redo the window it was on when it stopped, not the whole feed. Before
-     * this, every interrupted ingest restarted from CVE #1, and since NVD returns undated results in
-     * roughly ascending-CVE-id order, a run that never reaches the end never ingests anything from
-     * roughly the last decade — which is why every product's actionable list could come back empty
-     * even with an ingest that "completed" several times.
+     * <ul>
+     *   <li><b>Bootstrap</b> ({@link NvdIngestCursor#getLastModified()} not yet set): walks
+     *       backward from now toward {@link #EPOCH}, newest window first, so the densely-modified
+     *       recent data — what actually drives the actionable funnel — shows up within the first
+     *       few windows rather than after however long it takes to first crawl forward through
+     *       {@value #WINDOW_DAYS}-day slices of a quarter-century of mostly-empty history.</li>
+     *   <li><b>Routine incremental</b> (cursor set): a small forward sweep from there to now.</li>
+     * </ul>
+     *
+     * <p>The cursor is persisted after <b>each window completes</b> in either phase, not just once
+     * at the end of the whole sweep. That is the entire point: a run interrupted partway — by a
+     * redeploy, a crash, anything — only has to redo the window it was on when it stopped, not the
+     * whole feed or the entire remaining bootstrap. Before any of this, every interrupted ingest
+     * restarted from CVE #1, and since NVD returns undated results in roughly ascending-CVE-id
+     * order, a run that never reached the end never ingested anything from roughly the last decade
+     * — which is why every product's actionable list could come back empty even with an ingest that
+     * "completed" several times.
      *
      * @throws CancellationException if {@code progress} asks to stop between pages or windows
      */
     public IngestResult ingestData(JobProgress progress) {
         NvdIngestCursor cursor = cursorRepository.findById(CURSOR_ID).orElse(null);
-        LocalDateTime windowStart = (cursor != null && cursor.getLastModified() != null)
-                ? cursor.getLastModified() : EPOCH;
+        if (cursor != null && cursor.getLastModified() != null) {
+            return sweepForward(cursor.getLastModified(), progress);
+        }
+        LocalDateTime frontier = (cursor != null && cursor.getOldestSweptModifiedDate() != null)
+                ? cursor.getOldestSweptModifiedDate() : LocalDateTime.now();
+        return sweepBackward(frontier, progress);
+    }
+
+    /** Routine incremental sweep: {@code [from, now)}, forward, advancing the forward high-water mark. */
+    private IngestResult sweepForward(LocalDateTime from, JobProgress progress) {
+        LocalDateTime windowStart = from;
         LocalDateTime now = LocalDateTime.now();
 
         int totalProcessed = 0;
@@ -175,8 +192,42 @@ public class NVDService {
             }
 
             totalProcessed += ingestWindow(windowStart, windowEnd, progress, totalProcessed);
-            advanceCursor(windowEnd);
+            advanceForwardCursor(windowEnd);
             windowStart = windowEnd;
+        }
+
+        return IngestResult.of(totalProcessed, "CVE records");
+    }
+
+    /**
+     * Bootstrap sweep: {@code [EPOCH, frontier)}, backward from {@code frontier} in
+     * {@value #WINDOW_DAYS}-day steps, advancing the bootstrap frontier after each window. Once the
+     * frontier reaches {@link #EPOCH}, bootstrap is done — the forward high-water mark takes over
+     * from {@code frontier}'s original value (captured once, before the walk starts, so it stays
+     * fixed across however many resumed runs bootstrap takes) and the frontier column is cleared.
+     */
+    private IngestResult sweepBackward(LocalDateTime frontier, JobProgress progress) {
+        LocalDateTime bootstrapCompletesAt = LocalDateTime.now();
+        LocalDateTime windowEnd = frontier;
+
+        int totalProcessed = 0;
+        while (windowEnd.isAfter(EPOCH)) {
+            if (progress.isCancelled()) {
+                throw new CancellationException("NVD ingest cancelled after " + totalProcessed + " records");
+            }
+
+            LocalDateTime windowStart = windowEnd.minusDays(WINDOW_DAYS);
+            if (windowStart.isBefore(EPOCH)) {
+                windowStart = EPOCH;
+            }
+
+            totalProcessed += ingestWindow(windowStart, windowEnd, progress, totalProcessed);
+            if (windowStart.equals(EPOCH)) {
+                completeBootstrap(bootstrapCompletesAt);
+            } else {
+                advanceBootstrapFrontier(windowStart);
+            }
+            windowEnd = windowStart;
         }
 
         return IngestResult.of(totalProcessed, "CVE records");
@@ -208,13 +259,35 @@ public class NVDService {
         return processed;
     }
 
-    private void advanceCursor(LocalDateTime windowEnd) {
-        NvdIngestCursor cursor = cursorRepository.findById(CURSOR_ID).orElseGet(() -> {
+    private NvdIngestCursor loadOrCreateCursor() {
+        return cursorRepository.findById(CURSOR_ID).orElseGet(() -> {
             NvdIngestCursor fresh = new NvdIngestCursor();
             fresh.setId(CURSOR_ID);
             return fresh;
         });
+    }
+
+    /** Routine incremental sweep: moves the forward high-water mark ahead. */
+    private void advanceForwardCursor(LocalDateTime windowEnd) {
+        NvdIngestCursor cursor = loadOrCreateCursor();
         cursor.setLastModified(windowEnd);
+        cursor.setLastIngestedAt(LocalDateTime.now());
+        cursorRepository.save(cursor);
+    }
+
+    /** Bootstrap sweep, still in progress: moves the backward frontier toward {@link #EPOCH}. */
+    private void advanceBootstrapFrontier(LocalDateTime windowStart) {
+        NvdIngestCursor cursor = loadOrCreateCursor();
+        cursor.setOldestSweptModifiedDate(windowStart);
+        cursor.setLastIngestedAt(LocalDateTime.now());
+        cursorRepository.save(cursor);
+    }
+
+    /** Bootstrap sweep just reached {@link #EPOCH}: hand off to the forward high-water mark. */
+    private void completeBootstrap(LocalDateTime bootstrapCompletesAt) {
+        NvdIngestCursor cursor = loadOrCreateCursor();
+        cursor.setLastModified(bootstrapCompletesAt);
+        cursor.setOldestSweptModifiedDate(null);
         cursor.setLastIngestedAt(LocalDateTime.now());
         cursorRepository.save(cursor);
     }

@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
@@ -256,14 +258,18 @@ class NVDServiceTest {
     }
 
     /**
-     * A brand-new install has no cursor row at all, so the sweep starts from the fixed 1999 epoch —
-     * roughly 80-something windows to reach "now" from there, not one, so this cancels after the
-     * first window completes (the same technique as the cancellation test below) rather than mocking
-     * the whole sweep: the point here is only that a from-scratch sweep starts at the epoch, not that
-     * it can run to completion in a test.
+     * A brand-new install has no cursor row at all, so bootstrap starts — and walks <b>backward</b>
+     * from now toward the fixed 1999 epoch, newest window first (see {@code NvdIngestCursor}'s class
+     * Javadoc for why: a CVE's {@code lastModified} clusters in recent calendar time regardless of
+     * how old the CVE itself is, so walking forward from 1999 spends a long time on nearly-empty
+     * history before reaching the actionable data). Roughly 80-something windows to reach the epoch
+     * from here, not one, so this cancels after the first window completes (the same technique as
+     * the cancellation test below) rather than mocking the whole sweep: the point here is only that
+     * a from-scratch sweep starts at "now" and moves backward, not that it can run to completion in
+     * a test.
      */
     @Test
-    void ingestDataWithNoCursorStartsSweepingFromTheFixedEpoch() {
+    void ingestDataWithNoCursorStartsSweepingBackwardFromNow() {
         assertThat(cursorRepository.findById("nvd")).isEmpty();
 
         nvd.expect(requestTo(startsWith("https://services.nvd.nist.gov/rest/json/cves/2.0")))
@@ -283,12 +289,43 @@ class NVDServiceTest {
             }
         };
 
+        LocalDateTime beforeIngest = LocalDateTime.now();
         assertThatThrownBy(() -> nvdService.ingestData(cancelAfterFirstWindow))
                 .isInstanceOf(CancellationException.class);
 
         nvd.verify();
         NvdIngestCursor created = cursorRepository.findById("nvd").orElseThrow();
-        assertThat(created.getLastModified()).isEqualTo(LocalDateTime.of(1999, 1, 1, 0, 0).plusDays(119));
+        // Bootstrap isn't done after one window (119 days doesn't reach 1999 from "now" in one
+        // step), so the forward high-water mark stays unset -- only the backward frontier moves.
+        assertThat(created.getLastModified()).isNull();
+        assertThat(created.getOldestSweptModifiedDate())
+                .isCloseTo(beforeIngest.minusDays(119), within(10, ChronoUnit.SECONDS));
+    }
+
+    /**
+     * The frontier close to the 1999 epoch (under one window-width away) so a single window finishes
+     * the backward walk — the point is the hand-off, not the whole multi-decade sweep.
+     */
+    @Test
+    void bootstrapReachingTheEpochHandsOffToTheForwardCursor() {
+        NvdIngestCursor cursor = new NvdIngestCursor();
+        cursor.setId("nvd");
+        cursor.setOldestSweptModifiedDate(LocalDateTime.of(1999, 1, 1, 0, 0).plusDays(50));
+        cursorRepository.save(cursor);
+
+        nvd.expect(requestTo(startsWith("https://services.nvd.nist.gov/rest/json/cves/2.0")))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(nvdWindowResultJson(), MediaType.APPLICATION_JSON));
+
+        LocalDateTime beforeIngest = LocalDateTime.now();
+        IngestResult result = nvdService.ingestData(JobProgress.NOOP);
+
+        nvd.verify();
+        assertThat(result.itemsProcessed()).isEqualTo(1);
+
+        NvdIngestCursor updated = cursorRepository.findById("nvd").orElseThrow();
+        assertThat(updated.getOldestSweptModifiedDate()).isNull();
+        assertThat(updated.getLastModified()).isCloseTo(beforeIngest, within(10, ChronoUnit.SECONDS));
     }
 
     /**
