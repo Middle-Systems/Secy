@@ -5,7 +5,7 @@ import type { SourceConnector } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { formatInteger, formatRelativeDate } from '@/lib/format';
 
-import { ConnectorSyncCell, ConnectorTypeIcon } from './connectors.helpers';
+import { CONNECTOR_TYPE_LABELS, ConnectorSyncCell, ConnectorTypeIcon } from './connectors.helpers';
 
 interface ConnectorsColumnsOptions {
   /** Row-scoped delete action — opens the confirmation, doesn't delete directly. */
@@ -23,7 +23,7 @@ export function connectorsColumns({
       cell: ({ row }) => (
         <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-muted-foreground">
           <ConnectorTypeIcon type={row.original.type} />
-          GitHub
+          {CONNECTOR_TYPE_LABELS[row.original.type]}
         </span>
       ),
     },
@@ -47,6 +47,9 @@ export function connectorsColumns({
       id: 'repos',
       header: 'Repos',
       cell: ({ row }) => {
+        if (row.original.type !== 'GITHUB') {
+          return <span className="text-sm text-muted-foreground">—</span>;
+        }
         const count = row.original.repoAllowlist.length;
         return (
           <span className="text-sm text-muted-foreground">

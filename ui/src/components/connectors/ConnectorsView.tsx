@@ -26,10 +26,13 @@ import { connectorsColumns } from './connectors.columns';
 const PAGE_SIZE_OPTIONS = [15, 25, 50];
 
 /**
- * Connectors — agentless source/cloud connectors (Phase 6b). GitHub only for
- * this pass: each connector enumerates repos under a GitHub org/user and
- * pulls their dependency-graph SBOMs through the exact ingest path a manual
- * SPDX upload takes (one repo -> one `Product`). Follows the
+ * Connectors — agentless source/cloud connectors (Phase 6b). A GitHub
+ * connector enumerates repos under a GitHub org/user and pulls their
+ * dependency-graph SBOMs through the exact ingest path a manual SPDX upload
+ * takes (one repo -> one `Product`); an AWS connector enumerates EC2/ECR/
+ * Lambda in a region via Inspector2; an Azure connector enumerates VMs/ACR
+ * registries in a subscription via Defender for Cloud — all three funnel
+ * through the same `Asset`/scan pipeline Trivy/Grype use. Follows the
  * Infrastructure/Compliance views' shape: `DataTable` + `Pagination`, an "Add
  * connector" action opens `AddConnectorModal`, and "Sync now" (per row, in
  * `connectorsColumns`) drives the same queue -> poll -> settle flow as
@@ -78,7 +81,7 @@ export function ConnectorsView() {
     <div className="flex flex-col gap-6">
       <ListPageHeader
         title="Connectors"
-        subtitle="Source & cloud connectors that sync their own inventory — GitHub repos and their dependency-graph SBOMs, agentless."
+        subtitle="Source & cloud connectors that sync their own inventory — GitHub, AWS and Azure, agentless."
         actions={
           <>
             <Button
@@ -121,7 +124,7 @@ export function ConnectorsView() {
             emptyMessage={
               <span className="inline-flex items-center gap-2">
                 <Plug className="h-4 w-4" aria-hidden="true" />
-                No connectors yet — add one to pull inventory from GitHub automatically.
+                No connectors yet — add one to pull inventory from GitHub, AWS or Azure automatically.
               </span>
             }
           />

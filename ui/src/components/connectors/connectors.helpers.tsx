@@ -5,6 +5,8 @@
 import {
   CheckCircle2,
   Clock,
+  Cloud,
+  CloudCog,
   Github,
   Loader2,
   RefreshCw,
@@ -19,7 +21,20 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/** Icon for a connector's `type`. `GITHUB` is the only value for this pass. */
+/** Display label for a connector's `type`, shared by the icon and the Type column. */
+export const CONNECTOR_TYPE_LABELS: Record<SourceConnectorType, string> = {
+  GITHUB: 'GitHub',
+  AWS: 'AWS',
+  AZURE: 'Azure',
+};
+
+const CONNECTOR_TYPE_ICONS: Record<SourceConnectorType, LucideIcon> = {
+  GITHUB: Github,
+  AWS: Cloud,
+  AZURE: CloudCog,
+};
+
+/** Icon for a connector's `type`. */
 export function ConnectorTypeIcon({
   type,
   className,
@@ -27,8 +42,8 @@ export function ConnectorTypeIcon({
   type: SourceConnectorType;
   className?: string;
 }) {
-  void type;
-  return <Github className={cn('h-4 w-4 shrink-0', className)} aria-hidden="true" />;
+  const Icon = CONNECTOR_TYPE_ICONS[type];
+  return <Icon className={cn('h-4 w-4 shrink-0', className)} aria-hidden="true" />;
 }
 
 interface StatusStyle {

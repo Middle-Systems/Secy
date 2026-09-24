@@ -862,8 +862,8 @@ export interface ComplianceReportDetail {
 /* Source connectors — /api/connectors (Phase 6b)                             */
 /* -------------------------------------------------------------------------- */
 
-/** The kind of connector. `GITHUB` is the only value for this pass. */
-export type SourceConnectorType = 'GITHUB';
+/** The kind of connector — which provider `scope` is read against. */
+export type SourceConnectorType = 'GITHUB' | 'AWS' | 'AZURE';
 
 /**
  * A connector's own sync lifecycle, mirrors `SourceConnector.STATUS_*` on the
@@ -873,22 +873,25 @@ export type SourceConnectorType = 'GITHUB';
 export type SourceConnectorStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
 /**
- * Where Secy should look for inventory on its own — a GitHub org/user whose
- * repos are enumerated and each repo's dependency-graph SBOM pulled and
- * ingested through the same path a manual SPDX upload takes.
+ * Where Secy should look for inventory on its own, agentlessly — a GitHub
+ * org/user whose repos are enumerated and each repo's dependency-graph SBOM
+ * pulled through the same path a manual SPDX upload takes, an AWS region
+ * whose EC2/ECR/Lambda resources are enumerated and scanned via Inspector2,
+ * or an Azure subscription whose VMs/ACR registries are enumerated and
+ * scanned via Defender for Cloud.
  *
- * Deliberately carries no credential: the token is read server-side from
- * `SECY_GITHUB_TOKEN`, never entered in the UI (see `application.properties`'s
- * env-var-driven config).
+ * Deliberately carries no credential: the token/key pair is read server-side
+ * (`SECY_GITHUB_TOKEN` / `secy.aws.*` / `secy.azure.*`), never entered in the
+ * UI — one instance-wide credential per provider, never per connector.
  */
 export interface SourceConnector {
   id: string;
   type: SourceConnectorType;
   /** Operator-given label, e.g. "Acme org". */
   name: string;
-  /** GitHub org or user login to enumerate repos under. */
+  /** What `scope` means depends on `type`: a GitHub org/user login, an AWS region, or an Azure subscription id. */
   scope: string;
-  /** `owner/repo` names to restrict the sync to. Empty means every repo under `scope`. */
+  /** `owner/repo` names to restrict a GitHub sync to. Empty means every repo under `scope`. Not used by AWS/Azure. */
   repoAllowlist: string[];
   /** Null until the first sync ever runs. */
   status: SourceConnectorStatus | null;
