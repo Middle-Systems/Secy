@@ -9,6 +9,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -34,6 +35,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link #aComponentWithOnlyACompromiseFindingIsActionableAndOutranksEveryKevAndEpssRow()}: it is
  * the whole point of the phase, and the one thing a refactor of the two-tier paging could silently
  * break. See {@code PHASE6-CONTRACT.md} §4.
+ *
+ * <p>Every test is {@code @Transactional}: the H2 database is shared across every
+ * {@code @SpringBootTest} context in the run, and without a per-test rollback this class's last test
+ * to run leaves its fixtures (a {@code Product} named "Acme Web" among them) permanently committed —
+ * silent litter for whatever test class happens to run next and assumes a clean table.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -213,6 +219,7 @@ class CompromiseFunnelTest {
     /* ------------------------------------------------------------------ */
 
     @Test
+    @Transactional
     @WithMockUser
     void aComponentWithOnlyACompromiseFindingIsActionableAndOutranksEveryKevAndEpssRow() throws Exception {
         mockMvc.perform(get("/actionable").param("size", "10"))
@@ -241,6 +248,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void aCompromiseRowCarriesTheSharedFieldsAndNullsOnlyTheCveShapedOnes() throws Exception {
         mockMvc.perform(get("/actionable").param("size", "10"))
@@ -280,6 +288,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void aVulnerabilityRowIsUnchangedFromPhase5ApartFromTheNewDiscriminator() throws Exception {
         // The reason the union is a flat envelope: every Phase 1-5 field keeps its JSON path, so no
@@ -309,6 +318,7 @@ class CompromiseFunnelTest {
     /* ------------------------------------------------------------------ */
 
     @Test
+    @Transactional
     @WithMockUser
     void aPageStraddlingTheTierBoundaryIsServedFromBothQueriesWithNoGapOrDuplicate() throws Exception {
         // size=2 puts the boundary inside page 1: two findings, then one finding + one alert.
@@ -331,6 +341,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void aPageEntirelyPastTheCompromiseTierOffsetsIntoTheAlertQuery() throws Exception {
         // size=1, page=3 is one past the three findings — the alert half at offset 0.
@@ -352,6 +363,7 @@ class CompromiseFunnelTest {
     /* ------------------------------------------------------------------ */
 
     @Test
+    @Transactional
     @WithMockUser
     void aFilterOnlyOneArmCanSatisfyExcludesTheOtherArmFromTheCountAsWellAsTheContent() throws Exception {
         // minCvss asks about CVSS. A compromise finding has none, so returning it anyway — because
@@ -382,6 +394,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void reasonCompromiseIsEquivalentToItemTypeCompromise() throws Exception {
         mockMvc.perform(get("/actionable").param("reason", "COMPROMISE"))
@@ -399,6 +412,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void scopeFiltersApplyToBothArmsIdentically() throws Exception {
         // productId: two findings and one alert in Acme Web; nothing from the asset or Acme Batch.
@@ -426,6 +440,7 @@ class CompromiseFunnelTest {
     /* ------------------------------------------------------------------ */
 
     @Test
+    @Transactional
     @WithMockUser
     void aCompromiseIdIs404OnActionableDetailAndFoundOnCompromiseDetail() throws Exception {
         // Two arms, two detail endpoints. /actionable/{id} returns the full CVE, every component it
@@ -456,6 +471,7 @@ class CompromiseFunnelTest {
     /* ------------------------------------------------------------------ */
 
     @Test
+    @Transactional
     @WithMockUser
     void compromiseListDefaultsToActiveAndSortsByConfidenceThenFreshestIoc() throws Exception {
         mockMvc.perform(get("/compromise"))
@@ -472,6 +488,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void compromiseListFiltersByTypeConfidenceScopeAndComponent() throws Exception {
         mockMvc.perform(get("/compromise").param("type", "MALWARE_HASH"))
@@ -508,6 +525,7 @@ class CompromiseFunnelTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void compromiseListPagesAndCanShowAutoResolvedHistory() throws Exception {
         mockMvc.perform(get("/compromise").param("size", "2").param("page", "0"))
@@ -533,6 +551,7 @@ class CompromiseFunnelTest {
     /* ------------------------------------------------------------------ */
 
     @Test
+    @Transactional
     @WithMockUser
     void theDashboardGainsACompromiseTileThatDoesNotDisturbTheActionableRollUps() throws Exception {
         mockMvc.perform(get("/stats/dashboard"))

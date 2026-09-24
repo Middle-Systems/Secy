@@ -1,5 +1,6 @@
 package net.jdesive.secy.controller;
 
+import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.ProductRepository;
 import net.jdesive.secy.persistence.SourceConnectorRepository;
 import net.jdesive.secy.persistence.entity.Product;
@@ -13,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
@@ -28,6 +30,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * The plain CRUD surface of {@code /connectors} — creation, listing, detail and delete. The actual
  * sync ({@code POST /connectors/{id}/sync} and the {@code CONNECTOR_SYNC} job it queues) is
  * {@code ConnectorSyncJobFlowTest}'s job; this class only pins the resource contract.
+ *
+ * <p>Every test is {@code @Transactional} so nothing it creates survives past its own rollback —
+ * the H2 database is shared across every {@code @SpringBootTest} context in the run.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -42,13 +47,21 @@ class SourceConnectorControllerTest {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired
+    private CompromiseFindingRepository findingRepository;
+
     @BeforeEach
     void seed() {
         sourceConnectorRepository.deleteAll();
+        // A compromise_finding left behind by another test class holds an FK into sbom_component and
+        // would block productRepository.deleteAll() below -- the H2 database is shared across every
+        // @SpringBootTest context in the run, same reason ConnectorSyncJobFlowTest clears it.
+        findingRepository.deleteAll();
         productRepository.deleteAll();
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void createDoesNotTriggerASyncAndStartsQueuedWithNoLastSyncedAt() throws Exception {
         mockMvc.perform(post("/connectors")
@@ -68,6 +81,7 @@ class SourceConnectorControllerTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void createPersistsAnOptionalRepoAllowlist() throws Exception {
         String body = mockMvc.perform(post("/connectors")
@@ -87,6 +101,7 @@ class SourceConnectorControllerTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void listIsPagedNewestFirst() throws Exception {
         connector("First", "org-a");
@@ -100,6 +115,7 @@ class SourceConnectorControllerTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void detailReturnsTheConnectorOr404() throws Exception {
         UUID id = connector("Acme org", "acme-corp");
@@ -114,6 +130,7 @@ class SourceConnectorControllerTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void deleteRemovesTheConnectorButNotTheProductsItIntroduced() throws Exception {
         UUID id = connector("Acme org", "acme-corp");
@@ -132,6 +149,7 @@ class SourceConnectorControllerTest {
     }
 
     @Test
+    @Transactional
     @WithMockUser
     void deletingAnUnknownConnectorIs404() throws Exception {
         mockMvc.perform(delete("/connectors/{id}", UUID.randomUUID()))

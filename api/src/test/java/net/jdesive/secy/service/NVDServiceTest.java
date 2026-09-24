@@ -116,7 +116,10 @@ class NVDServiceTest {
         Vulnerability vulnerability = new Vulnerability();
         vulnerability.setId(CVE_ID);
         vulnerability.setDescription("Original description.");
-        vulnerabilityRepository.save(vulnerability);
+        // Vulnerability's @Id is manually assigned, so save() routes through entityManager.merge(),
+        // which returns a *different*, managed instance -- the local `vulnerability` reference stays
+        // detached unless reassigned here. Skipping this is exactly the bug this test exists to catch.
+        vulnerability = vulnerabilityRepository.save(vulnerability);
 
         // A real alert already correlated against it — this is the piece every earlier test ran
         // without, since it always ingested into an empty table.
