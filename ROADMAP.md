@@ -183,6 +183,21 @@ connectors (CODEOWNERS, GitHub team permissions, cloud resource tags). Each owne
 records its source (`INFERRED` / `MANUAL`) even though only `MANUAL` is populated yet, so M2/M3
 don't need a schema change to add inference.
 
+**Status: SHIPPED.** `ownership_link` (migration `020`) links a target — a `Product` today, an
+`Asset` from M3 on (the `asset_id` column exists now so M3 needs no later migration, but nothing
+writes it yet) — to an owner: a registered `User`, or a free-text `principal` (an unregistered
+individual's GitHub login/email, or a team name), typed by `owner_type` (`USER`/`TEAM`). Many-to-
+many: a product can have several owners, a user or team can own several products, and a `MANUAL`
+and an `INFERRED` link for the same owner can coexist (manual intent survives an inference
+refresh) — enforced by a per-`(target, owner, source, inference_method)` partial unique index.
+`OwnershipService`/`ProductOwnershipController` expose `GET`/`POST /products/{id}/owners` and
+`DELETE /products/{id}/owners/{ownerId}` for `MANUAL` links only; a manual `USER` link must
+reference a registered, enabled tenant member, a manual `TEAM` link takes free text only, and the
+Unassigned bucket can't have owners (409). `source`/`inference_method` (`CODEOWNERS`/
+`GITHUB_TEAM_PERMISSION`/`CLOUD_RESOURCE_TAG`) are reserved for M2/M3's writers via comment-only
+`TODO`s next to `GitHubSyncService.findOrCreateByName`, `AwsSyncService` and `AzureSyncService` —
+no inference runs yet. No ownership UI and no role gating (M1k) either.
+
 **M1c — Canonical component identity.** Extend the existing `NormalizedComponent`/`identityKey`
 (PURL-primary, built in the old roadmap's Phase 3) with CPE, SWID tag, and content hash as
 secondary identifiers. When identifiers conflict across sources, flag the link low-confidence

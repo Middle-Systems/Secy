@@ -94,6 +94,12 @@ public class GitHubSyncService {
                     // one-product-per-repo lookup with ProductTaggingService.resolveProduct so
                     // GitHub-sourced products go through the same tag-driven resolution M1a's manual
                     // upload path uses. No behavior change yet — see ROADMAP.md's M2 section.
+                    // TODO(M2): parse this repo's CODEOWNERS file and its GitHub team repo
+                    // permissions, and write OwnershipLink rows (source=INFERRED,
+                    // inferenceMethod=CODEOWNERS/GITHUB_TEAM_PERMISSION, evidence="path:line" or the
+                    // team slug) onto the resolved product below. A refresh must replace only this
+                    // method's own INFERRED rows for that product — never a MANUAL link, and never the
+                    // Unassigned bucket. See ROADMAP.md's M1b/M2 sections and OwnershipLink's Javadoc.
                     Product product = productService.findOrCreateByName(fullName);
                     SBOM sbom = sbomService.createPlaceholder(
                             product, document, defaultVersion(repo), null, null);

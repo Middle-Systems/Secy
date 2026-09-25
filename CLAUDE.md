@@ -24,7 +24,8 @@ items: KEV-listed OR EPSS > 0.1.
   resolves its product from repeated `tag=key=value` params via the tenant's configured product
   tag key, default `secy:product`; untagged/unresolved lands in the "Unassigned" bucket),
   `/sbom/{id}/vulnerabilities`, `/settings/product-tagging` (GET/PUT the tenant's product tag key
-  — M1a), `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
+  — M1a), `/products/{id}/owners` (GET/POST, `DELETE /{ownerId}` — manual ownership links, M1b),
+  `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
   `/assets`, `/assets/scan/{trivy,grype}`, `/compliance/reports` (+ `/{id}`, `/{id}/scan`,
   `/{id}/misconfigurations`), `/connectors` (+ `/{id}`, `/{id}/sync` — Phase 6b agentless source
   connectors, GitHub only for now).

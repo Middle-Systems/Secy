@@ -17,8 +17,9 @@ import java.util.UUID;
 /**
  * Base class for every entity M0 scopes to a tenant (ROADMAP.md, M0 — "Tenancy foundation (schema
  * only)"): {@link Product}, {@link SBOM}, {@link Asset}, {@link VulnerabilityAlert},
- * {@link CompromiseFinding}, {@link SourceConnector} and {@link DockerComplianceReport}. Future M1
- * tables should extend this too — don't build those now.
+ * {@link CompromiseFinding}, {@link SourceConnector}, {@link DockerComplianceReport},
+ * {@link ProductTagConfig} (M1a) and {@link OwnershipLink} (M1b). Future M1 tables should extend
+ * this too — don't build those now.
  *
  * <h2>Why a {@code @PrePersist} default instead of touching every creation site</h2>
  *

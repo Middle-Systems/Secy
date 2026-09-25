@@ -180,6 +180,10 @@ public class AwsSyncService {
     // product resolution yet — assets stay unassociated with a Product here. See ROADMAP.md's M3
     // section and ProductTaggingService.resolveProduct, the seam M3 should call into once cloud
     // resource-tag reading lands. No behavior change yet.
+    // TODO(M3): once a resource resolves to a product via ProductTaggingService.resolveProduct,
+    // read its cloud owner tag and write an OwnershipLink (source=INFERRED,
+    // inferenceMethod=CLOUD_RESOURCE_TAG) onto that product, or onto asset_id for a product-less
+    // asset — no schema change needed (see migration 020 / OwnershipLink's Javadoc).
     private static String ec2AssetName(Instance instance) {
         for (Tag tag : instance.tags()) {
             if ("Name".equals(tag.key()) && tag.value() != null && !tag.value().isBlank()) {
