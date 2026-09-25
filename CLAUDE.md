@@ -35,7 +35,11 @@ items: KEV-listed OR EPSS > 0.1.
   `/{id}/misconfigurations`), `/connectors` (+ `/{id}`, `/{id}/sync` — Phase 6b agentless source
   connectors, GitHub only for now), `POST /lineage/rebuild` (M1d — queues a full rebuild of the
   Apache AGE lineage graph from Postgres; 503 when `secy.lineage.enabled=false` or no graph writer
-  is configured, which is the default everywhere until you opt in — see below).
+  is configured, which is the default everywhere until you opt in — see below), `POST /vex`
+  (M1f — `?origin=TENANT|VENDOR` required, `?productId=` optional; validates an OpenVEX/CSAF
+  2.0-subset/CycloneDX VEX document synchronously, then queues a `VEX_UPLOAD` job), `/vex/documents`
+  (+ `/{id}`, `/{id}/statements`, `POST /{id}/deactivate`), `/vex/statements`,
+  `POST /vex/reconcile`, `/vex/settings/precedence` (GET/PUT the tenant's precedence policy).
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

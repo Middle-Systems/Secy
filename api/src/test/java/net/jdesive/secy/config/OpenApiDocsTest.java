@@ -57,7 +57,16 @@ class OpenApiDocsTest {
                 .contains("\"/threat/malware-hashes\"")
                 // M1e.
                 .contains("\"/lifecycle-drift\"")
-                .contains("\"/lifecycle-drift/{id}\"");
+                .contains("\"/lifecycle-drift/{id}\"")
+                // M1f.
+                .contains("\"/vex\"")
+                .contains("\"/vex/documents\"")
+                .contains("\"/vex/documents/{id}\"")
+                .contains("\"/vex/documents/{id}/statements\"")
+                .contains("\"/vex/documents/{id}/deactivate\"")
+                .contains("\"/vex/statements\"")
+                .contains("\"/vex/reconcile\"")
+                .contains("\"/vex/settings/precedence\"");
 
         assertThat(body)
                 .as("@Tag names")
@@ -71,7 +80,8 @@ class OpenApiDocsTest {
                 .contains("\"Compliance\"")
                 .contains("\"Compromise\"")
                 .contains("\"Threat\"")
-                .contains("\"Lifecycle drift\"");
+                .contains("\"Lifecycle drift\"")
+                .contains("\"VEX\"");
 
         assertThat(body)
                 .as("the GET /actionable typed union is described to clients — itemType is the "

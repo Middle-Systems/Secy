@@ -4,8 +4,14 @@ import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixSource;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.model.vex.VexStatementRole;
 import net.jdesive.secy.persistence.entity.AlertLifecycleState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
+import net.jdesive.secy.persistence.entity.VexDocumentFormat;
+import net.jdesive.secy.persistence.entity.VexJustification;
+import net.jdesive.secy.persistence.entity.VexOrigin;
+import net.jdesive.secy.persistence.entity.VexPrecedencePolicy;
+import net.jdesive.secy.persistence.entity.VexStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -50,7 +56,17 @@ public record ActionableDetailResponse(
         /** The FIRST EPSS entry, or null when the CVE has no EPSS row. */
         EpssEvidence epss,
         /** CVE references from NVD. */
-        List<ReferenceLink> references) {
+        List<ReferenceLink> references,
+        /**
+         * M1f: the alert's VEX resolution, plus every statement that applied and its role
+         * ({@code WON}/{@code AGREES}/{@code CONFLICTING}/{@code OVERRIDDEN}/{@code SUPERSEDED}) — how
+         * an operator sees which statements factored into the verdict, not just the verdict itself.
+         * {@code status}/{@code justification}/{@code conflict}/{@code winningStatementId}/
+         * {@code updatedAt} come from the alert's own stored columns (consistent with the list
+         * endpoint); {@code statements} and {@code policy} are freshly computed by
+         * {@code VexResolutionService.explain} so a stale precedence-policy read never happens.
+         */
+        Vex vex) {
 
     /** The CVE itself, flattened out of {@code Vulnerability}. */
     public record Cve(
@@ -119,6 +135,20 @@ public record ActionableDetailResponse(
 
     /** An NVD reference URL. */
     public record ReferenceLink(String url, String source, String tags) {
+    }
+
+    /** M1f's VEX block — see the field Javadoc above. Empty {@code statements} when nothing applies. */
+    public record Vex(VexStatus status, VexJustification justification, boolean conflict, UUID winningStatementId,
+                      VexPrecedencePolicy policy, LocalDateTime updatedAt, List<AppliedVexStatement> statements) {
+    }
+
+    /** One statement that applied to this alert, with the role {@code VexResolver} gave it. */
+    public record AppliedVexStatement(UUID statementId, UUID documentId, VexDocumentFormat format, VexOrigin origin,
+                                      String author, VexStatus status, String sourceStatus,
+                                      VexJustification justification, String sourceJustification,
+                                      String impactStatement, String actionStatement, String productRef,
+                                      String targetPurl, String matchVersion, LocalDateTime statementTimestamp,
+                                      VexStatementRole role) {
     }
 
 }

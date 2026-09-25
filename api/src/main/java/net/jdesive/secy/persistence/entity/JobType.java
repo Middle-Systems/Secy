@@ -100,6 +100,18 @@ public enum JobType {
      * which excludes this type for the same reason it excludes {@link #NVD}: a graph rebuild
      * changes no alert inputs, so it must not trigger a re-enrichment pass.
      */
-    LINEAGE_REBUILD
+    LINEAGE_REBUILD,
+
+    /**
+     * One uploaded VEX document (OpenVEX / CSAF 2.0 subset / CycloneDX VEX) being parsed into
+     * {@code vex_statement} rows and reconciled against existing alerts (M1f).
+     *
+     * <p>Per-invocation like {@link #SBOM_UPLOAD}, {@link #ASSET_SCAN}, {@link #COMPLIANCE_SCAN} and
+     * {@link #CONNECTOR_SYNC} — each upload is its own unit of work with its own payload (which
+     * {@code vex_document} row to finish ingesting) — so it is enqueued via {@code JobService.create()}
+     * and excluded from {@code uq_ingestion_job_active_type} by migration {@code 024e}. 10 characters,
+     * well within the {@code varchar(32)} column.
+     */
+    VEX_UPLOAD
 
 }

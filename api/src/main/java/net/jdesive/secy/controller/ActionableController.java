@@ -22,6 +22,7 @@ import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
 import net.jdesive.secy.persistence.entity.User;
+import net.jdesive.secy.persistence.entity.VexStatus;
 import net.jdesive.secy.security.AppUserPrincipal;
 import net.jdesive.secy.service.ActionableService;
 import net.jdesive.secy.service.TriageService;
@@ -127,11 +128,18 @@ public class ActionableController {
             @Parameter(description = "Exact compromise confidence: CONFIRMED (the feed named this exact "
                     + "artefact), LIKELY (the match needed an inference) or INVESTIGATE (the IOC has gone "
                     + "stale). Excludes every vulnerability row.")
-            @RequestParam(required = false) CompromiseConfidence confidence) {
+            @RequestParam(required = false) CompromiseConfidence confidence,
+            @Parameter(description = "M1f: exact VEX status. Omit for the default: NOT_AFFECTED and FIXED "
+                    + "rows are hidden (they are not work), AFFECTED/UNDER_INVESTIGATION stay visible. "
+                    + "Excludes every compromise row, which has no VEX status.")
+            @RequestParam(required = false) VexStatus vexStatus,
+            @Parameter(description = "M1f: true/false to show only conflicted/non-conflicted rows; omit for "
+                    + "both. Excludes every compromise row.")
+            @RequestParam(required = false) Boolean vexConflict) {
 
         ActionableFilter filter = new ActionableFilter(
                 productId, assetId, reason, minCvss, state, fixState, minExploitMaturity, matchConfidence,
-                itemType, confidence);
+                itemType, confidence, vexStatus, vexConflict);
         return actionableService.findActionable(page, size, filter);
     }
 

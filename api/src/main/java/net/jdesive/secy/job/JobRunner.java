@@ -21,6 +21,7 @@ import net.jdesive.secy.service.MalwareHashIngestService;
 import net.jdesive.secy.service.NVDService;
 import net.jdesive.secy.service.OsvIngestService;
 import net.jdesive.secy.service.SbomIngestJobService;
+import net.jdesive.secy.service.vex.VexIngestJobService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
@@ -92,6 +93,8 @@ public class JobRunner {
 
     private final LineageRebuildService lineageRebuildService;
 
+    private final VexIngestJobService vexIngestJobService;
+
     /**
      * Jobs this instance has dispatched and not yet finished, each mapped to its worker thread's
      * {@link Future} — a local capacity guard (correctness of the claim itself rests on the
@@ -121,7 +124,8 @@ public class JobRunner {
                      MaliciousPackageIngestService maliciousPackageIngestService,
                      MalwareHashIngestService malwareHashIngestService,
                      ConnectorSyncService connectorSyncService,
-                     LineageRebuildService lineageRebuildService) {
+                     LineageRebuildService lineageRebuildService,
+                     VexIngestJobService vexIngestJobService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -139,6 +143,7 @@ public class JobRunner {
         this.malwareHashIngestService = malwareHashIngestService;
         this.connectorSyncService = connectorSyncService;
         this.lineageRebuildService = lineageRebuildService;
+        this.vexIngestJobService = vexIngestJobService;
     }
 
     /**
@@ -255,6 +260,10 @@ public class JobRunner {
             // A singleton feed pull like the others in this block's first group -- not
             // per-invocation -- see JobType.LINEAGE_REBUILD's Javadoc.
             case LINEAGE_REBUILD -> lineageRebuildService.ingest(progress);
+            // Per-invocation like the SBOM_UPLOAD/ASSET_SCAN/COMPLIANCE_SCAN/CONNECTOR_SYNC group --
+            // looks up which VexDocument by job id. See VexIngestionService.ingestUploadJob /
+            // VexDocument.jobId.
+            case VEX_UPLOAD -> vexIngestJobService.ingest(id, progress);
         };
     }
 

@@ -13,9 +13,11 @@ import net.jdesive.secy.model.actionable.ActionableItemType;
 import net.jdesive.secy.model.actionable.OffsetLimitRequest;
 import net.jdesive.secy.model.compromise.CompromiseFilter;
 import net.jdesive.secy.model.component.CorrelatableComponent;
+import net.jdesive.secy.model.vex.VexExplanation;
 import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.*;
+import net.jdesive.secy.service.vex.VexResolutionService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -65,6 +67,9 @@ public class ActionableService {
     private final VulnerabilityAlertRepository alertRepository;
 
     private final CompromiseFindingRepository findingRepository;
+
+    /** M1f: {@code GET /actionable/{id}}'s "which statements applied, and who won" block. */
+    private final VexResolutionService vexResolutionService;
 
     /**
      * Paged actionable items: <b>every compromise finding first</b>, then vulnerability alerts by
@@ -158,7 +163,7 @@ public class ActionableService {
     @Transactional(readOnly = true)
     public Page<ActionableItemResponse> findActionableForAsset(int page, int size, UUID assetId) {
         return findActionable(page, size,
-                new ActionableFilter(null, assetId, null, null, null, null, null, null, null, null));
+                new ActionableFilter(null, assetId, null, null, null, null, null, null, null, null, null, null));
     }
 
     /**
@@ -204,6 +209,13 @@ public class ActionableService {
 
             // Phase 7: the triage half of "what is still work" — see triagePredicate.
             predicates.add(triagePredicate(root, cb, filter));
+            // M1f: the VEX half of "what is still work" — see vexPredicate. Composed the same way as
+            // triagePredicate: a null filter hides what a VEX statement says is not actionable any
+            // more, an explicit value is an exact match instead.
+            predicates.add(vexPredicate(root, cb, filter));
+            if (filter.vexConflict() != null) {
+                predicates.add(cb.equal(root.get("vexConflict"), filter.vexConflict()));
+            }
 
             if (filter.reason() != null) {
                 predicates.add(cb.equal(root.get("actionableReason"), filter.reason()));
@@ -292,6 +304,23 @@ public class ActionableService {
         return cb.not(cb.or(resolved, falsePositive, stillSnoozed));
     }
 
+    /**
+     * M1f's VEX half of "what is still work", the same shape as {@link #triagePredicate}. Null (the
+     * default): hide {@code NOT_AFFECTED} and {@code FIXED} — both are "not work" — while
+     * {@code AFFECTED}/{@code UNDER_INVESTIGATION} (and no VEX statement at all, i.e. {@code null})
+     * stay visible. A real value: exact match instead. No existing fixture has VEX data, so
+     * {@code vexStatus} is null on every row before M1f and this predicate is a no-op for every
+     * existing test.
+     */
+    private static <T> Predicate vexPredicate(Root<T> root, CriteriaBuilder cb, ActionableFilter filter) {
+        if (filter.vexStatus() != null) {
+            return cb.equal(root.get("vexStatus"), filter.vexStatus());
+        }
+        return cb.or(
+                cb.isNull(root.<VexStatus>get("vexStatus")),
+                cb.not(root.<VexStatus>get("vexStatus").in(VexStatus.NOT_AFFECTED, VexStatus.FIXED)));
+    }
+
     /* ------------------------------------------------------------------ */
     /* Mapping                                                            */
     /* ------------------------------------------------------------------ */
@@ -343,7 +372,11 @@ public class ActionableService {
                 alert.getTriageState(),
                 alert.getAssignee() == null ? null : alert.getAssignee().getId(),
                 alert.getAssignee() == null ? null : assigneeName(alert.getAssignee()),
-                alert.getSnoozedUntil());
+                alert.getSnoozedUntil(),
+                alert.getVexStatus(),
+                alert.getVexJustification(),
+                alert.isVexConflict(),
+                alert.getVexStatementId());
     }
 
     /**
@@ -392,7 +425,8 @@ public class ActionableService {
                 finding.getTriageState(),
                 finding.getAssignee() == null ? null : finding.getAssignee().getId(),
                 finding.getAssignee() == null ? null : assigneeName(finding.getAssignee()),
-                finding.getSnoozedUntil());
+                finding.getSnoozedUntil(),
+                null, null, false, null);
     }
 
     /** Falls back to email when a user has set no display name — the same rule {@code TriageService} uses. */
@@ -441,7 +475,26 @@ public class ActionableService {
                 affected,
                 toKevEvidence(kev),
                 toEpssEvidence(epss),
-                toReferences(cve));
+                toReferences(cve),
+                toVex(alert));
+    }
+
+    /** M1f: the alert's stored VEX snapshot, plus every applicable statement from {@code explain}. */
+    private ActionableDetailResponse.Vex toVex(VulnerabilityAlert alert) {
+        VexExplanation explanation = vexResolutionService.explain(alert);
+        List<ActionableDetailResponse.AppliedVexStatement> statements = explanation.statements().stream()
+                .map(applied -> {
+                    VexStatement s = applied.statement();
+                    return new ActionableDetailResponse.AppliedVexStatement(
+                            s.getId(), s.getDocumentId(), s.getFormat(), s.getOrigin(), s.getAuthor(),
+                            s.getStatus(), s.getSourceStatus(), s.getJustification(), s.getSourceJustification(),
+                            s.getImpactStatement(), s.getActionStatement(), s.getProductRef(), s.getTargetPurl(),
+                            s.getMatchVersion(), s.getStatementTimestamp(), applied.role());
+                })
+                .toList();
+        return new ActionableDetailResponse.Vex(
+                alert.getVexStatus(), alert.getVexJustification(), alert.isVexConflict(), alert.getVexStatementId(),
+                explanation.policy(), alert.getVexUpdatedAt(), statements);
     }
 
     private static ActionableDetailResponse.Cve toCve(Vulnerability cve) {

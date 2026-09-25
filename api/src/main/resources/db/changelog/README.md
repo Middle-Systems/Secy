@@ -54,6 +54,7 @@ Claimed prefixes:
 | `021`  | `sbom_component_identifier` (declared CPE/SWID per component instance) + `sbom_component.identity_confidence` + `sbom_component_identity_conflict` (one row per detected identifier conflict, its `other_component_id`/`other_identity_key` pair-or-neither check) + `sbom.ingestion_source` / `source_connector_id` (FK, `on delete set null`) / `lifecycle_stage` (reserved for M1e, unwritten) (ROADMAP.md, M1c — "Canonical component identity") |
 | `022`  | Apache AGE extension + `secy_lineage` graph, both precondition-guarded (`onFail:CONTINUE`) so a Postgres without AGE still boots; labels/indexes are created at rebuild time (ROADMAP.md, M1d) |
 | `023`  | `idx_sbom_product_stage_active` (lookup index for the per-(product, lifecycle stage) active-SBOM slot) + `lifecycle_drift_finding` — one row per (product, adjacent stage pair, drift kind, component identity) from the Source/Build/Analyzed/Deployed diff engine, reconciled like `compromise_finding`, no triage/severity columns (ROADMAP.md, M1e — "SBOM lifecycle stages + diffing") |
+| `024`  | `vex_precedence_config` (per-tenant `VexPrecedencePolicy`, seeded default for existing tenants) + `vex_document` / `vex_statement` (OpenVEX/CSAF-subset/CycloneDX VEX documents and the statements parsed from them, never deleted) + `vulnerability_alert.vex_*` denormalized resolution snapshot + `VEX_UPLOAD` joining the per-invocation job types excluded from `uq_ingestion_job_active_type` (ROADMAP.md, M1f — "VEX ingestion") |
 
 Pick the next free number if yours isn't listed.
 

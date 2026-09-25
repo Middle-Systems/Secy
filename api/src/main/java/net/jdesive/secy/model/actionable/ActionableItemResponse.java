@@ -8,6 +8,8 @@ import net.jdesive.secy.persistence.entity.FixSource;
 import net.jdesive.secy.persistence.entity.FixState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
 import net.jdesive.secy.persistence.entity.TriageState;
+import net.jdesive.secy.persistence.entity.VexJustification;
+import net.jdesive.secy.persistence.entity.VexStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -114,6 +116,13 @@ import java.util.UUID;
  * @param assigneeName         that assignee's display name, falling back to their email, or null
  * @param snoozedUntil         when a {@code SNOOZED} item reappears on the default list; meaningless
  *                             (and typically null) otherwise
+ * @param vexStatus            M1f: the alert's resolved VEX status, or null when no statement applies.
+ *                             Always null on a compromise row
+ * @param vexJustification     the winning statement's justification, when {@code vexStatus} is
+ *                             {@code NOT_AFFECTED} and one was given
+ * @param vexConflict          true when authors disagree in the winning precedence tier — nothing
+ *                             applies, flagged for review. Always false on a compromise row
+ * @param vexStatementId       the {@code VexStatement} that won resolution, or null
  */
 public record ActionableItemResponse(
         UUID id,
@@ -153,5 +162,9 @@ public record ActionableItemResponse(
         TriageState triageState,
         UUID assigneeId,
         String assigneeName,
-        LocalDateTime snoozedUntil) {
+        LocalDateTime snoozedUntil,
+        VexStatus vexStatus,
+        VexJustification vexJustification,
+        boolean vexConflict,
+        UUID vexStatementId) {
 }

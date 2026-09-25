@@ -17,6 +17,7 @@ import net.jdesive.secy.persistence.entity.SBOMComponent;
 import net.jdesive.secy.persistence.entity.Vulnerability;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
 import net.jdesive.secy.service.EnrichmentService;
+import net.jdesive.secy.service.vex.VexResolutionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -138,6 +139,14 @@ public class CorrelationService {
      * without three call sites to keep in step.
      */
     private final CompromiseDetectionService compromiseDetectionService;
+
+    /**
+     * M1f: re-matches every alert this run touched against active VEX statements. Statements are
+     * stored independently of alerts (design decision #1) precisely so a statement ingested before
+     * its component ever existed still applies once correlation raises the alert — waiting for the
+     * next VEX upload to notice would miss the common case entirely.
+     */
+    private final VexResolutionService vexResolutionService;
 
     /**
      * What one correlation run did. Returned for logging and tests; nothing persists it.
@@ -441,6 +450,14 @@ public class CorrelationService {
             toSave.add(stale);
             autoResolved++;
         }
+
+        // M1f: resolve VEX for the alerts this run actually confirmed, before they are saved --
+        // never for a row this same pass just auto-resolved, which keeps whatever snapshot it had.
+        // The fast path inside applyTo makes this a no-op query-for-query when no VEX exists yet.
+        List<VulnerabilityAlert> activeToSave = toSave.stream()
+                .filter(a -> a.getLifecycleState() == AlertLifecycleState.ACTIVE)
+                .toList();
+        vexResolutionService.applyTo(activeToSave);
 
         if (!toSave.isEmpty()) {
             alertRepository.saveAll(toSave);

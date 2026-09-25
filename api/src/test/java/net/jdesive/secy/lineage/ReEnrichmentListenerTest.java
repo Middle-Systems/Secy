@@ -42,6 +42,16 @@ class ReEnrichmentListenerTest {
     }
 
     @Test
+    void ignoresVexUpload() {
+        EnrichmentService enrichmentService = mock(EnrichmentService.class);
+        ReEnrichmentListener listener = new ReEnrichmentListener(enrichmentService);
+
+        listener.onFeedIngested(new FeedIngestedEvent(UUID.randomUUID(), JobType.VEX_UPLOAD));
+
+        verify(enrichmentService, never()).reEnrichAll();
+    }
+
+    @Test
     void kevStillTriggersReEnrichment() {
         EnrichmentService enrichmentService = mock(EnrichmentService.class);
         when(enrichmentService.reEnrichAll()).thenReturn(3);

@@ -315,6 +315,15 @@ into a `VexStatement` model: status (`not_affected` with justification, `affecte
 overrides vendor, conflicts flagged for review). Every finding shows which statements applied
 and which one won.
 
+**Status: SHIPPED (CSAF: subset — product_tree leaves + one-hop relationships, PURL-only matching; whole-product statements stored but not applied).**
+
+- **What shipped.** `POST /vex?origin=TENANT|VENDOR[&productId=]` validates synchronously, returning a 400 for a malformed document and a 413 over `secy.vex.max-document-bytes` (10 MB), with nesting-depth and duplicate-key limits. Nothing is queued on a rejection. The work then runs as a `VEX_UPLOAD` job.
+- **Formats.** OpenVEX (0.2.0 and legacy 0.0.1) and CycloneDX VEX (1.4-1.6, standalone or embedded, bom-ref/BOM-Link/PURL refs) are parsed into `vex_statement` rows (migration `024`). Also accepted: a scoped subset of CSAF 2.0 (`csaf_vex`/`csaf_security_advisory`: branches, full_product_names, one-hop relationships, product_groups, product_status + flags + impact threats + remediations).
+- **Resolution.** Each alert carries a `vex_status`/`vex_justification`/`vex_statement_id`/`vex_conflict` snapshot, resolved per tenant policy (`GET`/`PUT /vex/settings/precedence`, default `TENANT_OVER_VENDOR`). The newest statement per author supersedes that author's older ones. Disagreeing authors in the winning tier set `vex_conflict` and nothing wins.
+- **Effect on `/actionable`.** `GET /actionable` hides NOT_AFFECTED/FIXED rows by default (`?vexStatus=`, `?vexConflict=`), and `GET /actionable/{id}` lists every applicable statement with its role (WON/AGREES/CONFLICTING/OVERRIDDEN/SUPERSEDED). `actionable`, `triageState` and the dashboard counts are deliberately untouched.
+- **When statements apply.** Statements are stored independently of alerts and applied on VEX ingest, on every correlation (a statement that arrives before its component still applies), on document deactivation, on a policy change, and on `POST /vex/reconcile`.
+- **Not done, deliberately:** CSAF relationship chains beyond one hop, platform scoping, `product_version_range`/vers, CPE and hash identification helpers, CSAF 2.1, signatures and ROLIE; CPE matching in any format, and CycloneDX `versions[].range`; whole-product statements applying to every component of a Secy Product; automatic extraction of embedded VEX from `POST /sbom`; VEX authoring/UI (M1k), the M1j status-machine integration, M1i scoring input, and role gating. A narrow race exists with a correlation running concurrently; it heals on the next correlation, the next VEX upload, or `POST /vex/reconcile`.
+
 **M1g — CBOM ingestion.** CycloneDX 1.6 cryptographic-asset ingestion: algorithms, keys,
 certificates, protocols. Quantum-vulnerable algorithms (RSA, ECC) become their own finding
 category. Confirm the current CycloneDX parser's version ceiling during implementation — the
