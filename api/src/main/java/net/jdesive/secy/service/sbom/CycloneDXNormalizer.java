@@ -1,8 +1,11 @@
 package net.jdesive.secy.service.sbom;
 
+import net.jdesive.secy.model.cbom.CryptoAssets;
+import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.component.SbomFormat;
+import net.jdesive.secy.service.cbom.CryptoPropertiesExtractor;
 import net.jdesive.secy.model.cyclonedx.CycloneDXComponent;
 import net.jdesive.secy.model.cyclonedx.CycloneDXComponentLicense;
 import net.jdesive.secy.model.cyclonedx.CycloneDXExternalReference;
@@ -34,6 +37,17 @@ import java.util.Set;
  * no {@code components}, a component with no name — all of them normalise rather than throw, because
  * an SBOM that is 99% parseable is worth correlating and a hard failure on one malformed entry
  * loses the other 99%.
+ *
+ * <h2>M1g: CycloneDX 1.6+ {@code cryptoProperties}</h2>
+ *
+ * <p>CycloneDX 1.2+ JSON is accepted as always; {@code cryptoProperties} on a
+ * {@code cryptographic-asset} component is read only when {@code 1.6 <= specVersion < 2.0} (see
+ * {@link CycloneDxSpecVersion#supportsCryptoAssets}) — below the floor, the component still
+ * normalises as a plain row, just without a {@link NormalizedComponent#crypto()}; this is a skip, not
+ * a rejection. The check applies to {@code components[]} only, never {@code metadata.component} (the
+ * root), which is never correlated or crypto-classified either way. Pre-standard IBM CBOM drafts
+ * (top-level {@code "bomFormat": "CBOM"}) are already rejected by {@code SbomParser}'s
+ * {@code bomFormat} check, before this class ever runs — deliberately unsupported, not a bug.
  */
 @Component
 public class CycloneDXNormalizer {
@@ -47,7 +61,9 @@ public class CycloneDXNormalizer {
         CycloneDXMetadata metadata = file.getMetadata();
         if (metadata != null) {
             if (metadata.getComponent() != null) {
-                builder.rootComponent(component(metadata.getComponent()));
+                // Root is never crypto-classified, even when it is itself a cryptographic-asset and
+                // the document supports CBOM — see this class's Javadoc.
+                builder.rootComponent(component(metadata.getComponent(), false));
             }
             if (metadata.getTools() != null && metadata.getTools().getComponents() != null) {
                 for (CycloneDXTool tool : metadata.getTools().getComponents()) {
@@ -61,19 +77,29 @@ public class CycloneDXNormalizer {
             builder.declaredLifecycleStage(declaredLifecycleStage(metadata.getLifecycles()));
         }
 
+        boolean cbom = CycloneDxSpecVersion.supportsCryptoAssets(file.getSpecVersion());
+        int ignoredForSpecVersion = 0;
         if (file.getComponents() != null) {
             for (CycloneDXComponent cdx : file.getComponents()) {
                 if (cdx == null) {
                     continue;
                 }
-                builder.component(component(cdx));
+                if (!cbom && CryptoAssets.isCryptoAsset(cdx.getType())) {
+                    ignoredForSpecVersion++;
+                }
+                builder.component(component(cdx, cbom));
             }
         }
+        builder.cryptoAssetsIgnoredForSpecVersion(ignoredForSpecVersion);
 
         return builder.build();
     }
 
-    private NormalizedComponent component(CycloneDXComponent cdx) {
+    private NormalizedComponent component(CycloneDXComponent cdx, boolean extractCrypto) {
+        boolean isCrypto = CryptoAssets.isCryptoAsset(cdx.getType());
+        NormalizedCryptoAsset crypto = extractCrypto && isCrypto
+                ? CryptoPropertiesExtractor.extract(cdx.getCryptoProperties())
+                : null;
         return NormalizedComponent.builder()
                 .name(cdx.getName())
                 .version(cdx.getVersion())
@@ -85,6 +111,7 @@ public class CycloneDXNormalizer {
                 .externalReferences(references(cdx))
                 .hashes(hashes(cdx))
                 .identifiers(identifiers(cdx))
+                .crypto(crypto)
                 .build();
     }
 

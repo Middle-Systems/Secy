@@ -3,6 +3,7 @@ package net.jdesive.secy.model.component;
 import lombok.Builder;
 import lombok.Singular;
 import net.jdesive.secy.correlation.ComponentCoordinate;
+import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
 
 import java.util.List;
 
@@ -48,6 +49,10 @@ import java.util.List;
  *                           {@code cpe22Type}/{@code swid}. Secondary only: these never feed
  *                           {@link #identityKey()}, and disagreement with the primary identity is
  *                           flagged (see {@code ComponentIdentityAssessor}), never merged
+ * @param crypto             CycloneDX 1.6 {@code cryptoProperties} (M1g), when {@code type} is
+ *                           {@code cryptographic-asset} and the document's {@code specVersion}
+ *                           supports it (see {@code CycloneDxSpecVersion}); null otherwise. SPDX
+ *                           never sets this
  */
 @Builder
 public record NormalizedComponent(String name,
@@ -60,7 +65,8 @@ public record NormalizedComponent(String name,
                                   @Singular List<ExternalReference> externalReferences,
                                   String bomRef,
                                   @Singular List<ComponentHashValue> hashes,
-                                  @Singular List<Identifier> identifiers) {
+                                  @Singular List<Identifier> identifiers,
+                                  NormalizedCryptoAsset crypto) {
 
     /** A link the source document carried for a component. */
     public record ExternalReference(String type, String url) {

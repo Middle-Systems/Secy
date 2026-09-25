@@ -39,7 +39,15 @@ items: KEV-listed OR EPSS > 0.1.
   (M1f — `?origin=TENANT|VENDOR` required, `?productId=` optional; validates an OpenVEX/CSAF
   2.0-subset/CycloneDX VEX document synchronously, then queues a `VEX_UPLOAD` job), `/vex/documents`
   (+ `/{id}`, `/{id}/statements`, `POST /{id}/deactivate`), `/vex/statements`,
-  `POST /vex/reconcile`, `/vex/settings/precedence` (GET/PUT the tenant's precedence policy).
+  `POST /vex/reconcile`, `/vex/settings/precedence` (GET/PUT the tenant's precedence policy),
+  `/cbom/assets` (+ `/{id}`), `/cbom/quantum-findings` (+ `/{id}`) (M1g — CycloneDX 1.6
+  `cryptographic-asset` inventory and Shor-vulnerability findings; not part of `/actionable`). CBOM
+  data is not a separate upload — it rides on `POST /sbom`/`POST /sbom/{productId}/sboms` as ordinary
+  components of type `cryptographic-asset` inside a normal CycloneDX document, extracted only when
+  `specVersion >= 1.6`. A *standalone* CBOM (every component crypto-typed) uses the same endpoints
+  but replaces the product's/stage's whole active SBOM like any other upload — no separate
+  "supplementary CBOM" slot exists; prefer embedding the CBOM in a real SBOM, a dedicated product, or
+  the Unassigned bucket if you need the CBOM and the regular SBOM to coexist.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

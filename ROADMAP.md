@@ -329,6 +329,50 @@ certificates, protocols. Quantum-vulnerable algorithms (RSA, ECC) become their o
 category. Confirm the current CycloneDX parser's version ceiling during implementation — the
 design doc requires 1.6 specifically for this.
 
+**Status: SHIPPED.**
+
+- **What shipped.** CBOM rides on the existing SBOM upload endpoints — no new upload endpoint. A
+  `cryptographic-asset` component's `cryptoProperties` is extracted only when the document declares
+  `specVersion >= 1.6` (`CycloneDxSpecVersion`, floor 1.6/ceiling major==1 — a skip below the floor,
+  never a rejection); below it the component still ingests as a plain row. `cryptoProperties` is
+  bound as a raw `JsonNode` (`CryptoPropertiesExtractor`), tree-walked leniently — malformed shapes
+  degrade field-by-field rather than failing the upload, and `relatedCryptoMaterialProperties.value`
+  is never captured, in the model or the sanitized JSON copy. Each extracted asset is classified for
+  Shor-vulnerability (`QuantumVulnerabilityClassifier`, pure/static): OID first, then name patterns
+  (PQC checked before Shor patterns so hybrids like `X25519MLKEM768` aren't flagged), then curve,
+  then primitive/declared-NIST-level fallbacks — a name/OID match always overrides a declared level,
+  surfaced as a contradiction note rather than trusted. Persisted 1:1 per component in
+  `sbom_component_crypto_asset` (migration `025`, `@OneToMany` + a DB unique constraint, not
+  `@OneToOne`, to avoid a bytecode-enhancement-dependent lazy load on every component read).
+  `VULNERABLE` assets become `quantum_vulnerability_finding` rows (migration `025`), reconciled by
+  `QuantumFindingService` from a synchronous `@TransactionalEventListener(AFTER_COMMIT)` on the
+  existing `SbomUploadedEvent` — extraction/classification runs inline at ingest (no cross-document
+  dependency, M1c's Pass A pattern), but finding reconciliation needs the same after-commit,
+  staged-scope-union treatment `LifecycleDiffService` uses, since a finding must carry forward across
+  re-uploads and a staged product's candidate set is the union of every active stage slot. Unlike
+  M1e's drift engine, bucket (Unassigned) SBOMs get their own per-SBOM findings rather than being
+  skipped, so a security finding doesn't vanish just because an upload was untagged. Never deleted,
+  auto-resolved/revived exactly like `VulnerabilityAlert`/`LifecycleDriftFinding`. **Crypto components
+  are excluded from vulnerability correlation, compromise detection, and M1e's lifecycle drift** — a
+  false-positive hazard fixed as part of this milestone (a no-PURL crypto asset named "AES" or "RSA"
+  would otherwise trip the heuristic CPE matcher or malware-name matching). Read-only API:
+  `GET /cbom/assets[/{id}]` (inventory, never includes raw key material) and
+  `GET /cbom/quantum-findings[/{id}]` — not part of `GET /actionable` (no KEV/EPSS/CVSS to rank by).
+- **Not done, deliberately (D1-D8 in the implementation plan):** a separate "supplementary CBOM"
+  slot — a standalone CBOM (every component crypto-typed) uploaded to a product replaces that
+  product's/stage's whole active SBOM exactly like any other upload, auto-resolving its vulnerability
+  alerts until a real SBOM is re-uploaded (a WARN is logged; recommended workarounds are: embed the
+  CBOM in a real SBOM, use a dedicated product, or upload untagged to the Unassigned bucket); nested
+  `components[].components[]` (existing parser limitation, all types); Grover-weakened
+  symmetric/hash flagging (explicitly out of scope — this milestone only covers Shor-broken
+  algorithms); classical weakness (RSA-1024, SHA-1, expired certs — data is captured for M1h/M1i but
+  not flagged now); CycloneDX 1.7-only fields beyond the 1.6 set (raw JSON only, via
+  `cryptoProperties` on the detail endpoint); pre-standard IBM CBOM (`"bomFormat": "CBOM"`, already
+  rejected by the existing format check) and CycloneDX XML; SPDX 3 crypto (`TODO(spdx-3)`);
+  triage/severity/scoring (M1j/M1i); `/actionable` integration and UI (M1k); lineage crypto/finding
+  nodes (M1j); a manual re-reconcile endpoint; TLS 1.3 protocols whose key exchange is expressed only
+  by name (classified `NOT_VULNERABLE` alone — a documented limitation, not a bug).
+
 **M1h — SBOM quality scoring.** Score each ingested SBOM against the NTIA minimum elements
 (supplier, name, version, unique ID, dependency relationships, author, timestamp). A low score
 becomes its own finding category, surfaced per product.

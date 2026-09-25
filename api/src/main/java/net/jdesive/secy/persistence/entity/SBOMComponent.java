@@ -140,6 +140,19 @@ public class SBOMComponent implements CorrelatableComponent {
     private IdentityConfidence identityConfidence;
 
     /**
+     * The CycloneDX 1.6 {@code cryptoProperties} row for this component, when it is a
+     * {@code cryptographic-asset} on a document that supports CBOM (M1g) — at most one, enforced by
+     * {@code uq_sbom_component_crypto_asset_component}. Read path is {@code GET /cbom/assets}, not
+     * this collection — {@code @JsonIgnore}d for the same N+1 reason as {@link #identifiers}.
+     *
+     * @see SBOMComponentCryptoAsset
+     */
+    @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    private List<SBOMComponentCryptoAsset> cryptoAssets = new ArrayList<>();
+
+    /**
      * Keep {@link #identityKey} in lockstep with the fields it is derived from.
      *
      * <p>On the entity rather than in {@code SBOMService} on purpose: the golden-set fixtures, the

@@ -19,7 +19,8 @@ import java.util.UUID;
  * only)"): {@link Product}, {@link SBOM}, {@link Asset}, {@link VulnerabilityAlert},
  * {@link CompromiseFinding}, {@link SourceConnector}, {@link DockerComplianceReport},
  * {@link ProductTagConfig} (M1a), {@link OwnershipLink} (M1b), {@link LifecycleDriftFinding}
- * (M1e), and {@link VexDocument}, {@link VexStatement}, {@link VexPrecedenceConfig} (M1f). Future M1
+ * (M1e), {@link VexDocument}, {@link VexStatement}, {@link VexPrecedenceConfig} (M1f), and
+ * {@link QuantumVulnerabilityFinding} (M1g). Future M1
  * tables should extend this too — don't build those now.
  *
  * <h2>Why a {@code @PrePersist} default instead of touching every creation site</h2>

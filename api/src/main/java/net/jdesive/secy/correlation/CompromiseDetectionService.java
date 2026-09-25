@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.correlation.version.VersionRange;
 import net.jdesive.secy.correlation.version.VersionScheme;
 import net.jdesive.secy.correlation.version.VersionSchemes;
+import net.jdesive.secy.model.cbom.CryptoAssets;
 import net.jdesive.secy.model.component.ComponentIdentity;
 import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.AssetComponentRepository;
@@ -149,7 +150,9 @@ public class CompromiseDetectionService {
         Map<String, UUID> rowIds = new LinkedHashMap<>();
         for (SBOM scoped : correlationScope.sbomsInScope(sbom, productScoped)) {
             for (SBOMComponent component : scoped.getComponents()) {
-                if (component != null && component.getId() != null) {
+                // M1g: crypto assets are not packages -- excluded from malware-name/hash matching too.
+                if (component != null && component.getId() != null
+                        && !CryptoAssets.isCryptoAsset(component.getType())) {
                     String identity = identityOf(component, component.getId());
                     componentsByIdentity.put(identity, component);
                     rowIds.put(identity, component.getId());

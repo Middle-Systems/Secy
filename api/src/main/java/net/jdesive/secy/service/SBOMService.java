@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.events.SbomUploadedEvent;
+import net.jdesive.secy.model.cbom.CryptoAssetIdentity;
+import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
+import net.jdesive.secy.model.cbom.QuantumAssessment;
 import net.jdesive.secy.model.component.ComponentIdentityAssessor;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
@@ -11,6 +14,7 @@ import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.entity.*;
+import net.jdesive.secy.service.cbom.QuantumVulnerabilityClassifier;
 import net.jdesive.secy.service.sbom.ComponentIdentityService;
 import net.jdesive.secy.service.sbom.SbomParser;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -173,7 +178,18 @@ public class SBOMService {
         // behaviour — the upload is "the current one" from the moment it is accepted, even while its
         // components are still being persisted.
         if (!product.isUnassigned()) {
-            deactivateSupersededSboms(product, resolved);
+            int deactivated = deactivateSupersededSboms(product, resolved);
+            // M1g (D1): a standalone CBOM (every component is a cryptographic-asset) uploaded to a
+            // normal product slot replaces that slot's whole active SBOM, and therefore its
+            // vulnerability alerts, exactly like any other upload — no separate "supplementary CBOM"
+            // slot exists (see ROADMAP.md's D1). This is a deliberate, documented limitation; the WARN
+            // just makes the surprising case visible in the logs.
+            if (document.isCryptoOnly() && deactivated > 0) {
+                log.warn("Standalone CBOM uploaded to product {} ({}) deactivated {} previously-active "
+                                + "SBOM(s) — its vulnerability alerts will auto-resolve until a real SBOM is "
+                                + "next uploaded to this slot. See ROADMAP.md M1g decision D1.",
+                        product.getId(), product.getName(), deactivated);
+            }
         }
         sbom.setActive(true);
 
@@ -224,10 +240,16 @@ public class SBOMService {
         sbomRepository.saveAndFlush(sbom);
 
         if (document.rootComponent() != null) {
-            sbom.setComponent(toEntity(document.rootComponent(), sbom));
+            sbom.setComponent(toEntity(document.rootComponent(), sbom, null));
         }
-        for (NormalizedComponent component : document.components()) {
-            sbom.getComponents().add(toEntity(component, sbom));
+        // M1g: classify every crypto asset up front, index-aligned with document.components() — see
+        // QuantumVulnerabilityClassifier. Extraction/classification has no cross-document dependency,
+        // so it runs inline here (M1c's Pass A pattern); finding *reconciliation* is a separate,
+        // after-commit step — see QuantumFindingListener.
+        List<QuantumAssessment> assessments = QuantumVulnerabilityClassifier.assess(document.components());
+        List<NormalizedComponent> components = document.components();
+        for (int i = 0; i < components.size(); i++) {
+            sbom.getComponents().add(toEntity(components.get(i), sbom, assessments.get(i)));
         }
         for (NormalizedSbom.NormalizedTool tool : document.tools()) {
             SBOMTool sbomTool = new SBOMTool();
@@ -315,12 +337,15 @@ public class SBOMService {
      * — so a race between two concurrent same-stage uploads is possible, exactly as a race on the old
      * whole-product slot was. Read paths use {@code findFirst...OrderByUploadDateDesc} to tolerate it.
      */
-    private void deactivateSupersededSboms(Product product, SbomLifecycleStage stage) {
+    private int deactivateSupersededSboms(Product product, SbomLifecycleStage stage) {
+        int deactivated = 0;
         for (SBOM old : sbomRepository.findAllByProductIdAndActiveTrue(product.getId())) {
             if (stage == null || old.getLifecycleStage() == null || old.getLifecycleStage() == stage) {
                 old.setActive(false);
+                deactivated++;
             }
         }
+        return deactivated;
     }
 
     /**
@@ -329,8 +354,12 @@ public class SBOMService {
      *
      * <p>{@code identityKey} is not set here — {@link SBOMComponent#refreshIdentityKey()} derives it
      * on persist, so it is right for every writer, not just this one.
+     *
+     * @param assessment the M1g quantum-vulnerability verdict for this component, or null when it has
+     *                   no {@link NormalizedComponent#crypto()} (including the root, which is never
+     *                   classified — callers pass null for it)
      */
-    private SBOMComponent toEntity(NormalizedComponent component, SBOM sbom) {
+    private SBOMComponent toEntity(NormalizedComponent component, SBOM sbom, QuantumAssessment quantumAssessment) {
         SBOMComponent entity = new SBOMComponent();
         entity.setName(truncate(component.name(), MAX_SHORT_TEXT));
         entity.setDescription(truncate(component.description(), MAX_DESCRIPTION));
@@ -401,7 +430,101 @@ public class SBOMService {
             entity.getIdentityConflicts().add(row);
         }
 
+        // M1g: one sbom_component_crypto_asset row per cryptographic-asset component whose
+        // cryptoProperties were extracted (see CycloneDXNormalizer/CryptoPropertiesExtractor — null
+        // below the CycloneDX 1.6 floor, or for a non-crypto component, or for the root).
+        if (component.crypto() != null) {
+            entity.getCryptoAssets().add(cryptoAssetEntity(component, entity, quantumAssessment));
+        }
+
         return entity;
+    }
+
+    /**
+     * {@link NormalizedComponent#crypto()} → {@link SBOMComponentCryptoAsset}, with the M1g quantum
+     * classification folded in. String lists are joined with {@code ", "} (cipher suites use suite
+     * names only) then truncated to the column length.
+     */
+    private SBOMComponentCryptoAsset cryptoAssetEntity(NormalizedComponent component, SBOMComponent owner,
+                                                        QuantumAssessment assessment) {
+        NormalizedCryptoAsset crypto = component.crypto();
+        SBOMComponentCryptoAsset row = new SBOMComponentCryptoAsset();
+        row.setComponent(owner);
+        row.setAssetType(crypto.assetType());
+        row.setDeclaredAssetType(truncate(crypto.declaredAssetType(), 64));
+        row.setOid(truncate(crypto.oid(), 255));
+        row.setCryptoIdentityKey(CryptoAssetIdentity.keyOf(crypto.assetType(), component.name(), crypto.oid()));
+
+        NormalizedCryptoAsset.Algorithm algorithm = crypto.algorithm();
+        if (algorithm != null) {
+            row.setPrimitive(truncate(algorithm.primitive(), 32));
+            row.setParameterSetIdentifier(truncate(algorithm.parameterSetIdentifier(), 128));
+            row.setCurve(truncate(algorithm.curve(), 128));
+            row.setExecutionEnvironment(truncate(algorithm.executionEnvironment(), 64));
+            row.setImplementationPlatform(truncate(algorithm.implementationPlatform(), 64));
+            row.setCertificationLevels(truncate(joined(algorithm.certificationLevels()), 512));
+            row.setAlgorithmMode(truncate(algorithm.mode(), 32));
+            row.setPadding(truncate(algorithm.padding(), 32));
+            row.setCryptoFunctions(truncate(joined(algorithm.cryptoFunctions()), 512));
+            row.setClassicalSecurityLevel(algorithm.classicalSecurityLevel());
+            row.setNistQuantumSecurityLevel(algorithm.nistQuantumSecurityLevel());
+        }
+
+        NormalizedCryptoAsset.Certificate certificate = crypto.certificate();
+        if (certificate != null) {
+            row.setSubjectName(truncate(certificate.subjectName(), 1024));
+            row.setIssuerName(truncate(certificate.issuerName(), 1024));
+            row.setNotValidBefore(certificate.notValidBefore());
+            row.setNotValidAfter(certificate.notValidAfter());
+            row.setSignatureAlgorithmRef(truncate(certificate.signatureAlgorithmRef(), 255));
+            row.setSubjectPublicKeyRef(truncate(certificate.subjectPublicKeyRef(), 255));
+            row.setCertificateFormat(truncate(certificate.certificateFormat(), 64));
+            row.setCertificateExtension(truncate(certificate.certificateExtension(), 64));
+        }
+
+        NormalizedCryptoAsset.RelatedMaterial material = crypto.relatedMaterial();
+        if (material != null) {
+            row.setMaterialType(truncate(material.type(), 32));
+            row.setMaterialId(truncate(material.id(), 255));
+            row.setMaterialState(truncate(material.state(), 32));
+            row.setAlgorithmRef(truncate(material.algorithmRef(), 255));
+            row.setMaterialCreationDate(material.creationDate());
+            row.setMaterialActivationDate(material.activationDate());
+            row.setMaterialUpdateDate(material.updateDate());
+            row.setMaterialExpirationDate(material.expirationDate());
+            row.setMaterialSize(material.size());
+            row.setMaterialFormat(truncate(material.format(), 64));
+            row.setSecuredByMechanism(truncate(material.securedByMechanism(), 64));
+            row.setSecuredByAlgorithmRef(truncate(material.securedByAlgorithmRef(), 255));
+        }
+
+        NormalizedCryptoAsset.Protocol protocol = crypto.protocol();
+        if (protocol != null) {
+            row.setProtocolType(truncate(protocol.type(), 32));
+            row.setProtocolVersion(truncate(protocol.version(), 64));
+            if (protocol.cipherSuites() != null) {
+                String suiteNames = String.join(", ", protocol.cipherSuites().stream()
+                        .map(NormalizedCryptoAsset.CipherSuite::name)
+                        .filter(java.util.Objects::nonNull)
+                        .toList());
+                row.setCipherSuites(truncate(suiteNames, 4096));
+            }
+            row.setCryptoRefs(truncate(joined(protocol.cryptoRefs()), 2048));
+        }
+
+        QuantumAssessment effective = assessment == null ? QuantumAssessment.UNKNOWN : assessment;
+        row.setQuantumStatus(effective.status());
+        row.setQuantumFamily(effective.family());
+        row.setQuantumBasis(effective.basis());
+        row.setQuantumIndicator(truncate(effective.indicator(), 255));
+
+        row.setCryptoPropertiesJson(crypto.sanitizedJson());
+
+        return row;
+    }
+
+    private static String joined(List<String> values) {
+        return values == null || values.isEmpty() ? null : String.join(", ", values);
     }
 
     /**

@@ -3,6 +3,7 @@ package net.jdesive.secy.correlation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.asset.ScannerFinding;
+import net.jdesive.secy.model.cbom.CryptoAssets;
 import net.jdesive.secy.model.component.ComponentIdentity;
 import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
@@ -224,7 +225,11 @@ public class CorrelationService {
         Map<String, SBOMComponent> componentsByIdentity = new LinkedHashMap<>();
         for (SBOM scoped : correlationScope.sbomsInScope(sbom, productScoped)) {
             for (SBOMComponent component : scoped.getComponents()) {
-                if (component != null && component.getId() != null) {
+                // M1g: crypto assets (cryptographic-asset) are not packages -- feeding them into
+                // package-oriented CPE/OSV matching produces false-positive CVE alerts on bare names
+                // like "AES" or "RSA". See CryptoAssets and ROADMAP.md's M1g note.
+                if (component != null && component.getId() != null
+                        && !CryptoAssets.isCryptoAsset(component.getType())) {
                     componentsByIdentity.put(identityOf(component, component.getId()), component);
                 }
             }

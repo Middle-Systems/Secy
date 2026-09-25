@@ -1,0 +1,15 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "components": [
+    { "type": "library", "name": "lodash", "version": "4.17.21", "purl": "pkg:npm/lodash@4.17.21" },
+    { "type": "cryptographic-asset", "bom-ref": "key-rsa", "name": "RSA-2048",
+      "cryptoProperties": { "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": { "type": "private-key", "size": 2048, "format": "PEM",
+          "state": "active", "value": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC-FAKE" } } },
+    { "type": "cryptographic-asset", "bom-ref": "key-aes", "name": "AES-256",
+      "cryptoProperties": { "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": { "type": "secret-key", "size": 256 } } }
+  ]
+}

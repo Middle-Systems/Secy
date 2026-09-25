@@ -1,6 +1,7 @@
 package net.jdesive.secy.model.cyclonedx;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Data;
 
 import java.util.List;
@@ -35,5 +36,13 @@ public class CycloneDXComponent {
 
     /** Optional declared SWID tag (M1c) — see {@link CycloneDXSwid}. */
     private CycloneDXSwid swid;
+
+    /**
+     * CycloneDX 1.6 {@code cryptoProperties} (M1g). Bound as a raw tree on purpose — see
+     * {@code net.jdesive.secy.service.cbom.CryptoPropertiesExtractor}: {@code FAIL_ON_UNKNOWN_PROPERTIES=false}
+     * only tolerates unknown keys, not shape mismatches, and real-world CBOM shape drift is common
+     * enough that a typed POJO here would risk a 400 for the whole SBOM.
+     */
+    private JsonNode cryptoProperties;
 
 }

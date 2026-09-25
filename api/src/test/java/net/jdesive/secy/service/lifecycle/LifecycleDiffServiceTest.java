@@ -218,6 +218,19 @@ class LifecycleDiffServiceTest {
     }
 
     @Test
+    void aCryptographicAssetInBuildButNotInSourceProducesNoDriftFinding() {
+        // M1g: a Build SBOM with an embedded CBOM compared against a Source SBOM without one must not
+        // flag every crypto asset as UNEXPECTED_COMPONENT drift noise.
+        sbom(SbomLifecycleStage.SOURCE, "COMPLETED", npm("a", "1.0.0"));
+        SBOM build = sbom(SbomLifecycleStage.BUILD, "COMPLETED", npm("a", "1.0.0"), cryptoAsset("RSA-2048"));
+
+        LifecycleDiffRunSummary summary = lifecycleDiffService.runForSbom(build.getId());
+
+        assertThat(summary.pairsEvaluated()).isEqualTo(1);
+        assertThat(findingRepository.findAll()).isEmpty();
+    }
+
+    @Test
     void tenantIdIsCopiedFromTheSbom() {
         sbom(SbomLifecycleStage.SOURCE, "COMPLETED", npm("a", "1.0.0"));
         SBOM build = sbom(SbomLifecycleStage.BUILD, "COMPLETED", npm("a", "1.0.0"), npm("injected", "1.0.0"));
@@ -265,6 +278,13 @@ class LifecycleDiffServiceTest {
         component.setVersion(version);
         component.setPurl("pkg:npm/" + name + "@" + version);
         component.setType("library");
+        return component;
+    }
+
+    private static SBOMComponent cryptoAsset(String name) {
+        SBOMComponent component = new SBOMComponent();
+        component.setName(name);
+        component.setType("cryptographic-asset");
         return component;
     }
 

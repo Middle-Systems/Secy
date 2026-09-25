@@ -75,11 +75,16 @@ public interface SBOMComponentRepository extends JpaRepository<SBOMComponent, UU
      * false drift on every single pair. {@code left join s.component root} exactly mirrors
      * {@code LineageSourceReader}'s exclusion — an implicit {@code s.component.id} comparison would
      * become an inner join and silently drop every row whenever an SBOM has no root at all.
+     *
+     * <p><b>M1g:</b> {@code cryptographic-asset} components are excluded too — a Build SBOM with an
+     * embedded CBOM compared against a Source SBOM without one would otherwise flag every crypto asset
+     * as {@code UNEXPECTED_COMPONENT} drift noise. See {@code CryptoAssets}.
      */
     @Query("""
             select new net.jdesive.secy.model.lifecycle.StageComponent(c.id, c.identityKey, c.name, c.version, c.purl)
             from SBOM s join s.components c left join s.component root
             where s.id = :sbomId and c.identityKey is not null and (root.id is null or c.id <> root.id)
+              and (c.type is null or lower(c.type) <> 'cryptographic-asset')
             """)
     List<StageComponent> findStageComponents(@Param("sbomId") UUID sbomId);
 

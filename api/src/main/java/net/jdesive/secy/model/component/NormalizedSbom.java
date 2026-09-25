@@ -23,6 +23,10 @@ import java.util.List;
  *                             when absent, ambiguous/conflicting, or the format has no equivalent (SPDX).
  *                             The {@code ?stage=} API param, when given, wins over this at upload time —
  *                             see {@code SBOMService#createPlaceholder}.
+ * @param cryptoAssetsIgnoredForSpecVersion (M1g) count of {@code cryptographic-asset} components
+ *                             this document declared whose {@code cryptoProperties} were skipped
+ *                             because {@code specVersion} is below the 1.6 floor — the component
+ *                             itself still normalizes as a plain row. Always 0 for SPDX.
  */
 @Builder
 public record NormalizedSbom(SbomFormat format,
@@ -31,7 +35,8 @@ public record NormalizedSbom(SbomFormat format,
                              NormalizedComponent rootComponent,
                              @Singular List<NormalizedComponent> components,
                              @Singular List<NormalizedTool> tools,
-                             SbomLifecycleStage declaredLifecycleStage) {
+                             SbomLifecycleStage declaredLifecycleStage,
+                             int cryptoAssetsIgnoredForSpecVersion) {
 
     /** An SBOM generator. CycloneDX {@code metadata.tools}, SPDX {@code creationInfo.creators}. */
     public record NormalizedTool(String name, String version, String group, String type) {
@@ -40,6 +45,16 @@ public record NormalizedSbom(SbomFormat format,
     public NormalizedSbom {
         components = components == null ? List.of() : List.copyOf(components);
         tools = tools == null ? List.of() : List.copyOf(tools);
+    }
+
+    /**
+     * True when this document declared at least one component and every one of them is a
+     * {@code cryptographic-asset} (M1g) — a standalone CBOM. See ROADMAP.md's D1 for the interaction
+     * this has with the M1e active-SBOM slot.
+     */
+    public boolean isCryptoOnly() {
+        return !components.isEmpty()
+                && components.stream().allMatch(c -> net.jdesive.secy.model.cbom.CryptoAssets.isCryptoAsset(c.type()));
     }
 
 }
