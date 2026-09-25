@@ -9,6 +9,10 @@ on:
     branches: [master]
   pull_request:
 
+# Both jobs only check out and build; neither writes back to the repo.
+permissions:
+  contents: read
+
 jobs:
   api:
     name: api (build + test)
