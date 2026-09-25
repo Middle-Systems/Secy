@@ -52,8 +52,21 @@ Claimed prefixes:
 | `019`  | `product_tag_config` (per-tenant product tag key, seeded with the default `secy:product`) + `products.unassigned` / `products.tag_value` (with a partial unique index keeping one Unassigned bucket per tenant) + a backfilled Unassigned-bucket product per existing tenant (ROADMAP.md, M1a — "Tag-driven products") |
 | `020`  | `ownership_link` — manual (M1b) and future inferred (M2/M3) ownership links from a product (asset from M3) to a registered user or a free-text principal/team, with its one-target and owner-shape XOR checks and per-`(target, owner, source, inference_method)` partial unique indexes (ROADMAP.md, M1b — "Ownership model") |
 | `021`  | `sbom_component_identifier` (declared CPE/SWID per component instance) + `sbom_component.identity_confidence` + `sbom_component_identity_conflict` (one row per detected identifier conflict, its `other_component_id`/`other_identity_key` pair-or-neither check) + `sbom.ingestion_source` / `source_connector_id` (FK, `on delete set null`) / `lifecycle_stage` (reserved for M1e, unwritten) (ROADMAP.md, M1c — "Canonical component identity") |
+| `022`  | Apache AGE extension + `secy_lineage` graph, both precondition-guarded (`onFail:CONTINUE`) so a Postgres without AGE still boots; labels/indexes are created at rebuild time (ROADMAP.md, M1d) |
 
 Pick the next free number if yours isn't listed.
+
+### Precondition-guarded changesets
+
+`022` is the first changeset in this repo to use `--preconditions onFail:CONTINUE`. Every prior
+migration assumes the server it runs against supports whatever it does — reasonable when the
+changeset only uses core Postgres features. `022` is different: `create extension age` and
+`ag_catalog.create_graph(...)` only exist once the Apache AGE extension is installed on the
+server, which is an operator action outside Liquibase's control (see `api/docker/postgres-age/`
+and `api/compose.yaml`), and plenty of real Postgres instances running this codebase will never
+have it. `onFail:CONTINUE` lets those changesets skip themselves (with a logged warning) instead
+of failing startup, and Liquibase re-attempts a skipped changeset on every subsequent boot — so
+installing AGE later on an existing database is enough; no manual `changelog-sync` step needed.
 
 ## Writing a changeset
 

@@ -203,6 +203,9 @@ const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
     queryKeys.actionable.all,
     queryKeys.stats.all,
   ],
+  // M1d: a rebuild only writes the Apache AGE lineage graph, which has no read endpoint or
+  // browser view in this milestone -- nothing in the UI's cache needs invalidating.
+  LINEAGE_REBUILD: [],
 };
 
 /**

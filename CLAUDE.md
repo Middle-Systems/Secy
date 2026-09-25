@@ -28,7 +28,9 @@ items: KEV-listed OR EPSS > 0.1.
   `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
   `/assets`, `/assets/scan/{trivy,grype}`, `/compliance/reports` (+ `/{id}`, `/{id}/scan`,
   `/{id}/misconfigurations`), `/connectors` (+ `/{id}`, `/{id}/sync` — Phase 6b agentless source
-  connectors, GitHub only for now).
+  connectors, GitHub only for now), `POST /lineage/rebuild` (M1d — queues a full rebuild of the
+  Apache AGE lineage graph from Postgres; 503 when `secy.lineage.enabled=false` or no graph writer
+  is configured, which is the default everywhere until you opt in — see below).
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via
@@ -53,9 +55,14 @@ cd api && ./gradlew bootRun
 
 The devcontainer image is Node 20 + JDK 17, no Docker. The backend never starts a database
 itself (`spring.docker.compose.enabled=false`). Run PostgreSQL on the host
-(`docker compose -f api/compose.yaml up -d`, persistent volume) and `./gradlew bootRun` in the
-devcontainer reaches it via `host.docker.internal:5433` — `SECY_DB_URL` is preset to that in
+(`docker compose -f api/compose.yaml up -d --build`, persistent volume) and `./gradlew bootRun` in
+the devcontainer reaches it via `host.docker.internal:5433` — `SECY_DB_URL` is preset to that in
 `.devcontainer/devcontainer.json`. Tests never need a DB (H2, `src/test/resources`).
+
+`api/compose.yaml`'s Postgres image now needs `--build` the first time after pulling M1d (it
+layers the Apache AGE extension onto `postgres:16` — see `api/docker/postgres-age/Dockerfile`);
+your existing `secy-pgdata` volume is preserved. The lineage graph itself stays off regardless
+until `SECY_LINEAGE_ENABLED=true` is also set.
 
 ## Conventions
 
@@ -72,7 +79,11 @@ devcontainer reaches it via `host.docker.internal:5433` — `SECY_DB_URL` is pre
   `SECY_OSV_ECOSYSTEMS` (comma-separated OSV ecosystem names mirrored by `POST /osv/ingest`;
   default `npm,Maven,PyPI,Go,NuGet,RubyGems,crates.io,Packagist,Hex,Pub`),
   `SECY_GITHUB_TOKEN` (a GitHub PAT with `repo` + `read:org` scope, one token instance-wide, used
-  by every `SourceConnector` — blank means a connector sync 401/403s per-repo, skipped not fatal)
+  by every `SourceConnector` — blank means a connector sync 401/403s per-repo, skipped not fatal),
+  `SECY_LINEAGE_ENABLED` (M1d — default `false`; the Apache AGE lineage graph writer only exists as
+  a bean when this is `true`, so a Postgres without the AGE extension installed is unaffected),
+  `SECY_LINEAGE_AGE_LIBRARY` (default `age` — the shared library `LOAD`ed before every graph write),
+  `SECY_LINEAGE_BATCH_SIZE` (default `500` — rows per Cypher `UNWIND` batch on a rebuild)
   (see `application.properties` for defaults). For local dev, copy
   `application-local.properties.example` → `application-local.properties` (git-ignored) and fill in
   the NVD key. Never put a real secret in a tracked file.

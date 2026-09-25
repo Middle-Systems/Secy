@@ -80,7 +80,8 @@ export type JobType =
   | 'COMPLIANCE_SCAN'
   | 'MALICIOUS_PACKAGES'
   | 'MALWARE_HASHES'
-  | 'CONNECTOR_SYNC';
+  | 'CONNECTOR_SYNC'
+  | 'LINEAGE_REBUILD';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the

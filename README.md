@@ -33,8 +33,13 @@ ingested NVD/EPSS/KEV feeds, so you want it persistent, not per-run.
 
 ```bash
 # Anywhere with Docker (data persists in a named volume across `down`):
-docker compose -f api/compose.yaml up -d        # Postgres on :5433
+docker compose -f api/compose.yaml up -d --build   # Postgres (+ Apache AGE) on :5433
 ```
+
+`--build` is needed because `api/compose.yaml`'s Postgres is now a local build (Apache AGE layered
+onto `postgres:16`, for M1d's lineage graph — see `api/docker/postgres-age/Dockerfile`) rather than
+a plain pulled image; your existing `secy-pgdata` volume is preserved either way. The lineage graph
+itself stays off unless you also set `SECY_LINEAGE_ENABLED=true` — see `CLAUDE.md`.
 
 Or use a native install / a hosted database and set `SECY_DB_URL` accordingly.
 

@@ -17,7 +17,9 @@ nvd.apikey=
 
 # Database. The app never starts Postgres for you — run one yourself and point at it.
 #   - native install / hosted DB: set the URL below (or the SECY_DB_URL env var)
-#   - on a machine with Docker:    docker compose -f api/compose.yaml up -d   (data persists)
+#   - on a machine with Docker:    docker compose -f api/compose.yaml up -d --build   (data persists;
+#                                  --build is needed since that Postgres now bundles Apache AGE for
+#                                  M1d's lineage graph -- see api/docker/postgres-age/Dockerfile)
 #   - from the devcontainer:       host Postgres is reachable at host.docker.internal:5433
 #                                  (SECY_DB_URL is already set to this in devcontainer.json)
 #spring.datasource.url=jdbc:postgresql://localhost:5433/secy

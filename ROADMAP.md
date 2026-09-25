@@ -242,6 +242,29 @@ doc's `flowchart LR`. Graph writes are derived from Postgres and must be rebuild
 Postgres stays the system of record, the graph is a queryable index over it, not a second
 source of truth.
 
+**Status: SHIPPED (unverified against live AGE).** Implemented as a rebuild-from-Postgres job
+(`POST /lineage/rebuild`), not live incremental sync (a follow-up). This devcontainer has no
+Docker and cannot run Postgres or the AGE extension, so the split below is deliberate and the
+honest state of things:
+
+- **(A) Real, tested here** (pure logic + H2, exercised by `./gradlew test`): the planner
+  (`LineagePlanner` — Postgres rows → nodes/edges, with the exact scope rules: active SBOMs only,
+  root/metadata component excluded, present-in-last-scan-only asset components), the Cypher
+  renderer (`CypherRenderer`/`AgeSql` — exact statement text, chunking, ordering), the JPA source
+  reader (`LineageSourceReader`, runs fine on H2 since it's plain JPQL), the rebuild orchestration
+  (`LineageRebuildService`, tested via an in-memory fake `LineageGraphWriter`), `LINEAGE_REBUILD`
+  job dispatch + `POST /lineage/rebuild` + config wiring, and the `ReEnrichmentListener` exclusion.
+- **(B) Real code, only user-verifiable** (cannot run here, needs a live Postgres + AGE): migration
+  `022` (precondition-guarded so a Postgres without AGE still boots), `AgeLineageGraphWriter`'s
+  actual `ag_catalog.cypher()` JDBC execution, and the `api/docker/postgres-age/` Docker image
+  change. An opt-in integration test (`AgeLineageGraphWriterIT`, gated on `SECY_AGE_IT_URL`) exists
+  for whoever next has Docker/Postgres access to run — see `api/README.md`'s runbook.
+- **(C) Explicitly deferred, not built**: live incremental sync, Repo nodes, Build nodes (SBOMs are
+  labeled `SBOM`, not invented as `Build`, until M1e/M3 land real build entities), Build→Image /
+  Image→Workload edges, Finding/ActionItem nodes (M1j), Owner nodes (M2), dependency/root-component
+  edges (M1l), any graph-read API or UI, RLS-equivalent tenant isolation at the AGE label-table
+  level (Tenancy hardening), and scheduled/automatic rebuilds.
+
 **M1e — SBOM lifecycle stages + diffing.** Every SBOM is tagged with its stage (Source / Build /
 Analyzed / Deployed) at ingestion, by upload metadata or API field. A diff engine runs
 automatically whenever a new SBOM for a stage arrives and a comparable SBOM exists for the

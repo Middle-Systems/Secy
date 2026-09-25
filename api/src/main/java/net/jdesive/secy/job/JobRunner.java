@@ -10,6 +10,7 @@ import net.jdesive.secy.persistence.entity.JobStatus;
 import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.service.AssetScanIngestJobService;
 import net.jdesive.secy.service.ComplianceScanIngestJobService;
+import net.jdesive.secy.lineage.LineageRebuildService;
 import net.jdesive.secy.service.ConnectorSyncService;
 import net.jdesive.secy.service.CveListIngestService;
 import net.jdesive.secy.service.EPSSService;
@@ -89,6 +90,8 @@ public class JobRunner {
 
     private final ConnectorSyncService connectorSyncService;
 
+    private final LineageRebuildService lineageRebuildService;
+
     /**
      * Jobs this instance has dispatched and not yet finished, each mapped to its worker thread's
      * {@link Future} — a local capacity guard (correctness of the claim itself rests on the
@@ -117,7 +120,8 @@ public class JobRunner {
                      ComplianceScanIngestJobService complianceScanIngestJobService,
                      MaliciousPackageIngestService maliciousPackageIngestService,
                      MalwareHashIngestService malwareHashIngestService,
-                     ConnectorSyncService connectorSyncService) {
+                     ConnectorSyncService connectorSyncService,
+                     LineageRebuildService lineageRebuildService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -134,6 +138,7 @@ public class JobRunner {
         this.maliciousPackageIngestService = maliciousPackageIngestService;
         this.malwareHashIngestService = malwareHashIngestService;
         this.connectorSyncService = connectorSyncService;
+        this.lineageRebuildService = lineageRebuildService;
     }
 
     /**
@@ -247,6 +252,9 @@ public class JobRunner {
             // Looks up which SourceConnector by job id, same as the three above — see
             // SourceConnectorService.beginSyncJob / SourceConnector.jobId.
             case CONNECTOR_SYNC -> connectorSyncService.ingest(id, progress);
+            // A singleton feed pull like the others in this block's first group -- not
+            // per-invocation -- see JobType.LINEAGE_REBUILD's Javadoc.
+            case LINEAGE_REBUILD -> lineageRebuildService.ingest(progress);
         };
     }
 

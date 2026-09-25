@@ -1,6 +1,13 @@
 services:
   postgres:
-    image: 'postgres:16'
+    # Apache AGE layered onto postgres:16 -- see docker/postgres-age/Dockerfile for why this build
+    # rather than the stock image or the official apache/age image directly (M1d, ROADMAP.md).
+    # After pulling this change, rebuild once: `docker compose -f api/compose.yaml up -d --build`
+    # (the existing secy-pgdata volume is preserved; AGE is created in it by Liquibase 022a/022b,
+    # not an initdb script, so pre-existing data picks it up on its next boot too).
+    build:
+      context: ./docker/postgres-age
+    image: 'secy-postgres-age:16'
     container_name: secy-postgres
     restart: unless-stopped
     environment:

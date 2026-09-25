@@ -16,12 +16,15 @@ import org.springframework.stereotype.Component;
  * at {@code actionable = false} until the next SBOM upload. The listener is {@code @Async} so a
  * long re-enrichment never holds up the ingestion worker that fired the event.
  *
- * <p><b>Which feeds trigger it.</b> Everything except {@link JobType#NVD}. KEV and EPSS both feed
- * the funnel predicate directly; a future exploit-index feed changes {@code exploitMaturity}, and
- * gets re-enrichment for free by virtue of not being NVD — no edit here required. NVD is excluded
- * because a full CVE pull is the one ingest whose effect on alerts (a refreshed {@code cvssScore}
- * snapshot) does not change whether anything is actionable, and re-enriching the whole alert table
- * on the back of a multi-minute NVD pull is not worth it.
+ * <p><b>Which feeds trigger it.</b> Everything except {@link JobType#NVD} and
+ * {@link JobType#LINEAGE_REBUILD}. KEV and EPSS both feed the funnel predicate directly; a future
+ * exploit-index feed changes {@code exploitMaturity}, and gets re-enrichment for free by virtue of
+ * not being excluded here — no edit here required. NVD is excluded because a full CVE pull is the
+ * one ingest whose effect on alerts (a refreshed {@code cvssScore} snapshot) does not change
+ * whether anything is actionable, and re-enriching the whole alert table on the back of a
+ * multi-minute NVD pull is not worth it. {@code LINEAGE_REBUILD} is excluded because a lineage
+ * rebuild (M1d) only reads Postgres to write a derived graph index — it changes no alert inputs at
+ * all, so re-enriching after one is pure waste.
  */
 @Slf4j
 @Component
@@ -33,7 +36,7 @@ public class ReEnrichmentListener {
     @Async
     @EventListener
     public void onFeedIngested(FeedIngestedEvent event) {
-        if (event.type() == JobType.NVD) {
+        if (event.type() == JobType.NVD || event.type() == JobType.LINEAGE_REBUILD) {
             return;
         }
         try {

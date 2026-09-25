@@ -87,6 +87,19 @@ public enum JobType {
      * {@code 013}. 14 characters — fits the {@code varchar(32)} {@code ingestion_job.type} column
      * {@code 011e} already widened for {@code MALICIOUS_PACKAGES} with no further migration needed.
      */
-    CONNECTOR_SYNC
+    CONNECTOR_SYNC,
+
+    /**
+     * A full rebuild of the Apache AGE lineage graph from Postgres (M1d).
+     *
+     * <p>A singleton feed pull like {@link #NVD}/{@link #OSV} — one rebuild at a time — so it
+     * <b>keeps</b> the {@code uq_ingestion_job_active_type} slot; no migration is needed since
+     * {@code SBOM_UPLOAD}/{@code ASSET_SCAN}/{@code COMPLIANCE_SCAN} are the only types migration
+     * {@code 013} excludes from it. Triggered by {@code POST /lineage/rebuild}, dispatched to
+     * {@code LineageRebuildService}. See {@code net.jdesive.secy.service.ReEnrichmentListener},
+     * which excludes this type for the same reason it excludes {@link #NVD}: a graph rebuild
+     * changes no alert inputs, so it must not trigger a re-enrichment pass.
+     */
+    LINEAGE_REBUILD
 
 }
