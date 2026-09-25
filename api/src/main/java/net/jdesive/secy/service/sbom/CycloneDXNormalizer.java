@@ -9,7 +9,9 @@ import net.jdesive.secy.model.cyclonedx.CycloneDXExternalReference;
 import net.jdesive.secy.model.cyclonedx.CycloneDXFile;
 import net.jdesive.secy.model.cyclonedx.CycloneDXHash;
 import net.jdesive.secy.model.cyclonedx.CycloneDXMetadata;
+import net.jdesive.secy.model.cyclonedx.CycloneDXSwid;
 import net.jdesive.secy.model.cyclonedx.CycloneDXTool;
+import net.jdesive.secy.model.component.SecondaryIdentifiers;
 import net.jdesive.secy.persistence.entity.ComponentHash;
 import org.springframework.stereotype.Component;
 
@@ -77,7 +79,31 @@ public class CycloneDXNormalizer {
                 .licenses(licenses(cdx))
                 .externalReferences(references(cdx))
                 .hashes(hashes(cdx))
+                .identifiers(identifiers(cdx))
                 .build();
+    }
+
+    /**
+     * CycloneDX {@code component.cpe} / {@code component.swid} (M1c) → the normalised identifier
+     * list. Applies to {@code metadata.component} (the root) too, since it goes through this same
+     * {@link #component} method. Neither ever feeds {@code identityKey} — see
+     * {@link SecondaryIdentifiers}.
+     */
+    private List<NormalizedComponent.Identifier> identifiers(CycloneDXComponent cdx) {
+        List<NormalizedComponent.Identifier> out = new ArrayList<>();
+        NormalizedComponent.Identifier cpe = SecondaryIdentifiers.cpe(cdx.getCpe(), SecondaryIdentifiers.CDX_CPE);
+        if (cpe != null) {
+            out.add(cpe);
+        }
+        CycloneDXSwid swid = cdx.getSwid();
+        if (swid != null) {
+            NormalizedComponent.Identifier swidIdentifier = SecondaryIdentifiers.swid(
+                    swid.getTagId(), swid.getName(), swid.getVersion(), SecondaryIdentifiers.CDX_SWID);
+            if (swidIdentifier != null) {
+                out.add(swidIdentifier);
+            }
+        }
+        return SecondaryIdentifiers.dedupe(out);
     }
 
     /**

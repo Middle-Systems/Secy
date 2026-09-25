@@ -43,6 +43,16 @@ import java.util.Locale;
  * <p>The {@code name/} prefix keeps the no-PURL namespace disjoint from the PURL one, so a component
  * literally named {@code npm/lodash} can never collide with {@code pkg:npm/lodash}.
  *
+ * <h2>Secondary identifiers (M1c)</h2>
+ *
+ * <p>A component may also carry a declared CPE, a SWID tag, and/or content hashes (see
+ * {@code SBOMComponentIdentifier}, {@code net.jdesive.secy.persistence.entity.ComponentHash}). None
+ * of them participate in {@link #keyOf} — a no-PURL component with a declared CPE deliberately keeps
+ * its {@code name/} key rather than being re-keyed onto the CPE, because re-keying would orphan every
+ * alert already carried forward under the old key. Whether those secondary identifiers agree with
+ * this key is a separate, CVE-independent judgment — see
+ * {@code net.jdesive.secy.persistence.entity.IdentityConfidence}.
+ *
  * <h2>Known collapse</h2>
  *
  * <p>One SBOM that ships two versions of the same package (a bundler shading both {@code lodash

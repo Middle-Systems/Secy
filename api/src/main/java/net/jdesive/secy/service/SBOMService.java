@@ -3,12 +3,14 @@ package net.jdesive.secy.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.jdesive.secy.events.SbomUploadedEvent;
+import net.jdesive.secy.model.component.ComponentIdentityAssessor;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.entity.*;
+import net.jdesive.secy.service.sbom.ComponentIdentityService;
 import net.jdesive.secy.service.sbom.SbomParser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
@@ -67,6 +69,7 @@ public class SBOMService {
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
     private final SbomParser sbomParser;
+    private final ComponentIdentityService componentIdentityService;
 
     /** {@code sbom_component.description}. SPDX descriptions routinely run past this. */
     private static final int MAX_DESCRIPTION = 1024;
@@ -77,11 +80,13 @@ public class SBOMService {
 
     @Autowired
     public SBOMService(SBOMRepository sbomRepository, ApplicationEventPublisher eventPublisher,
-                       ObjectMapper objectMapper, SbomParser sbomParser) {
+                       ObjectMapper objectMapper, SbomParser sbomParser,
+                       ComponentIdentityService componentIdentityService) {
         this.sbomRepository = sbomRepository;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
         this.sbomParser = sbomParser;
+        this.componentIdentityService = componentIdentityService;
     }
 
     /**
@@ -98,6 +103,19 @@ public class SBOMService {
     @Transactional
     public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
                                   String rawBody, UUID jobId) {
+        return createPlaceholder(product, document, productVersion, rawBody, jobId, null, null);
+    }
+
+    /**
+     * The same placeholder creation, additionally recording M1c provenance: which channel the upload
+     * came through and, for a connector sync, which {@link SourceConnector}. The 5-arg overload above
+     * delegates here with both null, which is exactly what a pre-M1c row would have — never write
+     * {@code lifecycleStage} here, it is M1e's field to populate.
+     */
+    @Transactional
+    public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
+                                  String rawBody, UUID jobId, SbomIngestionSource ingestionSource,
+                                  UUID sourceConnectorId) {
         SBOM sbom = new SBOM();
         sbom.setFormat(document.format().label());
         sbom.setSpecVersion(truncate(document.specVersion(), MAX_SHORT_TEXT));
@@ -108,6 +126,8 @@ public class SBOMService {
         sbom.setUploadDate(LocalDateTime.now());
         sbom.setPendingRawBody(rawBody);
         sbom.setJobId(jobId);
+        sbom.setIngestionSource(ingestionSource);
+        sbom.setSourceConnectorId(sourceConnectorId);
 
         // Versioning logic: the new upload becomes the active SBOM immediately, matching the old
         // synchronous behaviour — the upload is "the current one" from the moment it is accepted,
@@ -188,6 +208,11 @@ public class SBOMService {
         // Consumed — no reason to keep a (possibly large) copy of the raw upload around.
         sbom.setPendingRawBody(null);
         SBOM saved = sbomRepository.saveAndFlush(sbom);
+
+        // M1c Pass B: the cross-instance hash-identity-collision sweep, tenant-wide. Runs inside this
+        // same transaction (REQUIRED propagation) and after the save/flush above so every component
+        // on this SBOM has an id and a computed identityKey to compare against the rest of the tenant.
+        componentIdentityService.flagHashIdentityCollisions(saved);
 
         int componentCount = document.components().size();
         progress.report(componentCount, "Persisted " + componentCount + " components; vulnerability scan starting");
@@ -279,6 +304,41 @@ public class SBOMService {
             if (normalized != null) {
                 entity.getHashes().add(normalized);
             }
+        }
+
+        // M1c: declared CPE/SWID identifiers, persisted verbatim (the normalizer already dropped
+        // over-long values — never truncate identifierValue here, same reasoning as the hash loop
+        // above). declaredName/declaredVersion are already length-bounded by SecondaryIdentifiers.
+        for (NormalizedComponent.Identifier identifier : component.identifiers()) {
+            SBOMComponentIdentifier row = new SBOMComponentIdentifier();
+            row.setIdentifierType(identifier.type());
+            row.setIdentifierValue(identifier.value());
+            row.setDeclaredName(identifier.declaredName());
+            row.setDeclaredVersion(identifier.declaredVersion());
+            row.setSource(identifier.source());
+            row.setComponent(entity);
+            entity.getIdentifiers().add(row);
+        }
+
+        // M1c Pass A: does this instance's own declared identifiers corroborate or conflict with its
+        // primary identity? CVE-independent, computed once here rather than at correlation time — see
+        // ComponentIdentityAssessor's Javadoc and IdentityConfidence's orthogonality note versus
+        // MatchConfidence. Deliberately not in @PrePersist/@PreUpdate: Pass B (flagHashIdentityCollisions)
+        // runs after this and must be able to set CONFLICTING on an already-assessed row without a
+        // lifecycle callback clobbering it back on the next flush.
+        ComponentIdentityAssessor.IdentityAssessment assessment = ComponentIdentityAssessor.assess(component);
+        entity.setIdentityConfidence(assessment.confidence());
+        for (ComponentIdentityAssessor.DetectedConflict conflict : assessment.conflicts()) {
+            SBOMComponentIdentityConflict row = new SBOMComponentIdentityConflict();
+            row.setConflictType(conflict.type());
+            row.setIdentifierType(conflict.identifierType());
+            row.setIdentifierValue(conflict.identifierValue());
+            row.setDetail(conflict.detail());
+            row.setOtherComponentId(null);
+            row.setOtherIdentityKey(null);
+            row.setDetectedAt(LocalDateTime.now());
+            row.setComponent(entity);
+            entity.getIdentityConflicts().add(row);
         }
 
         return entity;

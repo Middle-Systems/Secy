@@ -7,12 +7,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.auth.dto.ErrorResponse;
 import net.jdesive.secy.job.JobService;
+import net.jdesive.secy.model.component.ComponentIdentityResponse;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.Job;
 import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
+import net.jdesive.secy.persistence.entity.SbomIngestionSource;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
 import net.jdesive.secy.persistence.entity.Tenant;
 import net.jdesive.secy.service.AlertService;
@@ -20,6 +22,8 @@ import net.jdesive.secy.service.InvalidProductTagException;
 import net.jdesive.secy.service.ProductService;
 import net.jdesive.secy.service.ProductTaggingService;
 import net.jdesive.secy.service.SBOMService;
+import net.jdesive.secy.service.sbom.ComponentIdentityService;
+import net.jdesive.secy.service.sbom.ComponentNotFoundException;
 import net.jdesive.secy.service.sbom.SbomParser;
 import net.jdesive.secy.service.sbom.UnsupportedSbomFormatException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,18 +49,20 @@ public class SBOMController {
     private VulnerabilityAlertRepository alertRepository;
     private SbomParser sbomParser;
     private JobService jobService;
+    private ComponentIdentityService componentIdentityService;
 
     @Autowired
     public SBOMController(SBOMService sbomService, ProductService productService,
                           ProductTaggingService productTaggingService,
                           VulnerabilityAlertRepository alertRepository, SbomParser sbomParser,
-                          JobService jobService) {
+                          JobService jobService, ComponentIdentityService componentIdentityService) {
         this.sbomService = sbomService;
         this.productService = productService;
         this.productTaggingService = productTaggingService;
         this.alertRepository = alertRepository;
         this.sbomParser = sbomParser;
         this.jobService = jobService;
+        this.componentIdentityService = componentIdentityService;
     }
 
     /**
@@ -101,7 +107,8 @@ public class SBOMController {
         //    payload of its own (every other job type is a stateless feed pull), so the raw body and
         //    the job id live on the SBOM row instead — see SBOMService.ingestUploadJob.
         Job job = jobService.create(JobType.SBOM_UPLOAD, principal);
-        SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(), job.getId());
+        SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(),
+                job.getId(), SbomIngestionSource.MANUAL_UPLOAD, null);
 
         log.info("Queued {} SBOM upload {} for product {} as job {}: {} components pending ingest",
                 document.format().label(), placeholder.getId(), productId, job.getId(), document.components().size());
@@ -152,7 +159,8 @@ public class SBOMController {
 
         // 4-5. Queue the job, then persist the placeholder row against the resolved product.
         Job job = jobService.create(JobType.SBOM_UPLOAD, principal);
-        SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(), job.getId());
+        SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(),
+                job.getId(), SbomIngestionSource.TAGGED_UPLOAD, null);
 
         log.info("Queued {} SBOM upload {} for tag-resolved product {} ({}) as job {}: {} components pending ingest",
                 document.format().label(), placeholder.getId(), product.getId(), product.getName(), job.getId(),
@@ -186,6 +194,25 @@ public class SBOMController {
         }
 
         return ResponseEntity.ok(alerts);
+    }
+
+    /**
+     * M1c's identity detail endpoint — the read path for the {@code @JsonIgnore}d
+     * {@code identifiers}/{@code identityConflicts} collections on {@code SBOMComponent}.
+     *
+     * <p>TODO(tenancy-hardening): not tenant-filtered, matching every other endpoint here today.
+     */
+    @Operation(summary = "The declared CPE/SWID identifiers, content hashes, detected identity conflicts and provenance for one SBOM component")
+    @GetMapping("/{sbomId}/components/{componentId}/identity")
+    public ResponseEntity<ComponentIdentityResponse> getComponentIdentity(
+            @PathVariable UUID sbomId, @PathVariable UUID componentId) {
+        return ResponseEntity.ok(componentIdentityService.describe(sbomId, componentId));
+    }
+
+    /** No component with that id under that SBOM. */
+    @ExceptionHandler(ComponentNotFoundException.class)
+    public ResponseEntity<ErrorResponse> onComponentNotFound(ComponentNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(e.getMessage()));
     }
 
 }

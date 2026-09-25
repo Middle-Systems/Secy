@@ -7,6 +7,7 @@ import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
+import net.jdesive.secy.persistence.entity.SbomIngestionSource;
 import net.jdesive.secy.persistence.entity.Tenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,6 +107,9 @@ class TagDrivenSbomUploadTest {
         assertThat(product.isUnassigned()).isFalse();
         assertThat(product.getName()).isEqualTo("checkout-service");
         assertThat(product.getTagValue()).isEqualTo("checkout-service");
+        // M1c: this upload's provenance is recorded on the placeholder row immediately, before the
+        // SBOM_UPLOAD job ever runs — see SBOMController#uploadTaggedSbom.
+        assertThat(placeholder.getIngestionSource()).isEqualTo(SbomIngestionSource.TAGGED_UPLOAD);
     }
 
     @Test

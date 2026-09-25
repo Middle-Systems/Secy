@@ -204,6 +204,37 @@ secondary identifiers. When identifiers conflict across sources, flag the link l
 instead of guessing a merge. Keep per-instance provenance (which SBOM, which stage, which
 ingestion) — already partially present, formalize it as a first-class field.
 
+**Status: SHIPPED.** `identityKey` and its computation (`ComponentIdentity.keyOf`, PURL-primary,
+no secondary identifier ever folds into it) are unchanged — re-keying onto a declared CPE/SWID
+would orphan every alert already carried forward under the old key. CPE and SWID are new declared
+secondary identifiers, persisted one row per identifier in `sbom_component_identifier` (migration
+`021`, SBOM-only — asset-side is a future M3 table) with the exact document field each came from
+(`cyclonedx:component.cpe`, `spdx:externalRefs.cpe23Type`, …); content hashes stay exactly where
+they already were (`sbom_component_hash`, Phase 6) and are read, not duplicated. Two conflict
+passes run at ingestion, inside `SBOMService.ingestDocument`'s transaction, never at correlation
+time: `ComponentIdentityAssessor` (pure, no Spring/JPA) checks one component's own declared
+identifiers against its primary identity by name-token overlap (not string equality — PURL and CPE
+naming conventions differ systematically) and version agreement, and flags two hash entries under
+the same canonical algorithm disagreeing; `ComponentIdentityService.flagHashIdentityCollisions`
+then sweeps the same strong content digest (MD5/SHA-1 and well-known empty-content digests
+excluded) across every other component in the tenant, both sides flagged, never merged. Either
+pass can set `sbom_component.identity_confidence` (`CORROBORATED` / `UNCORROBORATED` /
+`CONFLICTING`, null = not assessed) and add a `sbom_component_identity_conflict` row per detected
+disagreement, readable via `GET /sbom/{sbomId}/components/{componentId}/identity`.
+**`IdentityConfidence` is orthogonal to `MatchConfidence`** — a per-component, CVE-independent
+document-facts judgment versus a per-(component, CVE) alert value; M1c does not cap or otherwise
+influence `MatchConfidence`, and the correlation engine's matching logic, `ComponentCoordinate`,
+`CpeMatcher`/`OsvMatcher`/`CorrelationMatch`, and the golden test set are all unchanged (precision/
+recall still 1.0 across every fixture). Per-SBOM provenance is formalized on `sbom`:
+`ingestion_source` (`MANUAL_UPLOAD` / `TAGGED_UPLOAD` / `GITHUB_CONNECTOR`, set by whichever
+`SBOMService.createPlaceholder` caller created the row) and `source_connector_id` (a plain id, not
+an association, `on delete set null`). **`lifecycle_stage` exists on `sbom` now, nullable, and
+nothing in M1c writes it** — reserved for M1e, following M1b's no-retrofit precedent so M1e needs
+no further migration. **Not done, deliberately**: a declared CPE does not yet feed
+`PurlCpeBridge`'s vendor/product guess (would change alert sets/confidence, needs its own golden
+fixtures — tracked as a `TODO(post-M1c)`); CycloneDX 1.6 `evidence.identity`/`omniborId`/`swhid`/
+nested `components[].components[]` are not parsed (noted as a follow-up, not built).
+
 **M1d — Lineage graph (Apache AGE).** Stand up Apache AGE as a Postgres extension (no new
 service). Write lineage edges Product → Repo → Build → Image/Artifact → Workload/Cloud Asset,
 and Build → Component (PURL) → Vulnerability → Finding → Action item, mirroring the design

@@ -8,6 +8,7 @@ import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
+import net.jdesive.secy.persistence.entity.SbomIngestionSource;
 import net.jdesive.secy.persistence.entity.SourceConnector;
 import net.jdesive.secy.service.ProductService;
 import net.jdesive.secy.service.SBOMService;
@@ -102,7 +103,8 @@ public class GitHubSyncService {
                     // Unassigned bucket. See ROADMAP.md's M1b/M2 sections and OwnershipLink's Javadoc.
                     Product product = productService.findOrCreateByName(fullName);
                     SBOM sbom = sbomService.createPlaceholder(
-                            product, document, defaultVersion(repo), null, null);
+                            product, document, defaultVersion(repo), null, null,
+                            SbomIngestionSource.GITHUB_CONNECTOR, connector.getId());
                     IngestResult result = sbomService.ingestDocument(sbom, document, progress);
                     componentsTotal += result.itemsProcessed();
                     succeeded++;

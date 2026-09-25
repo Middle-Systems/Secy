@@ -1,0 +1,76 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "acme-identifiers",
+  "creationInfo": {
+    "created": "2026-09-10T10:00:00Z",
+    "creators": [
+      "Tool: syft-0.98.0"
+    ]
+  },
+  "documentDescribes": [
+    "SPDXRef-Package-root"
+  ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-root",
+      "name": "acme-identifiers-app",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openssl",
+      "name": "openssl",
+      "versionInfo": "1.1.1f",
+      "downloadLocation": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:generic/openssl@1.1.1f"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:openssl:openssl:1.1.1f:*:*:*:*:*:*:*"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "CPE:2.3:A:OPENSSL:OPENSSL:1.1.1f:*:*:*:*:*:*:*"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:openssl:openssl:1.1.1g:*:*:*:*:*:*:*"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe22Type",
+          "referenceLocator": "cpe:/a:openssl:openssl:1.1.1f"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "swid",
+          "referenceLocator": "swid:2df9de35-0aff-4a86-ace6-f7dddd1ade4c"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-root"
+    }
+  ]
+}

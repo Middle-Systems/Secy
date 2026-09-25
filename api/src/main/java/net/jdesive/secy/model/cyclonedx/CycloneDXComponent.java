@@ -30,4 +30,10 @@ public class CycloneDXComponent {
 
     private List<CycloneDXExternalReference> externalReferences;
 
+    /** Optional declared CPE 2.2/2.3 string (M1c) — promoted to a secondary identifier, never folded into {@code identityKey}. */
+    private String cpe;
+
+    /** Optional declared SWID tag (M1c) — see {@link CycloneDXSwid}. */
+    private CycloneDXSwid swid;
+
 }

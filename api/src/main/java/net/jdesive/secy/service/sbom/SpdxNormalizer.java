@@ -3,6 +3,7 @@ package net.jdesive.secy.service.sbom;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.component.SbomFormat;
+import net.jdesive.secy.model.component.SecondaryIdentifiers;
 import net.jdesive.secy.model.spdx.SpdxChecksum;
 import net.jdesive.secy.model.spdx.SpdxDocument;
 import net.jdesive.secy.model.spdx.SpdxExternalRef;
@@ -164,7 +165,45 @@ public class SpdxNormalizer {
                 .licenses(licenses(pkg))
                 .externalReferences(references(pkg))
                 .hashes(hashes(pkg))
+                .identifiers(identifiers(pkg))
                 .build();
+    }
+
+    /**
+     * SPDX {@code externalRefs[].cpe23Type}/{@code cpe22Type}/{@code swid} (M1c) → the normalised
+     * identifier list. Deliberately promoted <b>in addition to</b>, not instead of, the same refs
+     * staying in {@link #references} — the roadmap's "SPDX CPE/SWID refs stay in
+     * {@code sbom_reference} too" decision, so the UI's existing references list is unaffected. An
+     * SPDX {@code swid} ref carries only a tagId (no name/version), which
+     * {@code ComponentIdentityAssessor} accounts for when assessing it.
+     */
+    private List<NormalizedComponent.Identifier> identifiers(SpdxPackage pkg) {
+        if (pkg.getExternalRefs() == null) {
+            return List.of();
+        }
+        List<NormalizedComponent.Identifier> out = new ArrayList<>();
+        for (SpdxExternalRef ref : pkg.getExternalRefs()) {
+            if (ref == null) {
+                continue;
+            }
+            String type = trim(ref.getReferenceType());
+            String locator = value(ref.getReferenceLocator());
+            if (type == null || locator == null) {
+                continue;
+            }
+            NormalizedComponent.Identifier identifier = null;
+            if ("cpe23Type".equalsIgnoreCase(type)) {
+                identifier = SecondaryIdentifiers.cpe(locator, SecondaryIdentifiers.SPDX_CPE23);
+            } else if ("cpe22Type".equalsIgnoreCase(type)) {
+                identifier = SecondaryIdentifiers.cpe(locator, SecondaryIdentifiers.SPDX_CPE22);
+            } else if ("swid".equalsIgnoreCase(type)) {
+                identifier = SecondaryIdentifiers.swid(locator, null, null, SecondaryIdentifiers.SPDX_SWID);
+            }
+            if (identifier != null) {
+                out.add(identifier);
+            }
+        }
+        return SecondaryIdentifiers.dedupe(out);
     }
 
     /**

@@ -61,6 +61,29 @@ public class SBOM extends TenantOwnedEntity {
      */
     private UUID jobId;
 
+    /** Which channel this SBOM arrived through (M1c). Null on any row that predates M1c. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ingestion_source", length = 32)
+    private SbomIngestionSource ingestionSource;
+
+    /**
+     * The {@link SourceConnector} that produced this SBOM, when {@link #ingestionSource} is
+     * {@link SbomIngestionSource#GITHUB_CONNECTOR} — a plain id, not a {@code @ManyToOne}, so
+     * serializing an {@code SBOM} never drags a connector's config along and no on-delete behavior
+     * needs modelling in the entity graph (the FK itself is {@code on delete set null}, migration
+     * {@code 021c}).
+     */
+    @Column(name = "source_connector_id")
+    private UUID sourceConnectorId;
+
+    /**
+     * Where in the SDLC this SBOM was captured. <b>M1e populates this; nothing in M1c writes it.</b>
+     * {@code null} means "stage unknown", not a default stage.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "lifecycle_stage", length = 16)
+    private SbomLifecycleStage lifecycleStage;
+
     @OneToMany(mappedBy = "sbom", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
     private List<SBOMTool> tools = new ArrayList<>();

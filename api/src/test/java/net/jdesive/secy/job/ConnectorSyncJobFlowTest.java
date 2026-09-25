@@ -181,6 +181,10 @@ class ConnectorSyncJobFlowTest {
         SBOM sbom = sbomRepository.findByProductIdAndActiveTrue(product.getId()).orElseThrow();
         assertThat(sbom.getProductVersion()).isEqualTo("main");
         assertThat(sbom.getFormat()).isEqualTo("SPDX");
+        // M1c: connector-synced SBOMs record their channel and originating connector.
+        assertThat(sbom.getIngestionSource())
+                .isEqualTo(net.jdesive.secy.persistence.entity.SbomIngestionSource.GITHUB_CONNECTOR);
+        assertThat(sbom.getSourceConnectorId()).isEqualTo(connectorId);
 
         // The async vulnerability scan (same VulnerabilityScanner hop SbomUploadJobFlowTest awaits)
         // must run and settle before the alert can be asserted on.

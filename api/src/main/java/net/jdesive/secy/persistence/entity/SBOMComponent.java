@@ -100,6 +100,46 @@ public class SBOMComponent implements CorrelatableComponent {
     private List<VulnerabilityAlert> vulnerabilityAlerts;
 
     /**
+     * Declared CPE/SWID identifiers for this component instance (M1c). {@code @JsonIgnore}d —
+     * {@code open-in-view} would otherwise turn every serialized {@code SBOMComponent} (this SBOM's
+     * tree, every alert's {@code component}) into an N+1; {@code ComponentIdentityService#describe}
+     * is the read path for these.
+     *
+     * @see SBOMComponentIdentifier
+     */
+    @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    private List<SBOMComponentIdentifier> identifiers = new ArrayList<>();
+
+    /**
+     * Detected disagreements between this component's declared identifiers and its primary identity,
+     * or with another component's content digest (M1c). Same {@code @JsonIgnore} reasoning as
+     * {@link #identifiers}.
+     *
+     * @see SBOMComponentIdentityConflict
+     */
+    @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    private List<SBOMComponentIdentityConflict> identityConflicts = new ArrayList<>();
+
+    /**
+     * Whether this component's own declared secondary identifiers corroborate, say nothing about, or
+     * conflict with its {@link #identityKey} (M1c). Computed by {@code ComponentIdentityService}/
+     * {@code SBOMService} at ingest — <b>deliberately NOT in {@code @PrePersist}/{@code @PreUpdate}</b>,
+     * unlike {@link #identityKey}: the cross-instance hash-collision pass
+     * ({@code ComponentIdentityService#flagHashIdentityCollisions}) sets this to {@code CONFLICTING}
+     * on already-persisted rows (including rows outside the current SBOM, via a bulk update), and a
+     * lifecycle callback re-deriving it on the next flush/update would silently overwrite that later
+     * verdict. {@code null} means "not assessed" — see {@link IdentityConfidence}'s Javadoc for the
+     * orthogonality note versus {@link MatchConfidence}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "identity_confidence", length = 16)
+    private IdentityConfidence identityConfidence;
+
+    /**
      * Keep {@link #identityKey} in lockstep with the fields it is derived from.
      *
      * <p>On the entity rather than in {@code SBOMService} on purpose: the golden-set fixtures, the
