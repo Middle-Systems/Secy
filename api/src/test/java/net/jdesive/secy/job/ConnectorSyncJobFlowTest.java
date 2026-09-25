@@ -15,6 +15,7 @@ import net.jdesive.secy.persistence.entity.OsvAdvisory;
 import net.jdesive.secy.persistence.entity.OsvAffectedRange;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
+import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 import net.jdesive.secy.persistence.entity.SourceConnector;
 import net.jdesive.secy.persistence.entity.SourceConnectorType;
 import net.jdesive.secy.persistence.entity.Vulnerability;
@@ -178,13 +179,18 @@ class ConnectorSyncJobFlowTest {
         assertThat(productRepository.findAll()).hasSize(1);
         Product product = productRepository.findByName("demo-org/service-a").orElseThrow();
 
-        SBOM sbom = sbomRepository.findByProductIdAndActiveTrue(product.getId()).orElseThrow();
+        SBOM sbom = sbomRepository
+                .findFirstByProductIdAndLifecycleStageAndActiveTrueOrderByUploadDateDesc(
+                        product.getId(), SbomLifecycleStage.SOURCE)
+                .orElseThrow();
         assertThat(sbom.getProductVersion()).isEqualTo("main");
         assertThat(sbom.getFormat()).isEqualTo("SPDX");
         // M1c: connector-synced SBOMs record their channel and originating connector.
         assertThat(sbom.getIngestionSource())
                 .isEqualTo(net.jdesive.secy.persistence.entity.SbomIngestionSource.GITHUB_CONNECTOR);
         assertThat(sbom.getSourceConnectorId()).isEqualTo(connectorId);
+        // M1e: the GitHub dependency-graph SBOM is the textbook Source SBOM.
+        assertThat(sbom.getLifecycleStage()).isEqualTo(SbomLifecycleStage.SOURCE);
 
         // The async vulnerability scan (same VulnerabilityScanner hop SbomUploadJobFlowTest awaits)
         // must run and settle before the alert can be asserted on.

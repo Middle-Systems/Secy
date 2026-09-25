@@ -22,7 +22,7 @@ import java.util.UUID;
  * @param ingestionSource    which entry point created the SBOM row, or null on a pre-M1c row
  * @param ingestionJobId     the job that ingested it ({@code sbom.jobId}), or null
  * @param sourceConnectorId  the {@code SourceConnector} that produced it, when applicable, or null
- * @param lifecycleStage     reserved for M1e; null until then
+ * @param lifecycleStage     the SBOM's lifecycle stage (M1e); null = unknown
  * @param bomRef             the document's own internal handle for this component — provenance only, never identity
  */
 public record ComponentProvenance(UUID sbomId, UUID productId, String format, String specVersion,

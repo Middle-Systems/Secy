@@ -15,9 +15,11 @@ import net.jdesive.secy.persistence.entity.JobType;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
 import net.jdesive.secy.persistence.entity.SbomIngestionSource;
+import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
 import net.jdesive.secy.persistence.entity.Tenant;
 import net.jdesive.secy.service.AlertService;
+import net.jdesive.secy.service.InvalidLifecycleStageException;
 import net.jdesive.secy.service.InvalidProductTagException;
 import net.jdesive.secy.service.ProductService;
 import net.jdesive.secy.service.ProductTaggingService;
@@ -87,12 +89,18 @@ public class SBOMController {
     @Operation(summary = "Upload a CycloneDX or SPDX (2.2/2.3 JSON) SBOM for a product; validates synchronously, then queues ingest + scan as a background job",
             description = "Returns immediately with a QUEUED SBOM_UPLOAD job; poll GET /jobs/{id} for progress. "
                     + "Format detection and parsing happen before the job is queued, so an unrecognised "
-                    + "document is still a synchronous 400 with nothing queued.")
+                    + "document is still a synchronous 400 with nothing queued. The optional `stage` param "
+                    + "(SOURCE/BUILD/ANALYZED/DEPLOYED, case-insensitive) records this SBOM's place in the "
+                    + "SDLC (M1e); it wins over any stage the document itself declares (CycloneDX "
+                    + "metadata.lifecycles), and an unrecognised value is a synchronous 400 with nothing "
+                    + "queued. A staged upload does not deactivate other stages' active SBOMs for this "
+                    + "product — see GET /products.")
     @ApiResponse(responseCode = "202", description = "Document validated; ingest queued")
     @PostMapping(value = "/{productId}/sboms", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Job> uploadSbom(
             @PathVariable UUID productId,
             @RequestParam(value = "productVersion", defaultValue = "Unknown") String productVersion,
+            @RequestParam(value = "stage", required = false) String stage,
             @RequestBody JsonNode body,
             Principal principal) {
 
@@ -103,12 +111,16 @@ public class SBOMController {
         //    the only synchronous work: a document that can never succeed must never be queued.
         NormalizedSbom document = sbomParser.parse(body);
 
+        // 2b. Parse the lifecycle stage param (M1e) -> 400 via onInvalidLifecycleStage for an
+        //     unrecognised value, before anything is queued or written.
+        SbomLifecycleStage explicitStage = SbomLifecycleStage.fromApiValue(stage);
+
         // 3. Queue the job, then persist a placeholder SBOM row pointing at it. The job carries no
         //    payload of its own (every other job type is a stateless feed pull), so the raw body and
         //    the job id live on the SBOM row instead — see SBOMService.ingestUploadJob.
         Job job = jobService.create(JobType.SBOM_UPLOAD, principal);
         SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(),
-                job.getId(), SbomIngestionSource.MANUAL_UPLOAD, null);
+                job.getId(), SbomIngestionSource.MANUAL_UPLOAD, null, explicitStage);
 
         log.info("Queued {} SBOM upload {} for product {} as job {}: {} components pending ingest",
                 document.format().label(), placeholder.getId(), productId, job.getId(), document.components().size());
@@ -137,12 +149,15 @@ public class SBOMController {
     @Operation(summary = "Upload a CycloneDX or SPDX SBOM, resolving its product from tag params rather than a URL path",
             description = "Same synchronous-validate/async-ingest contract as POST /sbom/{productId}/sboms, but the "
                     + "product is resolved from repeated tag=key=value params via the tenant's configured product "
-                    + "tag key (default secy:product); untagged or unresolved uploads land in the Unassigned bucket.")
+                    + "tag key (default secy:product); untagged or unresolved uploads land in the Unassigned bucket. "
+                    + "The optional `stage` param (SOURCE/BUILD/ANALYZED/DEPLOYED, case-insensitive) works exactly "
+                    + "as on the manual-assignment endpoint.")
     @ApiResponse(responseCode = "202", description = "Document validated; ingest queued")
     @PostMapping(value = "", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Job> uploadTaggedSbom(
             @RequestParam(value = "productVersion", defaultValue = "Unknown") String productVersion,
             @RequestParam(value = "tag", required = false) List<String> tags,
+            @RequestParam(value = "stage", required = false) String stage,
             @RequestBody JsonNode body,
             Principal principal) {
 
@@ -154,13 +169,17 @@ public class SBOMController {
         //    never succeed. Same synchronous validation as the manual-assignment endpoint.
         NormalizedSbom document = sbomParser.parse(body);
 
+        // 2b. Parse the lifecycle stage param (M1e) -> 400 via onInvalidLifecycleStage, before any
+        //     product is resolved or created.
+        SbomLifecycleStage explicitStage = SbomLifecycleStage.fromApiValue(stage);
+
         // 3. Resolve the product from the tags. TODO(tenancy-hardening): request-scoped tenant.
         Product product = productTaggingService.resolveProduct(Tenant.DEFAULT_TENANT_ID, tagMap);
 
         // 4-5. Queue the job, then persist the placeholder row against the resolved product.
         Job job = jobService.create(JobType.SBOM_UPLOAD, principal);
         SBOM placeholder = sbomService.createPlaceholder(product, document, productVersion, body.toString(),
-                job.getId(), SbomIngestionSource.TAGGED_UPLOAD, null);
+                job.getId(), SbomIngestionSource.TAGGED_UPLOAD, null, explicitStage);
 
         log.info("Queued {} SBOM upload {} for tag-resolved product {} ({}) as job {}: {} components pending ingest",
                 document.format().label(), placeholder.getId(), product.getId(), product.getName(), job.getId(),
@@ -179,6 +198,13 @@ public class SBOMController {
     /** A malformed {@code tag=key=value} param is the client's problem, same treatment as a bad document. */
     @ExceptionHandler(InvalidProductTagException.class)
     public ResponseEntity<ErrorResponse> onInvalidProductTag(InvalidProductTagException e) {
+        log.warn("Rejected SBOM upload: {}", e.getMessage());
+        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+    }
+
+    /** An unrecognised {@code ?stage=} value (M1e) — a request that can never succeed must never queue a job. */
+    @ExceptionHandler(InvalidLifecycleStageException.class)
+    public ResponseEntity<ErrorResponse> onInvalidLifecycleStage(InvalidLifecycleStageException e) {
         log.warn("Rejected SBOM upload: {}", e.getMessage());
         return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
     }

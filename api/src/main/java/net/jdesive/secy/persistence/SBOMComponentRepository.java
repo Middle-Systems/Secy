@@ -1,5 +1,6 @@
 package net.jdesive.secy.persistence;
 
+import net.jdesive.secy.model.lifecycle.StageComponent;
 import net.jdesive.secy.persistence.entity.IdentityConfidence;
 import net.jdesive.secy.persistence.entity.SBOMComponent;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -65,5 +66,21 @@ public interface SBOMComponentRepository extends JpaRepository<SBOMComponent, UU
     /** For {@code GET /sbom/{sbomId}/components/{componentId}/identity} — scoped to the named SBOM so a component id from a different SBOM 404s rather than leaking cross-document. */
     @Query("SELECT c FROM SBOMComponent c JOIN FETCH c.sbom s WHERE c.id = :componentId AND s.id = :sbomId")
     Optional<SBOMComponent> findByIdAndSbomId(@Param("componentId") UUID componentId, @Param("sbomId") UUID sbomId);
+
+    /**
+     * One SBOM's components, projected for {@code LifecycleDiffer} (M1e). The root/metadata component
+     * (held on {@code sbom.component} — see {@code SBOMService#toEntity}, which also puts it in
+     * {@code sbom.components} because it shares the same {@code sbom_id} FK) is deliberately excluded:
+     * roots differ across stages (a repo name vs an image name) and diffing them would manufacture
+     * false drift on every single pair. {@code left join s.component root} exactly mirrors
+     * {@code LineageSourceReader}'s exclusion — an implicit {@code s.component.id} comparison would
+     * become an inner join and silently drop every row whenever an SBOM has no root at all.
+     */
+    @Query("""
+            select new net.jdesive.secy.model.lifecycle.StageComponent(c.id, c.identityKey, c.name, c.version, c.purl)
+            from SBOM s join s.components c left join s.component root
+            where s.id = :sbomId and c.identityKey is not null and (root.id is null or c.id <> root.id)
+            """)
+    List<StageComponent> findStageComponents(@Param("sbomId") UUID sbomId);
 
 }

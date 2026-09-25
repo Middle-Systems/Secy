@@ -273,6 +273,42 @@ adjacent stage:
   - Build vs Deployed mismatch → runtime drift / unauthorized change finding.
   - Build vs Analyzed mismatch → incomplete SBOM / tampering finding.
 
+**Status: SHIPPED.** The pre-M1e "one active SBOM per product" invariant is now per-`(product,
+lifecycle_stage)`: `SBOMService.createPlaceholder` deactivates every active SBOM of the incoming
+stage (or every stage-less one, if the new upload declares no stage) rather than the whole
+product, so a normal product holds either one active stage-less SBOM (legacy mode) or up to one
+active SBOM per stage (staged mode) — the two never mix, and `null` still means "stage unknown",
+never a default. No DB uniqueness constraint enforces this (the Unassigned bucket legitimately
+holds many active SBOMs, and a partial index can't see `products.unassigned`); read paths use
+`findFirst...OrderByUploadDateDesc` to tolerate a same-stage upload race. **Correlation/detection
+scope changed to match**: `SbomCorrelationScope` gives a staged, product-scoped SBOM the union of
+every active stage's components (ascending by `SbomLifecycleStage.downstreamRank()`), so
+correlating one stage never auto-resolves another stage's alerts — the rule is now "most-
+downstream current stage wins" for a shared component identity, not "last scan wins". Every
+existing (stage-less) fixture is unaffected by construction. **How the stage is set**: the
+`?stage=` param on both `POST /sbom/{productId}/sboms` and `POST /sbom` wins when given (400 on
+an unrecognised value); otherwise CycloneDX 1.5+ `metadata.lifecycles[]` is mapped
+(`pre-build`→SOURCE, `build`→BUILD, `post-build`→ANALYZED, `operations`→DEPLOYED; conflicting or
+absent phases → null; SPDX has no equivalent, left as a `TODO(spdx-3)`); the GitHub connector
+always writes SOURCE. **The diff engine**: a pure `LifecycleDiffer` classifies each of the three
+adjacent pairs' downstream-vs-upstream disagreement as `UNEXPECTED_COMPONENT` or
+`VERSION_MISMATCH` (a component present upstream but missing downstream is computed but never
+raised — too noisy), scoped by ecosystem coverage so an app-only SBOM never gets flagged for OS
+packages it never inventoried. `LifecycleDiffService` runs it from a synchronous
+`@TransactionalEventListener(phase = AFTER_COMMIT)` on the existing `SbomUploadedEvent` — after
+commit, not inline, so two concurrent stage uploads (the ingestion worker pool defaults to 2) each
+see the other's committed components regardless of which one runs first; a diff failure is caught
+and logged, never fails the ingestion job that triggered it. Findings land in their own
+`lifecycle_drift_finding` table (migration `023`, plain UUID references per M1c's precedent,
+reconciled with the same `AlertLifecycleState` ACTIVE/AUTO_RESOLVED lifecycle as
+`VulnerabilityAlert`/`CompromiseFinding`, no triage/severity columns), browsable at
+`GET /lifecycle-drift` and `GET /lifecycle-drift/{id}` — **deliberately not folded into
+`GET /actionable`**, which ranks by KEV/EPSS/CVSS that a drift finding has none of. **Explicitly
+deferred**: triage/severity (M1j/M1i), KEV-style ranking (M1i — the data precondition is in place:
+`alert.component.sbom.lifecycleStage` already distinguishes a Deployed alert from a Source-only
+one, pinned by `StagedCorrelationScopeTest`), lineage drift nodes (M1j), a drift-finding UI (M1k),
+SPDX 3 lifecycle metadata, and a manual re-diff endpoint.
+
 **M1f — VEX ingestion.** CycloneDX VEX (embedded or standalone), OpenVEX, and CSAF VEX parsers
 into a `VexStatement` model: status (`not_affected` with justification, `affected`, `fixed`,
 `under_investigation`), precedence resolved per the tenant's configured rule (default: tenant

@@ -9,7 +9,7 @@
  * "Actionable" is Secy's platform-wide definition: a vulnerability that is
  * CISA-KEV listed OR has an EPSS probability greater than 0.1.
  */
-import type { Product, SBOM, VulnerabilityAlert } from '@/api/types';
+import type { Product, SBOM, SbomLifecycleStage, VulnerabilityAlert } from '@/api/types';
 
 import type { DerivedProduct, SbomStatusDisplay } from './product.types';
 
@@ -23,15 +23,44 @@ export function isActionableAlert(alert: VulnerabilityAlert): boolean {
   return hasKev || epss > EPSS_ACTIONABLE_THRESHOLD;
 }
 
-/** The product's active SBOM (`active === true`), or `undefined`. */
-export function activeSbom(product: Product): SBOM | undefined {
-  return product.sboms?.find((sbom) => sbom.active === true);
+/**
+ * Downstream-most first (M1e): a normal product can now hold several simultaneously-active stage
+ * SBOMs (Source/Build/Analyzed/Deployed), so "the" active SBOM a single-SBOM view shows must be
+ * picked deterministically rather than by array order (`Array.find` on an API-ordered array is not a
+ * stable "current" pick once more than one SBOM can be active). An unstaged SBOM ranks last — a
+ * stage-less upload is the pre-M1e legacy slot, never simultaneously active alongside a staged one.
+ */
+const STAGE_RANK: Record<SbomLifecycleStage, number> = {
+  DEPLOYED: 4,
+  ANALYZED: 3,
+  BUILD: 2,
+  SOURCE: 1,
+};
+
+function stageRank(sbom: SBOM): number {
+  return sbom.lifecycleStage ? STAGE_RANK[sbom.lifecycleStage] : 0;
 }
 
 /**
- * Every active SBOM on a product. For a normal product this is at most one (see {@link activeSbom});
- * the "Unassigned" bucket (M1a) deliberately keeps every SBOM it ever receives active, since each
- * one is an unrelated document rather than a version of "the product's" SBOM.
+ * The product's single "headline" active SBOM: highest lifecycle stage first (DEPLOYED > ANALYZED >
+ * BUILD > SOURCE > unstaged), ties broken by the newest `uploadDate`. `undefined` when none is
+ * active. See {@link activeSboms} for the full set a staged product may have active at once.
+ */
+export function activeSbom(product: Product): SBOM | undefined {
+  const actives = activeSboms(product);
+  if (actives.length === 0) return undefined;
+  return [...actives].sort((a, b) => {
+    const rankDiff = stageRank(b) - stageRank(a);
+    if (rankDiff !== 0) return rankDiff;
+    return new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime();
+  })[0];
+}
+
+/**
+ * Every active SBOM on a product. For a normal product this can now be more than one (M1e — at most
+ * one per lifecycle stage slot); the "Unassigned" bucket (M1a) deliberately keeps every SBOM it ever
+ * receives active, since each one is an unrelated document rather than a version of "the product's"
+ * SBOM or a stage of one pipeline.
  */
 export function activeSboms(product: Product): SBOM[] {
   return (product.sboms ?? []).filter((sbom) => sbom.active === true);
@@ -111,16 +140,28 @@ export function deriveProduct(product: Product): DerivedProduct {
     };
   }
 
+  // M1e: a normal (non-bucket) product can now have several simultaneously-active stage SBOMs.
+  // `sbom` below is still the single deterministic "headline" one the card links to, but the
+  // counters and status roll up over every active stage's components — each alert attaches to
+  // exactly one component row, so this is an unchanged result when there is only one active SBOM.
+  const actives = activeSboms(product);
   const sbom = activeSbom(product);
+  const statuses = actives.map((s) => sbomStatusLabel(s.status));
+  const lastScanned = actives
+    .map((s) => s.lastScannedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+
   return {
     ...product,
     activeSbom: sbom,
     activeSbomId: sbom?.id,
     activeSbomStatus: sbom?.status,
-    activeSbomStatusDisplay: sbomStatusLabel(sbom?.status),
-    lastScanned: sbom?.lastScannedAt ?? undefined,
-    vulnerabilityCount: countAlerts(sbom),
-    actionableCount: countActionableAlerts(sbom),
+    activeSbomStatusDisplay: actives.length > 1 ? aggregateStatusDisplay(statuses) : sbomStatusLabel(sbom?.status),
+    lastScanned,
+    vulnerabilityCount: actives.reduce((sum, s) => sum + countAlerts(s), 0),
+    actionableCount: actives.reduce((sum, s) => sum + countActionableAlerts(s), 0),
   };
 }
 

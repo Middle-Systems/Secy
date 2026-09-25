@@ -120,10 +120,11 @@ class TagDrivenSbomUploadTest {
         List<SBOM> all = sbomRepository.findAll();
         assertThat(all).hasSize(2);
         // Both point at the same bucket product, and both are still active — the whole point of
-        // skipping deactivateOldSboms for the bucket (see SBOMService#createPlaceholder). If the
-        // bucket's product had been treated like a normal product, SBOMRepository
-        // .findByProductIdAndActiveTrue would throw IncorrectResultSizeDataAccessException the
-        // moment a second row here was queried the normal way.
+        // skipping deactivateSupersededSboms for the bucket (see SBOMService#createPlaceholder). If
+        // the bucket's product had been treated like a normal product, the pre-M1e
+        // SBOMRepository.findByProductIdAndActiveTrue would have thrown
+        // IncorrectResultSizeDataAccessException the moment a second row here was queried the normal
+        // way — M1e's findAllByProductIdAndActiveTrue tolerates it by design.
         assertThat(all).allSatisfy(sbom -> assertThat(sbom.isActive()).isTrue());
         assertThat(all.stream().map(sbom -> sbom.getProduct().getId()).distinct().count()).isEqualTo(1);
 

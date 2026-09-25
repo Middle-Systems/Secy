@@ -12,12 +12,16 @@ import net.jdesive.secy.model.cyclonedx.CycloneDXMetadata;
 import net.jdesive.secy.model.cyclonedx.CycloneDXSwid;
 import net.jdesive.secy.model.cyclonedx.CycloneDXTool;
 import net.jdesive.secy.model.component.SecondaryIdentifiers;
+import net.jdesive.secy.model.cyclonedx.CycloneDXLifecycle;
 import net.jdesive.secy.persistence.entity.ComponentHash;
+import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -54,6 +58,7 @@ public class CycloneDXNormalizer {
                             tool.getName(), tool.getVersion(), tool.getGroup(), tool.getType()));
                 }
             }
+            builder.declaredLifecycleStage(declaredLifecycleStage(metadata.getLifecycles()));
         }
 
         if (file.getComponents() != null) {
@@ -152,6 +157,48 @@ public class CycloneDXNormalizer {
             }
         }
         return new ArrayList<>(out);
+    }
+
+    /**
+     * CycloneDX 1.5+ {@code metadata.lifecycles[].phase} → {@link SbomLifecycleStage} (M1e).
+     *
+     * <table border="1">
+     *   <caption>CycloneDX phase to lifecycle stage</caption>
+     *   <tr><th>CycloneDX phase</th><th>Stage</th></tr>
+     *   <tr><td>{@code pre-build}</td><td>{@code SOURCE}</td></tr>
+     *   <tr><td>{@code build}</td><td>{@code BUILD}</td></tr>
+     *   <tr><td>{@code post-build}</td><td>{@code ANALYZED}</td></tr>
+     *   <tr><td>{@code operations}</td><td>{@code DEPLOYED}</td></tr>
+     *   <tr><td>{@code design}, {@code discovery}, {@code decommission}, a custom name-only entry, or
+     *       anything unrecognised</td><td>ignored (contributes nothing)</td></tr>
+     * </table>
+     *
+     * <p>Distinct mapped stages are collected: exactly one → that stage; zero (nothing mapped) or
+     * more than one (conflicting phases) → {@code null} — M1c's "flag, don't merge" spirit applies
+     * here too: guessing which of two declared phases is right would be worse than leaving the field
+     * unknown.
+     */
+    private static SbomLifecycleStage declaredLifecycleStage(List<CycloneDXLifecycle> lifecycles) {
+        if (lifecycles == null || lifecycles.isEmpty()) {
+            return null;
+        }
+        Set<SbomLifecycleStage> mapped = EnumSet.noneOf(SbomLifecycleStage.class);
+        for (CycloneDXLifecycle lifecycle : lifecycles) {
+            if (lifecycle == null || lifecycle.getPhase() == null) {
+                continue;
+            }
+            SbomLifecycleStage stage = switch (lifecycle.getPhase().trim().toLowerCase(Locale.ROOT)) {
+                case "pre-build" -> SbomLifecycleStage.SOURCE;
+                case "build" -> SbomLifecycleStage.BUILD;
+                case "post-build" -> SbomLifecycleStage.ANALYZED;
+                case "operations" -> SbomLifecycleStage.DEPLOYED;
+                default -> null;
+            };
+            if (stage != null) {
+                mapped.add(stage);
+            }
+        }
+        return mapped.size() == 1 ? mapped.iterator().next() : null;
     }
 
     private List<NormalizedComponent.ExternalReference> references(CycloneDXComponent cdx) {

@@ -110,6 +110,9 @@ public class SpdxNormalizer {
             builder.tool(tool);
         }
 
+        // TODO(spdx-3): SPDX 2.2/2.3 has no lifecycle-stage equivalent to CycloneDX's
+        // metadata.lifecycles[] (M1e) — declaredLifecycleStage stays null (the builder default) for
+        // every SPDX document. SPDX 3.x's software_Sbom.sbomType may supply one; out of scope here.
         return builder.build();
     }
 

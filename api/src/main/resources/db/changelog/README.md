@@ -53,6 +53,7 @@ Claimed prefixes:
 | `020`  | `ownership_link` — manual (M1b) and future inferred (M2/M3) ownership links from a product (asset from M3) to a registered user or a free-text principal/team, with its one-target and owner-shape XOR checks and per-`(target, owner, source, inference_method)` partial unique indexes (ROADMAP.md, M1b — "Ownership model") |
 | `021`  | `sbom_component_identifier` (declared CPE/SWID per component instance) + `sbom_component.identity_confidence` + `sbom_component_identity_conflict` (one row per detected identifier conflict, its `other_component_id`/`other_identity_key` pair-or-neither check) + `sbom.ingestion_source` / `source_connector_id` (FK, `on delete set null`) / `lifecycle_stage` (reserved for M1e, unwritten) (ROADMAP.md, M1c — "Canonical component identity") |
 | `022`  | Apache AGE extension + `secy_lineage` graph, both precondition-guarded (`onFail:CONTINUE`) so a Postgres without AGE still boots; labels/indexes are created at rebuild time (ROADMAP.md, M1d) |
+| `023`  | `idx_sbom_product_stage_active` (lookup index for the per-(product, lifecycle stage) active-SBOM slot) + `lifecycle_drift_finding` — one row per (product, adjacent stage pair, drift kind, component identity) from the Source/Build/Analyzed/Deployed diff engine, reconciled like `compromise_finding`, no triage/severity columns (ROADMAP.md, M1e — "SBOM lifecycle stages + diffing") |
 
 Pick the next free number if yours isn't listed.
 

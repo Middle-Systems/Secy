@@ -54,7 +54,10 @@ class OpenApiDocsTest {
                 .contains("\"/threat/ingest/malicious-packages\"")
                 .contains("\"/threat/ingest/malware-hashes\"")
                 .contains("\"/threat/malicious-packages\"")
-                .contains("\"/threat/malware-hashes\"");
+                .contains("\"/threat/malware-hashes\"")
+                // M1e.
+                .contains("\"/lifecycle-drift\"")
+                .contains("\"/lifecycle-drift/{id}\"");
 
         assertThat(body)
                 .as("@Tag names")
@@ -67,7 +70,8 @@ class OpenApiDocsTest {
                 .contains("\"Stats\"")
                 .contains("\"Compliance\"")
                 .contains("\"Compromise\"")
-                .contains("\"Threat\"");
+                .contains("\"Threat\"")
+                .contains("\"Lifecycle drift\"");
 
         assertThat(body)
                 .as("the GET /actionable typed union is described to clients — itemType is the "

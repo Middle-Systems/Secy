@@ -96,6 +96,9 @@ public class CompromiseDetectionService {
 
     private final CompromiseAgingService agingService;
 
+    /** M1e: same staged-scope union {@code CorrelationService} uses — see {@link SbomCorrelationScope}. */
+    private final SbomCorrelationScope correlationScope;
+
     /**
      * What one detection pass did. Returned for logging and tests; nothing persists it.
      *
@@ -126,6 +129,11 @@ public class CompromiseDetectionService {
      * arrive untagged — so, exactly like {@link CorrelationService#correlate(SBOM)}, detection stays
      * scoped to the SBOM itself rather than the whole bucket product. An SBOM with no product at all
      * (only ever a test fixture) gets the same treatment for the same reason.
+     *
+     * <p><b>M1e:</b> for a staged, product-scoped SBOM the component set is the union of every active
+     * stage slot's components (see {@link SbomCorrelationScope}), most-downstream stage winning for a
+     * shared identity — the same rule and the same reasoning as
+     * {@link CorrelationService#correlate(SBOM)}'s Javadoc.
      */
     @Transactional
     public DetectionSummary detect(SBOM sbom) {
@@ -139,11 +147,13 @@ public class CompromiseDetectionService {
 
         Map<String, SBOMComponent> componentsByIdentity = new LinkedHashMap<>();
         Map<String, UUID> rowIds = new LinkedHashMap<>();
-        for (SBOMComponent component : sbom.getComponents()) {
-            if (component != null && component.getId() != null) {
-                String identity = identityOf(component, component.getId());
-                componentsByIdentity.put(identity, component);
-                rowIds.put(identity, component.getId());
+        for (SBOM scoped : correlationScope.sbomsInScope(sbom, productScoped)) {
+            for (SBOMComponent component : scoped.getComponents()) {
+                if (component != null && component.getId() != null) {
+                    String identity = identityOf(component, component.getId());
+                    componentsByIdentity.put(identity, component);
+                    rowIds.put(identity, component.getId());
+                }
             }
         }
 

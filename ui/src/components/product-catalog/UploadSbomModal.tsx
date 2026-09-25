@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { FileJson, Loader2, UploadCloud } from 'lucide-react';
 
 import { useUploadSbom } from '@/api/queries';
+import type { SbomLifecycleStage } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,9 +16,27 @@ import { Input } from '@/components/ui/input';
 import { JobStatusBadge } from '@/components/jobs/JobStatusBadge';
 import { useIngestJob } from '@/components/jobs/useIngestJob';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { formatInteger } from '@/lib/format';
 
 import type { DerivedProduct } from './product.types';
+
+/** Sentinel for "not specified" in the stage select — the value actually sent omits `stage` entirely. */
+const NO_STAGE = 'NONE';
+
+const STAGE_OPTIONS: { value: SbomLifecycleStage | typeof NO_STAGE; label: string }[] = [
+  { value: NO_STAGE, label: 'Not specified' },
+  { value: 'SOURCE', label: 'Source' },
+  { value: 'BUILD', label: 'Build' },
+  { value: 'ANALYZED', label: 'Analyzed' },
+  { value: 'DEPLOYED', label: 'Deployed' },
+];
 
 interface UploadSbomModalProps {
   product: DerivedProduct | null;
@@ -59,6 +78,7 @@ export function UploadSbomModal({ product, onOpenChange }: UploadSbomModalProps)
   const uploadSbom = useUploadSbom();
   const inputRef = useRef<HTMLInputElement>(null);
   const [productVersion, setProductVersion] = useState('');
+  const [stage, setStage] = useState<SbomLifecycleStage | typeof NO_STAGE>(NO_STAGE);
   const [parsed, setParsed] = useState<ParsedFile | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -68,6 +88,7 @@ export function UploadSbomModal({ product, onOpenChange }: UploadSbomModalProps)
         productId: product!.id,
         sbom: parsed!.sbom,
         productVersion: productVersion.trim() || undefined,
+        stage: stage === NO_STAGE ? undefined : stage,
       }),
     startMessage: 'Uploading SBOM…',
     successMessage: 'SBOM ingested and scanned.',
@@ -77,6 +98,7 @@ export function UploadSbomModal({ product, onOpenChange }: UploadSbomModalProps)
 
   const reset = () => {
     setProductVersion('');
+    setStage(NO_STAGE);
     setParsed(null);
     setFileError(null);
     if (inputRef.current) inputRef.current.value = '';
@@ -148,6 +170,30 @@ export function UploadSbomModal({ product, onOpenChange }: UploadSbomModalProps)
             />
             <p className="text-xs text-muted-foreground">
               Labels this scan in the version history. Defaults to “Unknown”.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="sbom-stage">Lifecycle stage</Label>
+            <Select
+              value={stage}
+              onValueChange={(v) => setStage(v as SbomLifecycleStage | typeof NO_STAGE)}
+              disabled={running}
+            >
+              <SelectTrigger id="sbom-stage" aria-label="Lifecycle stage">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STAGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Where this SBOM was captured (Source/Build/Analyzed/Deployed). A product can hold one
+              active SBOM per stage at once, enabling drift detection between them.
             </p>
           </div>
 

@@ -22,10 +22,15 @@ items: KEV-listed OR EPSS > 0.1.
 - Backend endpoints: `/nvd/search`, `/nvd/ingest`, `/kev`, `/kev/ingest`, `/epss`, `/epss/ingest`,
   `/osv`, `/osv/ingest`, `/cve-list/ingest`, `/products`, `POST /sbom` (tag-driven upload — M1a;
   resolves its product from repeated `tag=key=value` params via the tenant's configured product
-  tag key, default `secy:product`; untagged/unresolved lands in the "Unassigned" bucket),
+  tag key, default `secy:product`; untagged/unresolved lands in the "Unassigned" bucket) and
+  `POST /sbom/{productId}/sboms` (manual upload) both take an optional `?stage=` param
+  (`SOURCE`/`BUILD`/`ANALYZED`/`DEPLOYED`, case-insensitive, 400 on anything else — M1e; wins over
+  any stage the document itself declares, e.g. CycloneDX `metadata.lifecycles`),
   `/sbom/{id}/vulnerabilities`, `/settings/product-tagging` (GET/PUT the tenant's product tag key
   — M1a), `/products/{id}/owners` (GET/POST, `DELETE /{ownerId}` — manual ownership links, M1b),
-  `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/stats/dashboard`,
+  `/actionable`, `/actionable/{id}`, `/compromise`, `/compromise/{id}`, `/lifecycle-drift`,
+  `/lifecycle-drift/{id}` (M1e — Source/Build/Analyzed/Deployed SBOM diff findings; not part of
+  `/actionable`), `/stats/dashboard`,
   `/assets`, `/assets/scan/{trivy,grype}`, `/compliance/reports` (+ `/{id}`, `/{id}/scan`,
   `/{id}/misconfigurations`), `/connectors` (+ `/{id}`, `/{id}/sync` — Phase 6b agentless source
   connectors, GitHub only for now), `POST /lineage/rebuild` (M1d — queues a full rebuild of the

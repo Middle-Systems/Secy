@@ -660,7 +660,12 @@ export interface SBOM {
   productVersion?: string | null;
   /** The SBOM's root/metadata component. Not present on every payload. */
   component?: SBOMComponent;
+  /** Where in the SDLC this SBOM was captured (M1e). Null/absent means "stage unknown". */
+  lifecycleStage?: SbomLifecycleStage | null;
 }
+
+/** M1e — SBOM lifecycle stages + diffing. See `?stage=` on the SBOM upload endpoints. */
+export type SbomLifecycleStage = 'SOURCE' | 'BUILD' | 'ANALYZED' | 'DEPLOYED';
 
 export interface SBOMTool {
   id?: string;

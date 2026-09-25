@@ -178,6 +178,48 @@ describe('activeSbom', () => {
   it('returns undefined when there are no SBOMs', () => {
     expect(activeSbom(product({ sboms: [] }))).toBeUndefined();
   });
+
+  it('prefers DEPLOYED over SOURCE regardless of array order (M1e)', () => {
+    const source = sbom({ id: 'source', active: true, lifecycleStage: 'SOURCE' });
+    const deployed = sbom({ id: 'deployed', active: true, lifecycleStage: 'DEPLOYED' });
+
+    expect(activeSbom(product({ sboms: [source, deployed] }))?.id).toBe('deployed');
+    expect(activeSbom(product({ sboms: [deployed, source] }))?.id).toBe('deployed');
+  });
+
+  it('ranks BUILD and ANALYZED between SOURCE and DEPLOYED', () => {
+    const source = sbom({ id: 'source', active: true, lifecycleStage: 'SOURCE' });
+    const build = sbom({ id: 'build', active: true, lifecycleStage: 'BUILD' });
+    const analyzed = sbom({ id: 'analyzed', active: true, lifecycleStage: 'ANALYZED' });
+
+    expect(activeSbom(product({ sboms: [source, build] }))?.id).toBe('build');
+    expect(activeSbom(product({ sboms: [build, analyzed] }))?.id).toBe('analyzed');
+  });
+
+  it('ranks any staged SBOM above an unstaged one', () => {
+    const unstaged = sbom({ id: 'unstaged', active: true, lifecycleStage: undefined });
+    const source = sbom({ id: 'source', active: true, lifecycleStage: 'SOURCE' });
+
+    expect(activeSbom(product({ sboms: [unstaged, source] }))?.id).toBe('source');
+  });
+
+  it('ties on the same stage go to the newest uploadDate', () => {
+    const older = sbom({
+      id: 'older',
+      active: true,
+      lifecycleStage: 'BUILD',
+      uploadDate: '2026-01-01T00:00:00',
+    });
+    const newer = sbom({
+      id: 'newer',
+      active: true,
+      lifecycleStage: 'BUILD',
+      uploadDate: '2026-06-01T00:00:00',
+    });
+
+    expect(activeSbom(product({ sboms: [older, newer] }))?.id).toBe('newer');
+    expect(activeSbom(product({ sboms: [newer, older] }))?.id).toBe('newer');
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -244,6 +286,37 @@ describe('deriveProduct', () => {
     expect(derived.actionableCount).toBe(0);
     expect(derived.activeSbomStatusDisplay).toBe('Unknown');
     expect(derived.lastScanned).toBeUndefined();
+  });
+
+  it('M1e: a non-bucket product with active SOURCE+BUILD sums counters across both', () => {
+    const source = sbom({
+      id: 'source',
+      active: true,
+      lifecycleStage: 'SOURCE',
+      status: 'SCANNED',
+      lastScannedAt: '2026-03-01T00:00:00',
+      components: [component('c1', [alert('a1', { kev: kev('CVE-1') })])],
+    });
+    const build = sbom({
+      id: 'build',
+      active: true,
+      lifecycleStage: 'BUILD',
+      status: 'PROCESSING',
+      lastScannedAt: '2026-04-01T00:00:00',
+      components: [component('c2', [alert('a2', { epss: epss(0.5) }), alert('a3', {})])],
+    });
+
+    const derived = deriveProduct(product({ sboms: [source, build] }));
+
+    // The headline "the" active SBOM is deterministically the more downstream one (BUILD).
+    expect(derived.activeSbomId).toBe('build');
+    // Both stages' alerts count — each attaches to exactly one component row, no double counting.
+    expect(derived.vulnerabilityCount).toBe(3);
+    expect(derived.actionableCount).toBe(2);
+    // BUILD is still PROCESSING, so the aggregate status is Scanning even though SOURCE is done.
+    expect(derived.activeSbomStatusDisplay).toBe('Scanning');
+    // The most recent lastScannedAt across every active stage.
+    expect(derived.lastScanned).toBe('2026-04-01T00:00:00');
   });
 });
 

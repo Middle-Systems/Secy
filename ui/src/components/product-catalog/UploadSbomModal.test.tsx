@@ -191,4 +191,40 @@ describe('UploadSbomModal', () => {
       );
     });
   });
+
+  it('sends no stage param by default', async () => {
+    renderWithProviders(<UploadSbomModal product={PRODUCT} onOpenChange={vi.fn()} />);
+
+    await selectFile(cycloneDxFile());
+    await userEvent.click(screen.getByRole('button', { name: 'Start Analysis' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/sboms'));
+      expect(call).toBeDefined();
+      expect(String(call![0])).not.toContain('stage=');
+    });
+  });
+
+  it(
+    'sends the selected lifecycle stage in the upload query',
+    async () => {
+      renderWithProviders(<UploadSbomModal product={PRODUCT} onOpenChange={vi.fn()} />);
+
+      await selectFile(cycloneDxFile());
+      await userEvent.click(screen.getByRole('combobox', { name: 'Lifecycle stage' }));
+      await userEvent.click(await screen.findByRole('option', { name: 'Build' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Start Analysis' }));
+
+      await waitFor(() => {
+        const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/sboms'));
+        expect(call).toBeDefined();
+        expect(String(call![0])).toContain('stage=BUILD');
+      });
+    },
+    // Generous: Radix's Select popover involves real (unmocked) timers under userEvent's pointer
+    // simulation, and this sandbox's shared, resource-constrained devcontainer measurably slows that
+    // down (~40s observed here vs. low hundreds of ms for every other test in this file) without it
+    // being a genuine hang — see the default 5s timeout is what actually times out, not a stuck test.
+    90000,
+  );
 });

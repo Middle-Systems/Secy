@@ -2,6 +2,7 @@ package net.jdesive.secy.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.events.SbomUploadedEvent;
 import net.jdesive.secy.model.component.ComponentIdentityAssessor;
 import net.jdesive.secy.model.component.NormalizedComponent;
@@ -62,6 +63,7 @@ import java.util.UUID;
  * key {@code CorrelationService} upserts alerts on. So the same dependency in v1 and v2 has two rows
  * and one identity, and its alerts follow the identity.
  */
+@Slf4j
 @Service
 public class SBOMService {
 
@@ -109,13 +111,43 @@ public class SBOMService {
     /**
      * The same placeholder creation, additionally recording M1c provenance: which channel the upload
      * came through and, for a connector sync, which {@link SourceConnector}. The 5-arg overload above
-     * delegates here with both null, which is exactly what a pre-M1c row would have — never write
-     * {@code lifecycleStage} here, it is M1e's field to populate.
+     * delegates here with both null. Delegates to the 8-arg overload with a null {@code explicitStage}
+     * — the document's own declared stage (if any) still applies; see that overload.
      */
     @Transactional
     public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
                                   String rawBody, UUID jobId, SbomIngestionSource ingestionSource,
                                   UUID sourceConnectorId) {
+        return createPlaceholder(product, document, productVersion, rawBody, jobId, ingestionSource,
+                sourceConnectorId, null);
+    }
+
+    /**
+     * The same placeholder creation, additionally resolving and recording the M1e lifecycle stage.
+     *
+     * <h2>Stage resolution</h2>
+     *
+     * <p>{@code explicitStage} — the {@code ?stage=} API param, or {@link SbomLifecycleStage#SOURCE}
+     * for a GitHub connector sync — wins when given. Otherwise the document's own declared stage
+     * (CycloneDX {@code metadata.lifecycles[]}; always null for SPDX) is used. If both are given and
+     * disagree, the explicit one wins and the disagreement is logged — an operator naming
+     * {@code ?stage=build} on a document that itself declares {@code pre-build} almost certainly knows
+     * something the document's metadata does not.
+     *
+     * <h2>The active-SBOM slot (M1e)</h2>
+     *
+     * <p>The active slot key is {@code (product, lifecycleStage)}, not {@code product} alone — see
+     * {@link #deactivateSupersededSboms}. Skipped entirely for the Unassigned bucket (M1a): its SBOMs
+     * are unrelated documents that happened to arrive untagged, not versions of one another or of each
+     * other's stage, so there is no "old version" to deactivate — every bucket SBOM stays active,
+     * whatever stage it records. See {@code Product}'s class Javadoc and
+     * {@code CorrelationService}/{@code CompromiseDetectionService}, which correlate a bucket SBOM at
+     * its own scope rather than the whole-product scope this deactivation exists to serve.
+     */
+    @Transactional
+    public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
+                                  String rawBody, UUID jobId, SbomIngestionSource ingestionSource,
+                                  UUID sourceConnectorId, SbomLifecycleStage explicitStage) {
         SBOM sbom = new SBOM();
         sbom.setFormat(document.format().label());
         sbom.setSpecVersion(truncate(document.specVersion(), MAX_SHORT_TEXT));
@@ -129,17 +161,19 @@ public class SBOMService {
         sbom.setIngestionSource(ingestionSource);
         sbom.setSourceConnectorId(sourceConnectorId);
 
-        // Versioning logic: the new upload becomes the active SBOM immediately, matching the old
-        // synchronous behaviour — the upload is "the current one" from the moment it is accepted,
-        // even while its components are still being persisted.
-        //
-        // Skipped for the Unassigned bucket (M1a): its SBOMs are unrelated documents that happened
-        // to arrive untagged, not versions of one another, so there is no "old version" to
-        // deactivate — every bucket SBOM stays active. See Product's class Javadoc and
-        // CorrelationService/CompromiseDetectionService, which correlate a bucket SBOM at its own
-        // scope rather than the whole-product scope this deactivation exists to serve.
+        SbomLifecycleStage documentStage = document.declaredLifecycleStage();
+        SbomLifecycleStage resolved = explicitStage != null ? explicitStage : documentStage;
+        if (explicitStage != null && documentStage != null && explicitStage != documentStage) {
+            log.warn("SBOM upload declares lifecycle stage {} in its document metadata but the "
+                    + "request specified {} — the explicit stage wins", documentStage, explicitStage);
+        }
+        sbom.setLifecycleStage(resolved);
+
+        // The new upload becomes the active SBOM immediately, matching the old synchronous
+        // behaviour — the upload is "the current one" from the moment it is accepted, even while its
+        // components are still being persisted.
         if (!product.isUnassigned()) {
-            deactivateOldSboms(product);
+            deactivateSupersededSboms(product, resolved);
         }
         sbom.setActive(true);
 
@@ -257,10 +291,36 @@ public class SBOMService {
         return sbomParser.parse(root);
     }
 
-    private void deactivateOldSboms(Product product) {
-        // Find current active SBOM for this product and set active = false
-        sbomRepository.findByProductIdAndActiveTrue(product.getId())
-                .ifPresent(old -> old.setActive(false));
+    /**
+     * The M1e active-SBOM slot rule. The active slot key is {@code (product, lifecycleStage)}, not
+     * {@code product} alone: a normal product holds either exactly one active stage-less SBOM (legacy
+     * mode, the pre-M1e behaviour), or at most one active SBOM per stage with no stage-less one
+     * (staged mode) — the two modes never mix.
+     *
+     * <ul>
+     *   <li><b>{@code stage} is non-null (a staged upload):</b> deactivate every active SBOM of the
+     *       product whose stage is {@code stage} OR null. A stage-less SBOM was the pre-M1e "whole
+     *       product" truth; adopting stages supersedes it.</li>
+     *   <li><b>{@code stage} is null (an unstaged upload):</b> deactivate EVERY active SBOM of the
+     *       product, staged or not — exactly the pre-M1e meaning, "this is the product's whole truth
+     *       now".</li>
+     * </ul>
+     *
+     * <p>Called before the new row is saved, so {@code findAllByProductIdAndActiveTrue} never sees it
+     * — every row this touches is an existing, already-persisted one, and it dirty-flushes through the
+     * normal managed-entity mechanism, same as the pre-M1e code.
+     *
+     * <p>Deliberately no DB-level uniqueness constraint enforces this — the Unassigned bucket
+     * legitimately holds many active SBOMs and a partial index cannot see {@code products.unassigned}
+     * — so a race between two concurrent same-stage uploads is possible, exactly as a race on the old
+     * whole-product slot was. Read paths use {@code findFirst...OrderByUploadDateDesc} to tolerate it.
+     */
+    private void deactivateSupersededSboms(Product product, SbomLifecycleStage stage) {
+        for (SBOM old : sbomRepository.findAllByProductIdAndActiveTrue(product.getId())) {
+            if (stage == null || old.getLifecycleStage() == null || old.getLifecycleStage() == stage) {
+                old.setActive(false);
+            }
+        }
     }
 
     /**

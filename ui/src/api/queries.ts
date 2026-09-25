@@ -53,6 +53,7 @@ import type {
   Page,
   PageParams,
   Product,
+  SbomLifecycleStage,
   SourceConnector,
   TriageCommentPayload,
   TriageEvent,
@@ -735,6 +736,8 @@ export interface UploadSbomVariables {
   /** Parsed CycloneDX or SPDX (2.2/2.3 JSON) document. */
   sbom: unknown;
   productVersion?: string;
+  /** M1e: where in the SDLC this upload was captured. Omitted lets the document's own metadata (or nothing) decide. */
+  stage?: SbomLifecycleStage;
 }
 
 /**
@@ -753,8 +756,8 @@ export interface UploadSbomVariables {
 export function useUploadSbom(options?: MutationOverrides<Job, UploadSbomVariables>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ productId, sbom, productVersion = 'Unknown' }: UploadSbomVariables) =>
-      api.post<Job>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion } }),
+    mutationFn: ({ productId, sbom, productVersion = 'Unknown', stage }: UploadSbomVariables) =>
+      api.post<Job>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion, stage } }),
     ...options,
     onSuccess: (...args) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });

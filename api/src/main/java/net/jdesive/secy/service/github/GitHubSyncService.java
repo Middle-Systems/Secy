@@ -9,6 +9,7 @@ import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
 import net.jdesive.secy.persistence.entity.SbomIngestionSource;
+import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 import net.jdesive.secy.persistence.entity.SourceConnector;
 import net.jdesive.secy.service.ProductService;
 import net.jdesive.secy.service.SBOMService;
@@ -102,9 +103,11 @@ public class GitHubSyncService {
                     // method's own INFERRED rows for that product — never a MANUAL link, and never the
                     // Unassigned bucket. See ROADMAP.md's M1b/M2 sections and OwnershipLink's Javadoc.
                     Product product = productService.findOrCreateByName(fullName);
+                    // M1e: GitHub's dependency-graph SBOM is derived from repo manifests/lockfiles —
+                    // the textbook Source SBOM. No backfill of existing rows.
                     SBOM sbom = sbomService.createPlaceholder(
                             product, document, defaultVersion(repo), null, null,
-                            SbomIngestionSource.GITHUB_CONNECTOR, connector.getId());
+                            SbomIngestionSource.GITHUB_CONNECTOR, connector.getId(), SbomLifecycleStage.SOURCE);
                     IngestResult result = sbomService.ingestDocument(sbom, document, progress);
                     componentsTotal += result.itemsProcessed();
                     succeeded++;

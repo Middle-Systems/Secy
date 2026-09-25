@@ -122,6 +122,13 @@ public class CorrelationService {
     private final EnrichmentService enrichmentService;
 
     /**
+     * M1e: what a staged, product-scoped SBOM's match set is actually built from — see that class's
+     * Javadoc for why the plain {@code sbom.getComponents()} loop below is not enough once a product
+     * can hold several simultaneously-active stage SBOMs.
+     */
+    private final SbomCorrelationScope correlationScope;
+
+    /**
      * Phase 6's third promotion path, run over the same components in the same pass.
      *
      * <p>Called from here rather than from {@code SBOMService}/{@code AssetService} because this is
@@ -165,6 +172,24 @@ public class CorrelationService {
      * product at all (only ever a test fixture) gets the same SBOM-scoped treatment, for the same
      * reason: there is no product-wide "truth" to reconcile against.
      *
+     * <h2>M1e: several simultaneously-active stage SBOMs</h2>
+     *
+     * <p>"Last scan wins" above described a world with one active SBOM per product. M1e relaxed that
+     * to one active SBOM per <b>(product, stage)</b>, so for a staged SBOM the match set is not just
+     * this SBOM's own components — see {@link SbomCorrelationScope}. The rule is now <b>most-
+     * downstream current stage wins</b>: when the same component identity appears in more than one
+     * active stage slot, the more downstream stage's row (DEPLOYED over ANALYZED over BUILD over
+     * SOURCE) is what the alert attaches to and what its match confidence is derived from.
+     *
+     * <p><b>Accepted limitation:</b> if Source declares a vulnerable {@code lodash 4.17.20} and
+     * Deployed runs the fixed {@code 4.17.21}, the Deployed row represents that identity and no
+     * vulnerability alert is raised for the Source version — that disagreement surfaces instead as a
+     * {@code VERSION_MISMATCH} lifecycle drift finding (see {@code LifecycleDiffer}) whenever the
+     * adjacent pair exists, not as two competing vulnerability alerts. M1i/M1j may revisit. There is
+     * also a brief transient window where correlating one stage while a sibling stage's new upload is
+     * still {@code QUEUED} (not yet ingested) can briefly auto-resolve alerts that revive once the
+     * sibling's own correlation runs.
+     *
      * <p>Must run in a transaction: the component collection and the alert relations are lazy (this
      * is also why it's safe to call {@code sbom.getProduct().isUnassigned()} here — the lazy
      * {@code Product} proxy initializes within this transaction).
@@ -182,12 +207,17 @@ public class CorrelationService {
                 ? alertRepository.findAllByProductIdForCorrelation(productId)
                 : alertRepository.findAllBySbomIdForCorrelation(sbomId);
 
-        // identity -> the component row of THIS SBOM that carries it, so a carried-forward alert is
-        // re-pointed at current evidence rather than at a superseded version's row.
+        // identity -> the component row that currently carries it, so a carried-forward alert is
+        // re-pointed at current evidence rather than at a superseded version's row. M1e: iterating
+        // sbomsInScope() ascending by downstream rank and using put() means, for an identity that
+        // appears in more than one active stage slot, the most-downstream stage's row wins — see this
+        // method's Javadoc.
         Map<String, SBOMComponent> componentsByIdentity = new LinkedHashMap<>();
-        for (SBOMComponent component : sbom.getComponents()) {
-            if (component != null && component.getId() != null) {
-                componentsByIdentity.put(identityOf(component, component.getId()), component);
+        for (SBOM scoped : correlationScope.sbomsInScope(sbom, productScoped)) {
+            for (SBOMComponent component : scoped.getComponents()) {
+                if (component != null && component.getId() != null) {
+                    componentsByIdentity.put(identityOf(component, component.getId()), component);
+                }
             }
         }
 
