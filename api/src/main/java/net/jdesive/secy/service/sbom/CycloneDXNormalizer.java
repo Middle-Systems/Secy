@@ -1,5 +1,6 @@
 package net.jdesive.secy.service.sbom;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import net.jdesive.secy.model.cbom.CryptoAssets;
 import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
 import net.jdesive.secy.model.component.NormalizedComponent;
@@ -20,6 +21,7 @@ import net.jdesive.secy.persistence.entity.ComponentHash;
 import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 import org.springframework.stereotype.Component;
 
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -75,6 +77,11 @@ public class CycloneDXNormalizer {
                 }
             }
             builder.declaredLifecycleStage(declaredLifecycleStage(metadata.getLifecycles()));
+
+            // M1h: the document's own declared creation time — never sbom.uploadDate (Secy's ingest time).
+            builder.documentTimestamp(metadata.getTimestamp() == null ? null
+                    : java.time.LocalDateTime.ofInstant(metadata.getTimestamp().toInstant(), ZoneId.systemDefault()));
+            builder.authors(authors(metadata));
         }
 
         boolean cbom = CycloneDxSpecVersion.supportsCryptoAssets(file.getSpecVersion());
@@ -91,6 +98,7 @@ public class CycloneDXNormalizer {
             }
         }
         builder.cryptoAssetsIgnoredForSpecVersion(ignoredForSpecVersion);
+        builder.dependencyRelationshipRefs(dependencyRefs(file.getDependencies()));
 
         return builder.build();
     }
@@ -112,7 +120,101 @@ public class CycloneDXNormalizer {
                 .hashes(hashes(cdx))
                 .identifiers(identifiers(cdx))
                 .crypto(crypto)
+                .supplier(organizationName(cdx.getSupplier()))
                 .build();
+    }
+
+    /**
+     * An OrganizationalEntity {@code {name, url[], contact[]}} → its {@code name}, when present and
+     * textual/non-blank. Never throws — a string, an array, or an object with no {@code name} all
+     * return null rather than reject the document. Used for {@code component.supplier} (M1h) and
+     * {@code metadata.manufacturer} (M1h author source).
+     */
+    private static String organizationName(JsonNode n) {
+        if (n == null || !n.isObject()) {
+            return null;
+        }
+        JsonNode name = n.get("name");
+        if (name == null || !name.isTextual()) {
+            return null;
+        }
+        String trimmed = name.asText().trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * {@code metadata.authors[]} (OrganizationalContact entries) plus 1.6 {@code metadata.manufacturer}
+     * (M1h) — who created the SBOM DATA, never the tool. Each {@code authors[]} object entry
+     * contributes its {@code name}, falling back to {@code email}; a bare textual entry (non-standard,
+     * but tolerated) contributes its own text; anything else is skipped. Deduplicated with a
+     * {@code LinkedHashSet}, each entry truncated to 255 — matches {@code SBOMService}'s
+     * {@code MAX_SHORT_TEXT}, applied again defensively here since this is a parse-time helper with no
+     * access to that constant.
+     */
+    private static List<String> authors(CycloneDXMetadata metadata) {
+        Set<String> out = new LinkedHashSet<>();
+        JsonNode authors = metadata.getAuthors();
+        if (authors != null && authors.isArray()) {
+            for (JsonNode entry : authors) {
+                String value = null;
+                if (entry.isObject()) {
+                    JsonNode name = entry.get("name");
+                    if (name != null && name.isTextual() && !name.asText().isBlank()) {
+                        value = name.asText().trim();
+                    } else {
+                        JsonNode email = entry.get("email");
+                        if (email != null && email.isTextual() && !email.asText().isBlank()) {
+                            value = email.asText().trim();
+                        }
+                    }
+                } else if (entry.isTextual() && !entry.asText().isBlank()) {
+                    value = entry.asText().trim();
+                }
+                if (value != null) {
+                    out.add(value.length() > 255 ? value.substring(0, 255) : value);
+                }
+            }
+        }
+        String manufacturer = organizationName(metadata.getManufacturer());
+        if (manufacturer != null) {
+            out.add(manufacturer.length() > 255 ? manufacturer.substring(0, 255) : manufacturer);
+        }
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * Top-level {@code dependencies[]} (M1h) → the set of bom-refs that take part in at least one
+     * declared dependency relationship, for presence-only scoring — see
+     * {@code net.jdesive.secy.service.quality.SbomQualityScorer}. For each {@code {ref, dependsOn[]}}
+     * object entry: {@code ref} is always added (even with an empty/absent {@code dependsOn[]} —
+     * CycloneDX defines {@code {ref:X, dependsOn:[]}} as an explicit "X has no dependencies"
+     * assertion, which NTIA accepts), and every textual element of {@code dependsOn[]} is added too.
+     * Malformed shapes (not an array, entries not objects) degrade to an empty set rather than throw.
+     * CycloneDX 1.6 {@code provides[]} is deliberately ignored.
+     */
+    private static Set<String> dependencyRefs(JsonNode dependencies) {
+        Set<String> out = new LinkedHashSet<>();
+        if (dependencies == null || !dependencies.isArray()) {
+            return out;
+        }
+        for (JsonNode entry : dependencies) {
+            if (entry == null || !entry.isObject()) {
+                continue;
+            }
+            JsonNode ref = entry.get("ref");
+            if (ref != null && ref.isTextual() && !ref.asText().isBlank()) {
+                out.add(ref.asText().trim());
+            }
+            JsonNode dependsOn = entry.get("dependsOn");
+            if (dependsOn != null && dependsOn.isArray()) {
+                for (JsonNode dep : dependsOn) {
+                    if (dep != null && dep.isTextual() && !dep.asText().isBlank()) {
+                        out.add(dep.asText().trim());
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     /**

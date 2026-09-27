@@ -71,7 +71,10 @@ class OpenApiDocsTest {
                 .contains("\"/cbom/assets\"")
                 .contains("\"/cbom/assets/{id}\"")
                 .contains("\"/cbom/quantum-findings\"")
-                .contains("\"/cbom/quantum-findings/{id}\"");
+                .contains("\"/cbom/quantum-findings/{id}\"")
+                // M1h.
+                .contains("\"/sbom-quality\"")
+                .contains("\"/sbom-quality/{id}\"");
 
         assertThat(body)
                 .as("@Tag names")
@@ -87,7 +90,8 @@ class OpenApiDocsTest {
                 .contains("\"Threat\"")
                 .contains("\"Lifecycle drift\"")
                 .contains("\"VEX\"")
-                .contains("\"CBOM\"");
+                .contains("\"CBOM\"")
+                .contains("\"SBOM quality\"");
 
         assertThat(body)
                 .as("the GET /actionable typed union is described to clients — itemType is the "

@@ -48,6 +48,15 @@ public class SBOMComponent implements CorrelatableComponent {
     private String purl;
 
     /**
+     * The organization that supplied this component instance (M1h) — CycloneDX
+     * {@code component.supplier.name}, SPDX {@code PackageSupplier} with its
+     * {@code Organization:}/{@code Person:} prefix stripped. Null when the document declared none.
+     * Feeds {@code SbomQualityScorer}'s {@code SUPPLIER} coverage test.
+     */
+    @Column(name = "supplier_name", length = 255)
+    private String supplierName;
+
+    /**
      * Stable identity of this component within its product, across SBOM versions.
      *
      * <p>The version-less PURL ({@code maven/org.apache.logging.log4j:log4j-core}), or

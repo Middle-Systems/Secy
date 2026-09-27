@@ -53,6 +53,12 @@ import java.util.List;
  *                           {@code cryptographic-asset} and the document's {@code specVersion}
  *                           supports it (see {@code CycloneDxSpecVersion}); null otherwise. SPDX
  *                           never sets this
+ * @param supplier           the organization that supplied this component instance (M1h) — CycloneDX
+ *                           {@code component.supplier.name}, SPDX {@code PackageSupplier} with its
+ *                           {@code Organization:}/{@code Person:} prefix stripped; null when absent or
+ *                           SPDX {@code NOASSERTION}. Deliberately NOT CycloneDX
+ *                           manufacturer/publisher/author, NOT SPDX originator — follows the official
+ *                           NTIA→format mappings and keeps the two formats symmetric
  */
 @Builder
 public record NormalizedComponent(String name,
@@ -66,7 +72,8 @@ public record NormalizedComponent(String name,
                                   String bomRef,
                                   @Singular List<ComponentHashValue> hashes,
                                   @Singular List<Identifier> identifiers,
-                                  NormalizedCryptoAsset crypto) {
+                                  NormalizedCryptoAsset crypto,
+                                  String supplier) {
 
     /** A link the source document carried for a component. */
     public record ExternalReference(String type, String url) {
@@ -110,6 +117,7 @@ public record NormalizedComponent(String name,
         hashes = hashes == null ? List.of() : List.copyOf(hashes);
         identifiers = identifiers == null ? List.of() : List.copyOf(identifiers);
         bomRef = trimToNull(bomRef);
+        supplier = trimToNull(supplier);
 
         // Derived, never supplied: a parser that guessed its own ecosystem could disagree with the
         // one correlation derives from the same PURL, and the mismatch would be invisible.

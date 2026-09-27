@@ -84,6 +84,29 @@ public class SBOM extends TenantOwnedEntity {
     @Column(name = "lifecycle_stage", length = 16)
     private SbomLifecycleStage lifecycleStage;
 
+    /**
+     * The document's own declared creation time (M1h) — CycloneDX {@code metadata.timestamp}, SPDX
+     * {@code creationInfo.created} — never {@link #uploadDate} (Secy's own ingest time). Null when
+     * the document declared none or it was unparseable.
+     */
+    @Column(name = "document_timestamp")
+    private LocalDateTime documentTimestamp;
+
+    /**
+     * Who created the SBOM DATA (M1h), joined {@code "; "} — CycloneDX {@code metadata.authors[]}/
+     * 1.6 {@code metadata.manufacturer}, SPDX {@code Person:}/{@code Organization:} creators. Tools
+     * never count. Null when the document declared none.
+     */
+    @Column(name = "document_authors", length = 1024)
+    private String documentAuthors;
+
+    /**
+     * This document's NTIA minimum-elements completeness score (M1h), or null when it was not
+     * scored (no non-crypto components). See {@code SbomQualityScorer}.
+     */
+    @Embedded
+    private SbomQualityScore quality;
+
     @OneToMany(mappedBy = "sbom", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
     private List<SBOMTool> tools = new ArrayList<>();

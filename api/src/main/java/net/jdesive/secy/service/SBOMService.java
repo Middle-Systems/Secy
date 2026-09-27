@@ -15,6 +15,7 @@ import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.entity.*;
 import net.jdesive.secy.service.cbom.QuantumVulnerabilityClassifier;
+import net.jdesive.secy.service.quality.SbomQualityScorer;
 import net.jdesive.secy.service.sbom.ComponentIdentityService;
 import net.jdesive.secy.service.sbom.SbomParser;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -84,6 +85,9 @@ public class SBOMService {
     /** {@code sbom_component.purl} / {@code sbom_license.license} / {@code sbom_reference.url}. */
     private static final int MAX_PURL = 512;
     private static final int MAX_SHORT_TEXT = 255;
+
+    /** {@code sbom.document_authors} (M1h). */
+    private static final int MAX_DOCUMENT_AUTHORS = 1024;
 
     @Autowired
     public SBOMService(SBOMRepository sbomRepository, ApplicationEventPublisher eventPublisher,
@@ -261,6 +265,15 @@ public class SBOMService {
             sbom.getTools().add(sbomTool);
         }
 
+        // M1h: the document's own declared timestamp/authors, and the NTIA minimum-elements
+        // completeness score — self-contained to this document, so computed inline (M1c Pass A
+        // pattern). Finding reconciliation is a separate after-commit step — see
+        // SbomQualityFindingListener.
+        sbom.setDocumentTimestamp(document.documentTimestamp());
+        sbom.setDocumentAuthors(truncate(document.authors().isEmpty() ? null : String.join("; ", document.authors()),
+                MAX_DOCUMENT_AUTHORS));
+        sbom.setQuality(SbomQualityScorer.score(document));
+
         // Consumed — no reason to keep a (possibly large) copy of the raw upload around.
         sbom.setPendingRawBody(null);
         SBOM saved = sbomRepository.saveAndFlush(sbom);
@@ -367,6 +380,7 @@ public class SBOMService {
         entity.setType(truncate(component.type(), MAX_SHORT_TEXT));
         entity.setBomRef(truncate(component.bomRef(), MAX_SHORT_TEXT));
         entity.setPurl(truncate(component.purl(), MAX_PURL));
+        entity.setSupplierName(truncate(component.supplier(), MAX_SHORT_TEXT));
         entity.setSbom(sbom);
 
         for (String license : component.licenses()) {

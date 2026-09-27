@@ -48,6 +48,14 @@ items: KEV-listed OR EPSS > 0.1.
   but replaces the product's/stage's whole active SBOM like any other upload — no separate
   "supplementary CBOM" slot exists; prefer embedding the CBOM in a real SBOM, a dedicated product, or
   the Unassigned bucket if you need the CBOM and the regular SBOM to coexist.
+  `/sbom-quality` (+ `/{id}`) (M1h — NTIA minimum-elements quality findings per `(product,
+  lifecycle-stage slot)`, or per Unassigned-bucket SBOM; not part of `/actionable`). No new upload
+  endpoint either — every SBOM is scored 0-100 inline at ingest (supplier/name/version/unique-ID/
+  dependency-relationship per-component coverage, plus document-level author/timestamp, equal
+  weight, floor-rounded); the per-document score rides on `GET /products`' `sboms[].quality`, and a
+  finding is raised only when a slot's current SBOM scores below 70. Dependency relationship is
+  checked for PRESENCE only (a component's bom-ref appears in a declared dependency edge) — it does
+  not build or validate the real dependency graph (M1l's job).
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

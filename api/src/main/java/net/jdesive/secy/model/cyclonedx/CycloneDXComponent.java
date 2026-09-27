@@ -45,4 +45,12 @@ public class CycloneDXComponent {
      */
     private JsonNode cryptoProperties;
 
+    /**
+     * {@code component.supplier} (M1h) — an OrganizationalEntity {@code {name, url[], contact[]}}.
+     * Bound as a raw tree, same reasoning as {@link #cryptoProperties}: only {@code name} is ever
+     * read (see {@code CycloneDXNormalizer#organizationName}), so a typed POJO would risk rejecting a
+     * document whose {@code supplier} shape drifts in a field Secy never reads anyway.
+     */
+    private JsonNode supplier;
+
 }

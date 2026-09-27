@@ -1,10 +1,12 @@
 package net.jdesive.secy.service.sbom;
 
+import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.component.SbomFormat;
 import net.jdesive.secy.model.component.SecondaryIdentifiers;
 import net.jdesive.secy.model.spdx.SpdxChecksum;
+import net.jdesive.secy.model.spdx.SpdxCreationInfo;
 import net.jdesive.secy.model.spdx.SpdxDocument;
 import net.jdesive.secy.model.spdx.SpdxExternalRef;
 import net.jdesive.secy.model.spdx.SpdxPackage;
@@ -12,6 +14,10 @@ import net.jdesive.secy.model.spdx.SpdxRelationship;
 import net.jdesive.secy.persistence.entity.ComponentHash;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -43,7 +49,16 @@ import java.util.Set;
  *
  * <p>A package with neither a PURL nor a name is dropped; everything else is emitted, because a
  * package with only a name still correlates through the CPE fallback.
+ *
+ * <h2>M1h: dependency-relationship graph — presence only</h2>
+ *
+ * <p>{@link #dependencyRefs} reads a fixed set of relationship types purely to record which
+ * SPDXIDs take part in <em>at least one</em> declared dependency relationship — for
+ * {@code SbomQualityScorer}'s NTIA completeness check. This is still not a graph traversal: no
+ * edges are stored, no tree is built, nothing here changes the "relationship graph is not
+ * traversed" statement above for correlation purposes.
  */
+@Slf4j
 @Component
 public class SpdxNormalizer {
 
@@ -51,6 +66,16 @@ public class SpdxNormalizer {
     private static final Set<String> NO_VALUE = Set.of("NOASSERTION", "NONE");
 
     private static final String DESCRIBES = "DESCRIBES";
+
+    /**
+     * Relationship types M1h treats as a declared dependency edge, for presence-only scoring. Both
+     * ends of a matching relationship count. {@code DESCRIBES}/{@code DESCRIBED_BY} are deliberately
+     * excluded — they identify the root, not a dependency.
+     */
+    private static final Set<String> DEPENDENCY_RELATIONSHIP_TYPES = Set.of(
+            "DEPENDS_ON", "DEPENDENCY_OF", "DEV_DEPENDENCY_OF", "BUILD_DEPENDENCY_OF", "RUNTIME_DEPENDENCY_OF",
+            "OPTIONAL_DEPENDENCY_OF", "PROVIDED_DEPENDENCY_OF", "TEST_DEPENDENCY_OF", "DEPENDENCY_MANIFEST_OF",
+            "CONTAINS", "CONTAINED_BY", "STATIC_LINK", "DYNAMIC_LINK", "PREREQUISITE_FOR", "HAS_PREREQUISITE");
 
     /**
      * SPDX 2.3 {@code primaryPackagePurpose} → the CycloneDX {@code type} vocabulary the rest of Secy
@@ -113,6 +138,15 @@ public class SpdxNormalizer {
         // TODO(spdx-3): SPDX 2.2/2.3 has no lifecycle-stage equivalent to CycloneDX's
         // metadata.lifecycles[] (M1e) — declaredLifecycleStage stays null (the builder default) for
         // every SPDX document. SPDX 3.x's software_Sbom.sbomType may supply one; out of scope here.
+
+        // M1h: document-declared timestamp/authors, and dependency-relationship presence.
+        SpdxCreationInfo creationInfo = document.getCreationInfo();
+        if (creationInfo != null) {
+            builder.documentTimestamp(timestamp(creationInfo.getCreated()));
+        }
+        builder.authors(authors(document));
+        builder.dependencyRelationshipRefs(dependencyRefs(document));
+
         return builder.build();
     }
 
@@ -169,7 +203,32 @@ public class SpdxNormalizer {
                 .externalReferences(references(pkg))
                 .hashes(hashes(pkg))
                 .identifiers(identifiers(pkg))
+                .supplier(party(pkg.getSupplier()))
                 .build();
+    }
+
+    /**
+     * SPDX {@code PackageSupplier} (M1h) — {@code value()} first (drops {@code NOASSERTION}/
+     * {@code NONE}), then strips a leading {@code Organization:}/{@code Person:} prefix
+     * case-insensitively and trims. Null when absent or a sentinel.
+     */
+    private static String party(String raw) {
+        String withPrefix = value(raw);
+        if (withPrefix == null) {
+            return null;
+        }
+        String stripped = stripPartyPrefix(withPrefix);
+        return stripped == null || stripped.isBlank() ? null : stripped.trim();
+    }
+
+    private static String stripPartyPrefix(String value) {
+        if (value.regionMatches(true, 0, "Organization:", 0, 13)) {
+            return value.substring(13);
+        }
+        if (value.regionMatches(true, 0, "Person:", 0, 7)) {
+            return value.substring(7);
+        }
+        return value;
     }
 
     /**
@@ -331,6 +390,92 @@ public class SpdxNormalizer {
                 version = spec.substring(hyphen + 1);
             }
             out.add(new NormalizedSbom.NormalizedTool(name, version, null, "application"));
+        }
+        return out;
+    }
+
+    /**
+     * {@code creationInfo.creators[]} entries prefixed {@code Person:}/{@code Organization:} (M1h) —
+     * who created the SBOM DATA. {@code Tool:} entries never count as an author, unlike
+     * {@link #tools(SpdxDocument)}, which reads only those.
+     */
+    private static List<String> authors(SpdxDocument document) {
+        if (document.getCreationInfo() == null || document.getCreationInfo().getCreators() == null) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (String creator : document.getCreationInfo().getCreators()) {
+            String trimmed = trim(creator);
+            if (trimmed == null) {
+                continue;
+            }
+            String rest = null;
+            if (trimmed.regionMatches(true, 0, "Person:", 0, 7)) {
+                rest = trimmed.substring(7);
+            } else if (trimmed.regionMatches(true, 0, "Organization:", 0, 13)) {
+                rest = trimmed.substring(13);
+            }
+            String value = trim(rest);
+            if (value != null) {
+                out.add(value.length() > 255 ? value.substring(0, 255) : value);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * SPDX {@code creationInfo.created} (M1h) — the document's own declared creation time. Tolerates
+     * both an offset (RFC 3339, the SPDX-mandated shape) and a bare local date-time; unparseable
+     * degrades to null (logged at DEBUG) rather than failing the upload. A private copy of the same
+     * pattern {@code VexParsing.timestamp} uses, kept local rather than made public just for this one
+     * caller.
+     */
+    private static LocalDateTime timestamp(String raw) {
+        String trimmed = trim(raw);
+        if (trimmed == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(trimmed).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime();
+        } catch (DateTimeParseException offsetFailure) {
+            try {
+                return LocalDateTime.parse(trimmed);
+            } catch (DateTimeParseException localFailure) {
+                log.debug("Unparseable SPDX creationInfo.created: '{}'", raw);
+                return null;
+            }
+        }
+    }
+
+    /**
+     * {@code relationships[]} entries whose {@code relationshipType} is one of
+     * {@link #DEPENDENCY_RELATIONSHIP_TYPES} (M1h) — both {@code spdxElementId} and
+     * {@code relatedSpdxElement} are added, trimmed and non-blank. A literal {@code NONE}/
+     * {@code NOASSERTION} target is added harmlessly (it never matches a real SPDXID); its source
+     * package still counts, per NTIA's "known unknowns" guidance. {@code DESCRIBES}/
+     * {@code DESCRIBED_BY} are excluded — they identify the root, not a dependency edge.
+     */
+    private static Set<String> dependencyRefs(SpdxDocument document) {
+        Set<String> out = new LinkedHashSet<>();
+        if (document.getRelationships() == null) {
+            return out;
+        }
+        for (SpdxRelationship relationship : document.getRelationships()) {
+            if (relationship == null || relationship.getRelationshipType() == null) {
+                continue;
+            }
+            String type = relationship.getRelationshipType().trim().toUpperCase(Locale.ROOT);
+            if (!DEPENDENCY_RELATIONSHIP_TYPES.contains(type)) {
+                continue;
+            }
+            String source = trim(relationship.getSpdxElementId());
+            if (source != null) {
+                out.add(source);
+            }
+            String target = trim(relationship.getRelatedSpdxElement());
+            if (target != null) {
+                out.add(target);
+            }
         }
         return out;
     }

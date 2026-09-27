@@ -377,6 +377,55 @@ design doc requires 1.6 specifically for this.
 (supplier, name, version, unique ID, dependency relationships, author, timestamp). A low score
 becomes its own finding category, surfaced per product.
 
+**Status: SHIPPED.**
+
+- **What shipped.** Every ingested SBOM is scored 0-100 against the seven NTIA minimum elements,
+  computed inline in `SBOMService.ingestDocument` (`SbomQualityScorer`, pure/static, M1c's Pass A
+  pattern — self-contained to the one document, no cross-SBOM dependency). Five are per-component
+  coverage percentages over the document's non-crypto, root-excluded population (empty population —
+  including a standalone CBOM — means "not scored", `quality: null`, not a score of zero): supplier,
+  component name, component version, unique identifier (PURL/CPE/SWID/hash), and dependency
+  relationship. Two are document-level all-or-nothing: author (tools never count) and the document's
+  own declared timestamp (never `sbom.uploadDate`). All seven are equal-weight, exact-integer floored
+  arithmetic — 100 means fully complete, never a rounded-up near-miss. New parsing added to support
+  this, `JsonNode`-bound like M1g's `cryptoProperties` (a typed POJO would risk turning an
+  already-accepted document into a 400): CycloneDX `component.supplier`, `metadata.authors[]`, 1.6
+  `metadata.manufacturer` (1.5's `metadata.manufacture` and either format's product-supplier field are
+  deliberately NOT read as an SBOM-author source), and top-level `dependencies[]`; SPDX's existing
+  `PackageSupplier` binding is now read, plus `Person:`/`Organization:` `creationInfo.creators[]`
+  entries and a fixed allowlist of dependency-style `relationships[].relationshipType`s (excluding
+  `DESCRIBES`/`DESCRIBED_BY`, which identify the root, not an edge). The score is stored as an
+  `@Embeddable` on `sbom` (migration `026`, every column a wrapper type so an unscored SBOM's row
+  stays insertable), so `GET /products`' `sboms[].quality` carries it automatically, alongside a new
+  `supplierName` on every component and `documentTimestamp`/`documentAuthors` on every SBOM. A score
+  below 70 (`SbomQualityScorer.FINDING_THRESHOLD`, a constant — the test `application.properties`
+  replaces rather than merges with the main one, so a `@ConfigurationProperties` field would need
+  restating there; M1i is expected to make this tenant-configurable) becomes an
+  `sbom_quality_finding` row, reconciled by `SbomQualityFindingService` from the same
+  `SbomUploadedEvent` after-commit listener pattern as M1e/M1g. **Finding identity is the SLOT — 
+  `(product_id, lifecycle_stage)`, null stage the legacy unstaged slot — or `scope_sbom_id` for the
+  Unassigned bucket, one row per bucket SBOM — never the SBOM id**, so a re-upload of an equally-poor
+  document revives the same row instead of losing triage continuity to a resolve/recreate cycle; an
+  improved re-upload auto-resolves it, and superseded stage slots (an unstaged upload superseding
+  every staged SBOM, or vice versa) are swept auto-resolved in the same reconcile pass. Unlike
+  M1e/M1g, there is no cross-SBOM union or diff here — the candidate is always exactly the one SBOM's
+  own score; the only other SBOMs ever read are the product's active-slot set, solely to sweep
+  superseded slots. Read-only API: `GET /sbom-quality[/{id}]` — not part of `GET /actionable` (no
+  KEV/EPSS/CVSS to rank it by).
+- **Dependency relationship is checked for PRESENCE only.** `dependencyRelationshipRefs` records
+  which bom-refs/SPDXIDs take part in at least one declared dependency relationship — it does
+  **not** build or validate the dependency graph. That is explicitly M1l's job; this milestone never
+  traverses edges, only checks whether a component's own bom-ref appears in the declared set (a
+  component with no bom-ref automatically fails this element).
+- **Not done, deliberately.** A manual rescore/re-reconcile endpoint; backfilling a score onto
+  pre-M1h SBOMs (their raw bodies are already gone by the time this shipped — `pendingRawBody` is
+  cleared at ingest); nested `components[].components[]` (existing parser limitation, all formats);
+  SPDX `files[]`/`snippets[]`; CycloneDX XML/SPDX 3 dependency and author/supplier equivalents
+  (`TODO(spdx-3)`); tenant-configurable weights/threshold (M1i); triage/severity and `/actionable`
+  integration (M1j/M1i); UI (M1k); lineage finding nodes (M1j); NTIA's non-field "practices and
+  processes" guidance; newer CISA fields (tool name, generation context, license, hash-as-a-separate-
+  element).
+
 **M1i — Scoring engine rework.** Scores exist at three levels — finding, asset, product — with
 asset/product rolling up from their findings. Finding-score inputs: base CVSS severity,
 exploitation signals (KEV, EPSS — already computed by the existing funnel), lifecycle presence

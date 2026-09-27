@@ -4,7 +4,9 @@ import lombok.Builder;
 import lombok.Singular;
 import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A whole SBOM document, normalised — the only thing {@code SBOMService} accepts.
@@ -27,6 +29,21 @@ import java.util.List;
  *                             this document declared whose {@code cryptoProperties} were skipped
  *                             because {@code specVersion} is below the 1.6 floor — the component
  *                             itself still normalizes as a plain row. Always 0 for SPDX.
+ * @param documentTimestamp    (M1h) the document's own declared creation time — CycloneDX
+ *                             {@code metadata.timestamp}, SPDX {@code creationInfo.created} —
+ *                             converted to system-default-zone {@link LocalDateTime}. Null when
+ *                             absent or unparseable; never {@code sbom.uploadDate} (Secy's own ingest
+ *                             time)
+ * @param authors              (M1h) who created the SBOM DATA, never the tool that generated the
+ *                             document — CycloneDX {@code metadata.authors[].name}/{@code .email},
+ *                             plus 1.6 {@code metadata.manufacturer.name}; SPDX
+ *                             {@code creationInfo.creators[]} entries prefixed {@code Person:}/
+ *                             {@code Organization:} with the prefix stripped. Deduplicated, document
+ *                             order
+ * @param dependencyRelationshipRefs (M1h) the bom-refs/SPDXIDs that take part in at least one
+ *                             declared dependency relationship. <b>Presence only, not a graph</b> —
+ *                             M1l will replace this with a real edge list; see
+ *                             {@code SbomQualityScorer}
  */
 @Builder
 public record NormalizedSbom(SbomFormat format,
@@ -36,7 +53,10 @@ public record NormalizedSbom(SbomFormat format,
                              @Singular List<NormalizedComponent> components,
                              @Singular List<NormalizedTool> tools,
                              SbomLifecycleStage declaredLifecycleStage,
-                             int cryptoAssetsIgnoredForSpecVersion) {
+                             int cryptoAssetsIgnoredForSpecVersion,
+                             LocalDateTime documentTimestamp,
+                             @Singular List<String> authors,
+                             @Singular Set<String> dependencyRelationshipRefs) {
 
     /** An SBOM generator. CycloneDX {@code metadata.tools}, SPDX {@code creationInfo.creators}. */
     public record NormalizedTool(String name, String version, String group, String type) {
@@ -45,6 +65,8 @@ public record NormalizedSbom(SbomFormat format,
     public NormalizedSbom {
         components = components == null ? List.of() : List.copyOf(components);
         tools = tools == null ? List.of() : List.copyOf(tools);
+        authors = authors == null ? List.of() : List.copyOf(authors);
+        dependencyRelationshipRefs = dependencyRelationshipRefs == null ? Set.of() : Set.copyOf(dependencyRelationshipRefs);
     }
 
     /**
