@@ -64,6 +64,17 @@ items: KEV-listed OR EPSS > 0.1.
   (the active `ScoringWeights`), `POST /risk-score/rescore` (queues the singleton `RISK_RESCORE` job —
   backfill/model-version bumps; no enrichment side effects). The score never gates `actionable`/
   `actionableReason`, and is null on a compromise row (never scored) or a not-yet-scored alert.
+  `GET /findings` (+ `/types`, `/{type}/{id}`) (M1j — Finding & Action-item model): a read-model typed
+  union over the five existing finding tables — vulnerability/compromise/lifecycle-drift/quantum-
+  vulnerable/sbom-quality, plus a `PROVENANCE` stub with no data until M4 — never a new table, never
+  touching `/actionable`; shows NOT_AFFECTED/RESOLVED rows with their derived `status` instead of
+  hiding them. `/action-items` (+ `/{id}`, `PATCH /{id}`, `POST /{id}/findings`,
+  `DELETE /{id}/findings/{type}/{findingId}`, `POST /{id}/comments`, `GET /{id}/history`): the
+  concrete remediation task over one or more findings, scoped to exactly one product or asset
+  (derived from its findings, never client-supplied); status machine OPEN/IN_PROGRESS/RISK_ACCEPTED/
+  RESOLVED with derived NOT_AFFECTED (all linked active findings VEX not-affected), auto-reopen (a
+  resolved item's finding reappears) and risk-acceptance expiry, all computed on read, never a cron
+  job. `TriageState` is unchanged and never written by any of this.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

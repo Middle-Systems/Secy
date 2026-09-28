@@ -61,11 +61,15 @@ import java.util.UUID;
  *
  * <h2>What is deliberately NOT here</h2>
  *
- * <p>No {@code triage_state}/{@code assignee_id}/{@code snoozed_until}/severity band — those are
- * M1j (triage consolidation <b>and</b> scoring) territory. M1i (ROADMAP.md — "Scoring engine rework")
- * deliberately does not score this finding type — its inputs are all vulnerability-shaped and none
- * apply here. Not surfaced on {@code GET /actionable} either — no KEV/EPSS/CVSS to rank it by, same
- * reasoning as {@code LifecycleDriftController}/{@code CbomController}.
+ * <p>Still no {@code triage_state}/{@code assignee_id}/{@code snoozed_until}/severity band on this
+ * table — same M1j (ROADMAP.md — "Finding &amp; Action-item model") satellite resolution as
+ * {@link QuantumVulnerabilityFinding}: resolved via
+ * {@code net.jdesive.secy.service.finding.FindingResolver} into a {@code ResolvedFinding}, triaged/
+ * grouped only through the separate {@code action_item}/{@code action_item_finding} tables, never by
+ * a column added here. Scoring is still not done for this finding type and, as of M1j, is
+ * <b>unowned</b> — no milestone currently promises it. Not surfaced on {@code GET /actionable}
+ * either — no KEV/EPSS/CVSS to rank it by, same reasoning as
+ * {@code LifecycleDriftController}/{@code CbomController}.
  */
 @Getter
 @Setter

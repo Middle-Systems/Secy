@@ -54,7 +54,7 @@ disable toggles and score-snapshot semantics.
 | Products | Tag-driven, tag key configurable per tenant — **default `secy:product`, locked in M1a**. Untagged assets land in "Unassigned". Manual product assignment at upload time stays available until connectors exist. |
 | Component identity | PURL is the primary key; CPE, SWID, and content hashes are secondary identifiers. Conflicting identifiers flag a low-confidence link rather than guessing. |
 | VEX precedence | Configurable per tenant; default is tenant statements override vendor statements, conflicts flagged for review. |
-| Risk acceptance approval | **Still open** — the design doc leaves this unresolved (security-engineer approval vs. owner self-accept) and it's a policy call, not an engineering one. Decide before M1j (the Finding/Action-item status machine) ships the risk-acceptance flow. |
+| Risk acceptance approval | **Resolved (M1j) — schema-only.** Any authenticated user may accept risk (owner self-accept; no role model until M1k). Required: strictly-future expiry + non-blank justification, recorded acceptor/timestamp. Optional: an approver (may equal the acceptor) + note. No approval enforcement, no separation of duties, no max expiry — see M1j's status note. |
 | Test fixtures | Synthetic fixtures, extending the existing `api/src/test/resources/correlation/` golden-set pattern already used for correlation precision/recall testing — repeatable, no anonymized-real-SBOM sourcing problem. |
 | Capacity | Unchanged — solo + Claude sessions, milestone-paced, no hard date. |
 
@@ -113,7 +113,9 @@ original 10 are now closed):
    IAM/workload-identity model; no Kubernetes or registry connector; no ownership inference.
 9. One role (ADMIN) — no leadership/security-engineer/software-engineer view split.
 10. `TriageState` doesn't have risk-acceptance-with-expiry or a VEX-backed not-affected status,
-    and doesn't auto-reopen when a resolved component reappears.
+    and doesn't auto-reopen when a resolved component reappears. **(Closed by M1j — via the new
+    `ActionItem`/`RemediationStatusDeriver` satellite, not by extending `TriageState` itself,
+    which stays exactly as it was.)**
 11. No Postgres row-level security, no per-tenant secret storage, no SSO, no audit log.
 12. No Helm chart for self-hosted multi-tenant-capable deployment.
 
@@ -520,6 +522,67 @@ SNOOZED become sub-states of "In progress" or stay as-is alongside the new statu
 acceptance requires resolving the still-open approval-policy question first (see decisions
 table).
 
+**Status: SHIPPED.**
+
+- **What shipped.** A `Finding` read-model — not a table — computed over the five existing finding
+  tables (`VulnerabilityAlert`, `CompromiseFinding`, `LifecycleDriftFinding`,
+  `QuantumVulnerabilityFinding`, `SbomQualityFinding`) by a new `FindingResolver`
+  (`GET /findings`, `/findings/types`, `/findings/{type}/{id}`), plus a `FindingType.PROVENANCE`
+  stub with zero data source until M4. A brand-new `ActionItem` table (migration `028`) — the
+  concrete remediation task, manually created over one or more findings via a new satellite join
+  table `action_item_finding` (one nullable typed column per finding table, generalizing the
+  `triage_event` 014b two-way XOR pattern to five, one action item per finding) — with create/
+  assign(unassign)/attach/detach/comment/history (`action_item_event`, append-only) and the status
+  machine: `OPEN → IN_PROGRESS → RISK_ACCEPTED → RESOLVED`, plus derived-only `NOT_AFFECTED`,
+  auto-reopen and risk-acceptance-expiry, all computed on read by a pure `RemediationStatusDeriver`
+  — no cron job, the same precedent `/actionable`'s snooze-expiry set. Each item shows a computed
+  (never stored) `ActionItemScore` — the MAX risk score of its linked, still-active, non-VEX
+  vulnerability findings, explainable via `topFindingId`, the same "max, explainable" rule M1i's
+  rollups use; compromise/drift/quantum/quality links count toward `findingCountsByType` but never
+  toward the score.
+- **The satellite decision.** `Finding` is a typed-union DTO, not a unified table — the five
+  existing finding tables, their entities and their reconcile services (`CorrelationService`,
+  `CompromiseDetectionService`, `LifecycleDiffService`, `QuantumFindingService`,
+  `SbomQualityFindingService`) are **completely untouched** beyond Javadoc. This generalizes
+  `TriageService.Target`'s existing "switch, don't share an interface" adapter pattern from two
+  tables to five, rather than rewriting any of Phase 1-M1i's substrate — the single biggest reason
+  this milestone shipped without touching `ActionableService`, `/actionable`, or any of M1e/M1g/M1h's
+  reconcile write paths.
+- **`TriageState` kept, mapped, never written through.** `TriageState`/`TriageService`/
+  `PATCH /actionable/*`/`/actionable`'s default hiding are byte-for-byte unchanged. A finding's
+  derived status maps `ACKNOWLEDGED`/unexpired-`SNOOZED` to `IN_PROGRESS` and `FALSE_POSITIVE` to
+  `NOT_AFFECTED` (basis `TRIAGE`, honestly distinguished from a VEX-backed `NOT_AFFECTED`) for
+  display only — no write-through in either direction, ever. Consequence, stated honestly: `/actionable`
+  does not consult `ActionItem` status — a risk-accepted item's alert still appears there today;
+  whether M1k's security-engineer view hides it is M1k's call, not retroactively promised here.
+- **`PROVENANCE` is a pure stub.** No table, no data source, never resolves — `GET /findings/types`
+  reports it `available: false` with a note pointing at M4. Kept in the enum only so the vocabulary
+  matches the design doc's promise honestly instead of silently dropping it.
+- **Narrower interpretations, stated explicitly.** One scope (product XOR asset) per action item,
+  derived from its findings and never client-supplied — a cross-product "upgrade everywhere"
+  campaign is N action items, one per product, not one item spanning products. Grouping is manual
+  only; nothing auto-creates an action item. "Resolved" is verified against the *next* scan, not
+  retroactively — resolving an item while a finding is still present and then having the next scan
+  still observe it is treated as reopen-worthy, which is intentionally slightly stronger than a
+  literal reading of "reappears". VEX-backed `NOT_AFFECTED` exists only for vulnerability findings —
+  compromise/drift/quantum/quality findings have no VEX concept, so their "not fixing this on
+  purpose" path is `RISK_ACCEPTED` with an expiry, not a fabricated not-affected state.
+- **Risk-acceptance approval — resolved schema-only.** Any authenticated user may accept risk
+  (effectively owner self-accept; no role model exists until M1k). Recorded automatically:
+  acceptor + timestamp. Required: a strictly-future expiry and a non-blank justification. Optional:
+  an approver (may equal the acceptor — no separation-of-duties check) and a note. See the decisions
+  table and Open questions below — this was the one item explicitly blocking M1j and is now closed.
+- **Deferred, stated honestly, not silently re-promised.** Non-vulnerability scoring is now
+  **unowned** — M1i skipped it and M1j only surfaces the existing per-vulnerability risk score, it
+  computes nothing new for drift/quantum/quality findings; no milestone currently claims it. Also
+  deferred: enforcing the risk-acceptance approval policy (role/separation-of-duties/max-expiry);
+  M1k's role-based visibility and its "only action items for products/repos they own" filter (the
+  `product_id` + `OwnershipService.productIdsOwnedBy` seam exists, unwired); hiding risk-accepted
+  items from `/actionable`; grouping suggestions and auto-creation; lineage graph Finding/ActionItem
+  nodes (M1d); a materialized `effective_status` column (`GET /action-items` derives, filters and
+  pages in memory — fine at human-created, hundreds-not-millions-per-tenant volume); any UI; GitHub
+  Issues sync (M2); tenant enforcement (Tenancy hardening).
+
 **M1k — Role-based views.** One correlated data model, three views chosen by role:
   - **Leadership**: metrics and charts only (risk trend, findings by severity, MTTR, KEV
     exposure, SBOM-stage coverage per product) — no row-level drill-down by default.
@@ -784,8 +847,9 @@ Carried forward from the design doc rather than silently decided:
   before M1a ships, since it's cheap to change now and expensive once tenants have tagged
   resources against it.~~ **Resolved**: `secy:product` locked in as the default, configurable
   per tenant via `GET`/`PUT /settings/product-tagging` — see M1a's status note.
-- **Risk acceptance approval**: security-engineer approval vs. owner self-accept — genuinely
-  open, decide before M1j builds the risk-acceptance flow.
+- ~~**Risk acceptance approval**: security-engineer approval vs. owner self-accept — genuinely
+  open, decide before M1j builds the risk-acceptance flow.~~ **Resolved**: see M1j's status note —
+  schema-only (acceptor/expiry/justification recorded, optional approver, no enforcement).
 - **Sample fixtures**: recommending synthetic fixtures extending the existing correlation
   golden-set pattern (`api/src/test/resources/correlation/`) — real anonymized SBOMs are the
   alternative if synthetic ones prove too easy to over-fit to.

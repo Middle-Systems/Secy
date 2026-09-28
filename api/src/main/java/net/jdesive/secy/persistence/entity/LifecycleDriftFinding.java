@@ -39,12 +39,17 @@ import java.util.UUID;
  *
  * <h2>What is deliberately NOT here</h2>
  *
- * <p>No {@code triage_state}/{@code assignee_id}/{@code snoozed_until}/{@code severity} — those are
- * M1j (triage consolidation <b>and</b> scoring) territory. M1i (ROADMAP.md — "Scoring engine rework")
- * deliberately does not score this finding type — its inputs are all vulnerability-shaped and none
- * apply here. {@link #stagePair}'s {@link LifecycleStagePair#category()} gives M1j what it will need
- * later. Not surfaced on {@code GET /actionable} either — see {@code LifecycleDriftController}'s
- * Javadoc.
+ * <p>Still no {@code triage_state}/{@code assignee_id}/{@code snoozed_until}/{@code severity} columns
+ * on this table. M1j (ROADMAP.md — "Finding &amp; Action-item model") landed triage consolidation as
+ * a <b>satellite</b>, not as columns here: this row is resolved into a
+ * {@code net.jdesive.secy.service.finding.ResolvedFinding} by
+ * {@code net.jdesive.secy.service.finding.FindingResolver}, and any triage/remediation workflow over
+ * it lives in the separate {@code action_item}/{@code action_item_finding} tables, linked by id, never
+ * by a column added here. Scoring is still not done for this finding type and, as of M1j, is
+ * <b>unowned</b> — no milestone currently promises it (M1i deliberately skipped it; M1j only surfaces
+ * the existing per-vulnerability risk score, it computes nothing new). {@link #stagePair}'s
+ * {@link LifecycleStagePair#category()} is what {@code FindingResolver} uses for its title. Not
+ * surfaced on {@code GET /actionable} either — see {@code LifecycleDriftController}'s Javadoc.
  */
 @Getter
 @Setter
