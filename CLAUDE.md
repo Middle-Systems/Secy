@@ -56,6 +56,14 @@ items: KEV-listed OR EPSS > 0.1.
   finding is raised only when a slot's current SBOM scores below 70. Dependency relationship is
   checked for PRESENCE only (a component's bom-ref appears in a declared dependency edge) — it does
   not build or validate the real dependency graph (M1l's job).
+  `/actionable` (+ `/{id}`) gained a per-row `riskScore`, an `?minScore=` filter and an `?rankBy=EPSS|SCORE`
+  secondary-sort param (M1i — Scoring engine rework; `EPSS` stays the default, `SCORE` is opt-in), plus
+  `riskScoreBreakdown` on the detail response. New: `GET /products/{id}/risk-score` and
+  `GET /assets/{id}/risk-score` (the maximum score among that scope's default `/actionable`
+  vulnerability population, plus `topFindingId`/`compromiseFindingCount`), `GET /risk-score/model`
+  (the active `ScoringWeights`), `POST /risk-score/rescore` (queues the singleton `RISK_RESCORE` job —
+  backfill/model-version bumps; no enrichment side effects). The score never gates `actionable`/
+  `actionableReason`, and is null on a compromise row (never scored) or a not-yet-scored alert.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

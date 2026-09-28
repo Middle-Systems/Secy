@@ -10,8 +10,9 @@ package net.jdesive.secy.persistence.entity;
  * specific vulnerability match was identified, computed at correlation time and dependent on which
  * CVE is in question. {@code IdentityConfidence} is a per-component-<em>instance</em>, CVE-independent
  * judgment computed once at ingestion from the document's own facts — it exists before, and without,
- * any CVE. M1c does not cap or otherwise influence {@code MatchConfidence}; a later phase (M1i) may
- * use this as one scoring input, but nothing here changes how an alert's own confidence is decided.
+ * any CVE. M1c does not cap or otherwise influence {@code MatchConfidence}; M1i deliberately did not
+ * consume it as a scoring input either (see the note below) — nothing here changes how an alert's
+ * own confidence is decided.
  *
  * <ul>
  *   <li>{@link #CORROBORATED} — at least one declared CPE or SWID agrees with the primary identity
@@ -32,8 +33,10 @@ package net.jdesive.secy.persistence.entity;
  * <p>No code may rely on this enum's declaration order (contrast {@link MatchConfidence}, whose
  * order is load-bearing).
  *
- * <p>M1i consumes {@code identity_confidence} as a scoring input; M1c does not cap
- * {@code MatchConfidence} with it.
+ * <p>M1i deliberately did not consume {@code identity_confidence} as a scoring input — it is not in
+ * the roadmap's M1i input list. It is a candidate future input: adding it would mean a new
+ * {@code ScoreInput} plus its own weight row, see {@code net.jdesive.secy.service.scoring.ScoringWeights}.
+ * M1c does not cap {@code MatchConfidence} with it either.
  */
 public enum IdentityConfidence {
     CORROBORATED,

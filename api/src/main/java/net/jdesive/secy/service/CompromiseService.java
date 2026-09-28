@@ -43,7 +43,7 @@ public class CompromiseService {
     /**
      * Sorts below every real {@code iocLastSeen}, so a finding whose feed stated no timestamp lands
      * at the bottom of its confidence band rather than the top of a descending sort — the same
-     * problem, and the same coalesce fix, as {@code ActionableService.NO_EPSS}.
+     * problem, and the same coalesce fix, as {@code ActionableService.NO_SCORE}.
      */
     private static final LocalDateTime NO_IOC_TIMESTAMP = LocalDateTime.of(1970, 1, 1, 0, 0);
 

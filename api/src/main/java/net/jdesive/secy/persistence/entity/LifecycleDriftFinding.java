@@ -40,9 +40,11 @@ import java.util.UUID;
  * <h2>What is deliberately NOT here</h2>
  *
  * <p>No {@code triage_state}/{@code assignee_id}/{@code snoozed_until}/{@code severity} — those are
- * M1j (triage consolidation) and M1i (scoring) territory. {@link #stagePair}'s
- * {@link LifecycleStagePair#category()} gives them what they will need later. Not surfaced on
- * {@code GET /actionable} either — see {@code LifecycleDriftController}'s Javadoc.
+ * M1j (triage consolidation <b>and</b> scoring) territory. M1i (ROADMAP.md — "Scoring engine rework")
+ * deliberately does not score this finding type — its inputs are all vulnerability-shaped and none
+ * apply here. {@link #stagePair}'s {@link LifecycleStagePair#category()} gives M1j what it will need
+ * later. Not surfaced on {@code GET /actionable} either — see {@code LifecycleDriftController}'s
+ * Javadoc.
  */
 @Getter
 @Setter

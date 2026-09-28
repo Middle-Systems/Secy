@@ -195,7 +195,11 @@ public class CorrelationService {
      * Deployed runs the fixed {@code 4.17.21}, the Deployed row represents that identity and no
      * vulnerability alert is raised for the Source version — that disagreement surfaces instead as a
      * {@code VERSION_MISMATCH} lifecycle drift finding (see {@code LifecycleDiffer}) whenever the
-     * adjacent pair exists, not as two competing vulnerability alerts. M1i/M1j may revisit. There is
+     * adjacent pair exists, not as two competing vulnerability alerts. <b>M1i kept this behavior</b>
+     * on review (ROADMAP.md — "Scoring engine rework"): a Deployed fixed version is the more accurate
+     * risk statement, and scoring the Source-side identity too would double-count one real
+     * vulnerability as two. M1j may still revisit this when its {@code Finding} supertype absorbs
+     * both alert kinds. There is
      * also a brief transient window where correlating one stage while a sibling stage's new upload is
      * still {@code QUEUED} (not yet ingested) can briefly auto-resolve alerts that revive once the
      * sibling's own correlation runs.

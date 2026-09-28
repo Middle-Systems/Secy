@@ -21,6 +21,7 @@ import net.jdesive.secy.service.MalwareHashIngestService;
 import net.jdesive.secy.service.NVDService;
 import net.jdesive.secy.service.OsvIngestService;
 import net.jdesive.secy.service.SbomIngestJobService;
+import net.jdesive.secy.service.scoring.RiskScoringService;
 import net.jdesive.secy.service.vex.VexIngestJobService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -95,6 +96,8 @@ public class JobRunner {
 
     private final VexIngestJobService vexIngestJobService;
 
+    private final RiskScoringService riskScoringService;
+
     /**
      * Jobs this instance has dispatched and not yet finished, each mapped to its worker thread's
      * {@link Future} — a local capacity guard (correctness of the claim itself rests on the
@@ -125,7 +128,8 @@ public class JobRunner {
                      MalwareHashIngestService malwareHashIngestService,
                      ConnectorSyncService connectorSyncService,
                      LineageRebuildService lineageRebuildService,
-                     VexIngestJobService vexIngestJobService) {
+                     VexIngestJobService vexIngestJobService,
+                     RiskScoringService riskScoringService) {
         this.jobService = jobService;
         this.kevService = kevService;
         this.epssService = epssService;
@@ -144,6 +148,7 @@ public class JobRunner {
         this.connectorSyncService = connectorSyncService;
         this.lineageRebuildService = lineageRebuildService;
         this.vexIngestJobService = vexIngestJobService;
+        this.riskScoringService = riskScoringService;
     }
 
     /**
@@ -264,6 +269,9 @@ public class JobRunner {
             // looks up which VexDocument by job id. See VexIngestionService.ingestUploadJob /
             // VexDocument.jobId.
             case VEX_UPLOAD -> vexIngestJobService.ingest(id, progress);
+            // A singleton feed pull like LINEAGE_REBUILD -- not per-invocation, no job id lookup
+            // needed. See JobType.RISK_RESCORE's Javadoc.
+            case RISK_RESCORE -> riskScoringService.rescoreAll(progress);
         };
     }
 

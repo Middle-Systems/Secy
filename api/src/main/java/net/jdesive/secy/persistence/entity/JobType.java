@@ -112,6 +112,22 @@ public enum JobType {
      * and excluded from {@code uq_ingestion_job_active_type} by migration {@code 024e}. 10 characters,
      * well within the {@code varchar(32)} column.
      */
-    VEX_UPLOAD
+    VEX_UPLOAD,
+
+    /**
+     * A full rescore of every {@code vulnerability_alert} from its current snapshots (M1i, ROADMAP.md
+     * — "Scoring engine rework") — no enrichment side effects, just {@code RiskScoringService.rescoreAll}
+     * recomputing {@code risk_score}/{@code risk_score_model}/{@code risk_scored_at}. Used for backfill
+     * (pre-M1i rows are NULL until their next enrichment or this job) and for a future weights-model
+     * version bump.
+     *
+     * <p>A singleton feed pull like {@link #LINEAGE_REBUILD} — one rescore at a time — so it
+     * <b>keeps</b> the {@code uq_ingestion_job_active_type} slot; no migration needed, same reasoning
+     * as {@link #LINEAGE_REBUILD}. 12 characters, well within {@code varchar(32)}. Triggered by
+     * {@code POST /risk-score/rescore}. See {@code net.jdesive.secy.service.ReEnrichmentListener},
+     * which excludes this type for the same reason it excludes {@link #LINEAGE_REBUILD}/{@link #VEX_UPLOAD}:
+     * a rescore changes no funnel input at all.
+     */
+    RISK_RESCORE
 
 }

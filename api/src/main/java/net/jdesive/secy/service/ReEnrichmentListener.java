@@ -16,19 +16,23 @@ import org.springframework.stereotype.Component;
  * at {@code actionable = false} until the next SBOM upload. The listener is {@code @Async} so a
  * long re-enrichment never holds up the ingestion worker that fired the event.
  *
- * <p><b>Which feeds trigger it.</b> Everything except {@link JobType#NVD}, {@link JobType#LINEAGE_REBUILD}
- * and {@link JobType#VEX_UPLOAD}. KEV and EPSS both feed the funnel predicate directly; a future
- * exploit-index feed changes {@code exploitMaturity}, and gets re-enrichment for free by virtue of
- * not being excluded here — no edit here required. NVD is excluded because a full CVE pull is the
- * one ingest whose effect on alerts (a refreshed {@code cvssScore} snapshot) does not change
- * whether anything is actionable, and re-enriching the whole alert table on the back of a
- * multi-minute NVD pull is not worth it. {@code LINEAGE_REBUILD} is excluded because a lineage
- * rebuild (M1d) only reads Postgres to write a derived graph index — it changes no alert inputs at
- * all, so re-enriching after one is pure waste. {@code VEX_UPLOAD} is excluded (M1f) for the same
- * reason: a VEX document changes no funnel input at all — {@code actionable}/{@code actionableReason}
- * are untouched by design — and {@code VexIngestionService} already reconciles its own
- * {@code vex_*} columns as part of the job itself, so a further re-enrichment pass would be pure
- * waste (and, if it ran, would do nothing to the columns this feed actually wrote).
+ * <p><b>Which feeds trigger it.</b> Everything except {@link JobType#NVD}, {@link JobType#LINEAGE_REBUILD},
+ * {@link JobType#VEX_UPLOAD} and {@link JobType#RISK_RESCORE}. KEV and EPSS both feed the funnel
+ * predicate directly; a future exploit-index feed changes {@code exploitMaturity}, and gets
+ * re-enrichment for free by virtue of not being excluded here — no edit here required. NVD is
+ * excluded because a full CVE pull is the one ingest whose effect on alerts (a refreshed
+ * {@code cvssScore} snapshot) does not change whether anything is actionable, and re-enriching the
+ * whole alert table on the back of a multi-minute NVD pull is not worth it. {@code LINEAGE_REBUILD}
+ * is excluded because a lineage rebuild (M1d) only reads Postgres to write a derived graph index —
+ * it changes no alert inputs at all, so re-enriching after one is pure waste. {@code VEX_UPLOAD} is
+ * excluded (M1f) for the same reason: a VEX document changes no funnel input at all —
+ * {@code actionable}/{@code actionableReason} are untouched by design — and
+ * {@code VexIngestionService} already reconciles its own {@code vex_*} columns as part of the job
+ * itself, so a further re-enrichment pass would be pure waste (and, if it ran, would do nothing to
+ * the columns this feed actually wrote). {@code RISK_RESCORE} is excluded (M1i) for the same
+ * reason again: a rescore only recomputes {@code risk_score}/{@code risk_score_model}/
+ * {@code risk_scored_at} from snapshots that are already current — it changes no funnel input, so
+ * re-enriching after one would just rescore the same rows a second time for nothing.
  */
 @Slf4j
 @Component
@@ -40,7 +44,8 @@ public class ReEnrichmentListener {
     @Async
     @EventListener
     public void onFeedIngested(FeedIngestedEvent event) {
-        if (event.type() == JobType.NVD || event.type() == JobType.LINEAGE_REBUILD || event.type() == JobType.VEX_UPLOAD) {
+        if (event.type() == JobType.NVD || event.type() == JobType.LINEAGE_REBUILD
+                || event.type() == JobType.VEX_UPLOAD || event.type() == JobType.RISK_RESCORE) {
             return;
         }
         try {

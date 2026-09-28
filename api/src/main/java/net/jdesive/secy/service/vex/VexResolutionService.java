@@ -16,6 +16,7 @@ import net.jdesive.secy.persistence.entity.VexPrecedencePolicy;
 import net.jdesive.secy.persistence.entity.VexStatement;
 import net.jdesive.secy.persistence.entity.VexStatus;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
+import net.jdesive.secy.service.scoring.RiskScoringService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,6 +57,9 @@ public class VexResolutionService {
     private final VexPrecedenceConfigRepository vexPrecedenceConfigRepository;
 
     private final VulnerabilityAlertRepository alertRepository;
+
+    /** M1i: rescores an alert whose VEX snapshot just changed — see {@link #writeResolution}. */
+    private final RiskScoringService riskScoringService;
 
     /** A summary of one reconciliation pass — how many alerts were looked at, and how many changed. */
     public record VexReconcileSummary(int alertsEvaluated, int alertsChanged) {
@@ -267,7 +271,13 @@ public class VexResolutionService {
         return new VexResolver.AlertTarget(alert.getVulnerability().getId(), identityKey, version, productId);
     }
 
-    /** Writes the four snapshot fields; bumps {@code vexUpdatedAt} only when something actually changed. */
+    /**
+     * Writes the four snapshot fields; bumps {@code vexUpdatedAt} only when something actually
+     * changed. M1i: also rescores the alert when it changed, so {@code riskScore} picks up the new
+     * VEX multiplier (e.g. a fresh {@code NOT_AFFECTED} zeroing it) without waiting for the next
+     * enrichment pass — never when nothing changed, which keeps the fast path (no active statements)
+     * exactly as query-free as it was before M1i.
+     */
     private boolean writeResolution(VulnerabilityAlert alert, VexResolver.VexResolution resolution) {
         VexStatus newStatus = resolution.status();
         VexJustification newJustification = resolution.justification();
@@ -285,6 +295,7 @@ public class VexResolutionService {
         alert.setVexConflict(newConflict);
         if (changed) {
             alert.setVexUpdatedAt(LocalDateTime.now());
+            riskScoringService.apply(alert);
         }
         return changed;
     }

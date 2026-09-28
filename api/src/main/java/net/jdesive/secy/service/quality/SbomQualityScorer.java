@@ -79,7 +79,9 @@ public final class SbomQualityScorer {
      * A finding is raised when the score is strictly below this. A constant, not a
      * {@code @ConfigurationProperties} field, because the test {@code application.properties}
      * <b>replaces</b> the main one rather than merging with it — a property here would need
-     * restating there too. M1i is expected to make this tenant-configurable later.
+     * restating there too. Future expansion (tenant-configurable scoring) may make this
+     * tenant-configurable later, the same way M1i's {@code ScoringWeightsProvider} is the seam for
+     * per-tenant risk-scoring weights.
      */
     public static final int FINDING_THRESHOLD = 70;
 

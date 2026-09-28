@@ -123,6 +123,8 @@ import java.util.UUID;
  * @param vexConflict          true when authors disagree in the winning precedence tier — nothing
  *                             applies, flagged for review. Always false on a compromise row
  * @param vexStatementId       the {@code VexStatement} that won resolution, or null
+ * @param riskScore            M1i per-finding risk score 0-100; null on a compromise row (never
+ *                             scored) and on a not-yet-scored alert. Breakdown: GET /actionable/{id}
  */
 public record ActionableItemResponse(
         UUID id,
@@ -166,5 +168,6 @@ public record ActionableItemResponse(
         VexStatus vexStatus,
         VexJustification vexJustification,
         boolean vexConflict,
-        UUID vexStatementId) {
+        UUID vexStatementId,
+        Double riskScore) {
 }

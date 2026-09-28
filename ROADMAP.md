@@ -434,6 +434,79 @@ transitive, from M1l), fix availability (already tracked as `fixState`). Every f
 per-input breakdown of how each signal moved the score. Weights live in one place so they can
 become tenant-configurable later (future-expansion item, not M1 scope).
 
+**Status: SHIPPED.**
+
+- **What shipped.** A pure, additive, non-gating 0-100 risk score (`RiskScorer`, no Spring/JPA, same
+  pure-scorer pattern as M1c/M1h) computed per `VulnerabilityAlert` from eight `ScoreInput`s applied
+  in a fixed order — `CVSS_BASE` (score, falling back to a severity-band value, falling back to a
+  medium-representative "unknown is not harmless" default), `KEV` and `EPSS` (additive points, from
+  the same denormalized snapshots the funnel already reads), `EXPLOIT_MATURITY` (additive, suppressed
+  to zero when KEV-listed to avoid double-counting KEV's implied `IN_THE_WILD`), then four
+  multipliers: `LIFECYCLE_PRESENCE` (M1e's SBOM stage, or `ASSET_OBSERVED` for a scanner-derived
+  finding — only `SOURCE` is discounted, `0.6`; everything else, including "unknown", is neutral
+  `1.0`), `VEX_STATUS` (M1f — `NOT_AFFECTED`/`FIXED` zero the score but keep the breakdown visible),
+  `DEPENDENCY_DEPTH` (see below) and `FIX_AVAILABILITY` (`fixState`, `FIXED` discounted to `0.95`).
+  Arithmetic is exact `BigDecimal`, additive steps clamped to `[0,100]`; the breakdown's per-factor
+  `points` are rounded-checkpoint deltas that always sum to the final score exactly, regardless of
+  rounding along the way. Weights live in one Java record, `ScoringWeights.DEFAULT` (model version
+  `m1i.1`), behind `ScoringWeightsProvider.forTenant` — a stub returning the same weights for every
+  tenant today, the seam for tenant-configurable scoring later, same non-`@ConfigurationProperties`
+  reasoning as M1h's `SbomQualityScorer`. The score is stored denormalized on `vulnerability_alert`
+  (`risk_score`/`risk_score_model`/`risk_scored_at`, migration `027`) and written by
+  `RiskScoringService.apply` from four call sites: `EnrichmentService.enrich` (both branches — the
+  cve-null branch clears the score, exactly like every other snapshot it clears), `VexResolutionService
+  .writeResolution` (only when the VEX snapshot actually changed), the new singleton `RISK_RESCORE`
+  job (`POST /risk-score/rescore`, for backfill and future model-version bumps — excluded from
+  `ReEnrichmentListener` for the same "changes no funnel input" reason as `LINEAGE_REBUILD`/
+  `VEX_UPLOAD`), and nowhere else. `CompromiseFinding` and the M1g/M1h/M1e finding types
+  (`QuantumVulnerabilityFinding`, `SbomQualityFinding`, `LifecycleDriftFinding`) are explicitly **not**
+  scored — their inputs are all vulnerability-shaped and none apply; a compromise finding's row is
+  counted separately (`compromiseFindingCount`) and never folded into a rollup's score number.
+  `matchConfidence`/`identityConfidence` and the REJECTED/DISPUTED CVE veto are likewise not inputs —
+  see `IdentityConfidence`'s Javadoc for that one.
+- **The critical discipline held.** `EnrichmentService`'s `actionable`/`actionableReason` computation
+  is untouched line-for-line; scoring runs strictly after it and never feeds back. The default
+  `/actionable` sort stays EPSS-descending (the pinned Phase-1 contract) — the risk score is added
+  only as the first tie-breaker, ahead of `createdAt`; full score-ranking is opt-in via the new
+  `?rankBy=SCORE` (`ActionableRank`), never the default. `GET /actionable` gained `riskScore` per row
+  and `minScore` as a filter (unscored rows excluded, same rule as `minCvss`); `GET /actionable/{id}`
+  gained a `riskScoreBreakdown` (stored snapshot alongside a freshly recomputed one, `current` says
+  whether they still agree — M1f's VEX-block pattern). New read surface: `GET /products/{id}/risk-score`
+  and `GET /assets/{id}/risk-score` (rollup = the **maximum** of the scope's default `/actionable`
+  vulnerability population, explainable via `topFindingId`, never a sum or average — an asset linked
+  to a product never leaks into that product's rollup, the same XOR rule `/actionable`'s own filters
+  already enforce), `GET /risk-score/model` (the active `ScoringWeights`), `POST /risk-score/rescore`.
+  Acceptance criterion pinned by `RiskScoreAcceptanceTest`: a KEV-listed CVE on an identical component
+  scores `92.8` when the finding is `DEPLOYED` and `55.7` when the same CVE is `SOURCE`-only in a
+  different product — correlating Deployed first and Source second (so Source has the *newer*
+  `createdAt`) and still getting Deployed first in the default listing proves score, not recency,
+  drives the order.
+- **The dependency-depth placeholder, and the roadmap's own order inconsistency.** M1i's input list
+  above names "dependency depth (direct vs. transitive, from M1l)" as an input, and the "Suggested
+  order" diagram below places M1i *before* M1l — so M1i cannot literally read a real depth value yet.
+  Resolved with a declared neutral placeholder rather than waiting on M1l: `DependencyDepth`
+  (`DIRECT`/`TRANSITIVE`/`UNKNOWN`) lives in `persistence.entity` (not `service.scoring`) precisely so
+  M1l can `@Enumerated` it onto a real column later without a package move, `RiskScoreInputs.from`
+  hard-codes `UNKNOWN` for every alert today (`// TODO(M1l): read component.getDependencyDepth()`),
+  and `UNKNOWN`'s weight (`1.0`) equals `DIRECT`'s — neutral, not a discount — so nothing in the score
+  changes the day M1l starts supplying real values; only `TRANSITIVE` (`0.9`) will move existing
+  scores, and only downward. The breakdown surfaces this today as `DEPENDENCY_DEPTH` with
+  `available=false` and an explanatory note, so a client can grey it out rather than presenting a
+  fake number as authoritative.
+- **Out of scope, deliberately (M1j's territory).** `LifecycleDriftFinding`, `QuantumVulnerabilityFinding`
+  and `SbomQualityFinding` are not scored (see above) — their Javadoc's old "M1j (triage) and M1i
+  (scoring) territory" notes now read "M1j (triage consolidation **and** scoring)", since M1j's
+  `Finding` supertype is what will eventually absorb this scoring into itself, not the reverse.
+- **The feeds-wiring caveat.** The separate "M1 feeds wiring" roadmap item promises "existing findings
+  keep their score when a feed is toggled" — but `EnrichmentService.reEnrichAll` (run after every
+  KEV/EPSS/EXPLOIT/OSV/CVE_LIST ingest and `SBOM_UPLOAD`) already rescores every existing finding as a
+  side effect of that same pass, via the M1i hook added to `enrich`. M1i does not change that trigger;
+  it only lays down `risk_score_model` as the snapshot seed feeds-wiring will need to revisit when it
+  implements per-feed toggles.
+- **Not done, deliberately.** Tenant-configurable weights (`ScoringWeightsProvider` is a stub);
+  asset/product rollup persistence (computed on read, every time); a real dependency-depth value (M1l);
+  `identityConfidence`/REJECTED-DISPUTED-veto/triage/SSVC as scoring inputs; UI (M1k).
+
 **M1j — Finding & Action-item model.** Broaden the alert model beyond `VulnerabilityAlert` /
 `CompromiseFinding` to a `Finding` supertype covering: vulnerable component, lifecycle drift
 (M1e), quantum-vulnerable algorithm (M1g), failed provenance check (stub until M4), and

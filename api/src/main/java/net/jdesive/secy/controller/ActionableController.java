@@ -10,6 +10,7 @@ import net.jdesive.secy.model.actionable.ActionableDetailResponse;
 import net.jdesive.secy.model.actionable.ActionableFilter;
 import net.jdesive.secy.model.actionable.ActionableItemResponse;
 import net.jdesive.secy.model.actionable.ActionableItemType;
+import net.jdesive.secy.model.actionable.ActionableRank;
 import net.jdesive.secy.model.actionable.AddCommentRequest;
 import net.jdesive.secy.model.actionable.BulkTriagePatchRequest;
 import net.jdesive.secy.model.actionable.TriageEventResponse;
@@ -135,12 +136,19 @@ public class ActionableController {
             @RequestParam(required = false) VexStatus vexStatus,
             @Parameter(description = "M1f: true/false to show only conflicted/non-conflicted rows; omit for "
                     + "both. Excludes every compromise row.")
-            @RequestParam(required = false) Boolean vexConflict) {
+            @RequestParam(required = false) Boolean vexConflict,
+            @Parameter(description = "M1i: risk score (0-100) at or above this; unscored rows are excluded. "
+                    + "Excludes every compromise row, which is never scored.")
+            @RequestParam(required = false) Double minScore,
+            @Parameter(description = "M1i: which vulnerability-tier secondary sort key to use. EPSS (the "
+                    + "default, unchanged since Phase 1) sorts by EPSS descending with the risk score as a "
+                    + "tie-breaker; SCORE swaps the two. The compromise tier is unaffected either way.")
+            @RequestParam(defaultValue = "EPSS") ActionableRank rankBy) {
 
         ActionableFilter filter = new ActionableFilter(
                 productId, assetId, reason, minCvss, state, fixState, minExploitMaturity, matchConfidence,
-                itemType, confidence, vexStatus, vexConflict);
-        return actionableService.findActionable(page, size, filter);
+                itemType, confidence, vexStatus, vexConflict, minScore);
+        return actionableService.findActionable(page, size, filter, rankBy);
     }
 
     @Operation(

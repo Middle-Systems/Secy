@@ -12,6 +12,7 @@ import net.jdesive.secy.persistence.entity.VexJustification;
 import net.jdesive.secy.persistence.entity.VexOrigin;
 import net.jdesive.secy.persistence.entity.VexPrecedencePolicy;
 import net.jdesive.secy.persistence.entity.VexStatus;
+import net.jdesive.secy.model.scoring.RiskScoreBreakdown;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -66,7 +67,15 @@ public record ActionableDetailResponse(
          * endpoint); {@code statements} and {@code policy} are freshly computed by
          * {@code VexResolutionService.explain} so a stale precedence-policy read never happens.
          */
-        Vex vex) {
+        Vex vex,
+        /** M1i: the alert's stored risk score — matches the list row exactly. */
+        Double riskScore,
+        /**
+         * M1i: the fresh, full breakdown behind {@link #riskScore} — {@code RiskScoringService.explain}
+         * recomputed against this alert's <em>current</em> snapshots, the same stored-vs-fresh pattern
+         * as {@link #vex}. {@code current} is false when a re-enrichment or rescore is due.
+         */
+        RiskScoreBreakdown riskScoreBreakdown) {
 
     /** The CVE itself, flattened out of {@code Vulnerability}. */
     public record Cve(

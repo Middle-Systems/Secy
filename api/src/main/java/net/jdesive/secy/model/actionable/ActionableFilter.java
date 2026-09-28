@@ -75,6 +75,9 @@ import java.util.UUID;
  *                           set for triage. Excludes every compromise row, which has no VEX status.
  * @param vexConflict        M1f: exact match on {@link net.jdesive.secy.persistence.entity.VulnerabilityAlert#isVexConflict()}
  *                           when non-null. Excludes every compromise row.
+ * @param minScore           M1i: risk score at or above this. Items with no stored score are
+ *                           excluded, the same "unscored is not below the bar" rule {@code minCvss}
+ *                           uses. Excludes every compromise row, which is never scored.
  */
 public record ActionableFilter(
         UUID productId,
@@ -88,7 +91,8 @@ public record ActionableFilter(
         ActionableItemType itemType,
         CompromiseConfidence confidence,
         VexStatus vexStatus,
-        Boolean vexConflict) {
+        Boolean vexConflict,
+        Double minScore) {
 
     /**
      * Whether any vulnerability row could satisfy this filter.
@@ -111,7 +115,8 @@ public record ActionableFilter(
                 && matchConfidence == null
                 && (minExploitMaturity == null || minExploitMaturity == ExploitMaturity.NONE)
                 && vexStatus == null
-                && vexConflict == null;
+                && vexConflict == null
+                && minScore == null;
     }
 
 }

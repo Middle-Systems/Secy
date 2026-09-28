@@ -52,6 +52,16 @@ class ReEnrichmentListenerTest {
     }
 
     @Test
+    void riskRescoreDoesNotTriggerReEnrichment() {
+        EnrichmentService enrichmentService = mock(EnrichmentService.class);
+        ReEnrichmentListener listener = new ReEnrichmentListener(enrichmentService);
+
+        listener.onFeedIngested(new FeedIngestedEvent(UUID.randomUUID(), JobType.RISK_RESCORE));
+
+        verify(enrichmentService, never()).reEnrichAll();
+    }
+
+    @Test
     void kevStillTriggersReEnrichment() {
         EnrichmentService enrichmentService = mock(EnrichmentService.class);
         when(enrichmentService.reEnrichAll()).thenReturn(3);
