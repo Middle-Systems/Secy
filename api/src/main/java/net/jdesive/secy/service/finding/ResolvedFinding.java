@@ -1,5 +1,6 @@
 package net.jdesive.secy.service.finding;
 
+import net.jdesive.secy.model.finding.FindingFix;
 import net.jdesive.secy.persistence.entity.AlertLifecycleState;
 import net.jdesive.secy.persistence.entity.FindingType;
 import net.jdesive.secy.persistence.entity.TriageState;
@@ -42,7 +43,8 @@ public record ResolvedFinding(
         VexJustification vexJustification,
         boolean vexConflict,
         TriageState triageState,
-        LocalDateTime snoozedUntil) {
+        LocalDateTime snoozedUntil,
+        FindingFix fix) {
 
     /** {@code /findings/{type}/{id}}'s sibling per-type detail path — see the M1j plan's table. */
     public String detailPath() {

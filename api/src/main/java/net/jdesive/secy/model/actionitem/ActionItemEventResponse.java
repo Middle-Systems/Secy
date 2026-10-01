@@ -20,6 +20,7 @@ public record ActionItemEventResponse(
         UUID assigneeId,
         LocalDateTime riskAcceptedUntil,
         UUID riskApprovedById,
+        UUID vexDocumentId,
         String comment,
         UUID changedById,
         String changedByName,

@@ -34,7 +34,8 @@ public interface OwnershipLinkRepository extends JpaRepository<OwnershipLink, UU
 
     /**
      * The products a user manually or automatically owns within a tenant — M1k's seam for the
-     * software-engineer "my products" filter. No caller yet in M1b.
+     * software-engineer "my products" filter. First called by
+     * {@code net.jdesive.secy.service.access.OwnedByResolver} (M1k).
      */
     @Query("select distinct l.product.id from OwnershipLink l "
             + "where l.tenantId = :tenantId and l.user.id = :userId and l.product is not null")

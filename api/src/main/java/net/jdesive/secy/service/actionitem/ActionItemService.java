@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.model.actionable.AddCommentRequest;
 import net.jdesive.secy.model.actionitem.ActionItemDetailResponse;
 import net.jdesive.secy.model.actionitem.ActionItemEventResponse;
+import net.jdesive.secy.model.actionitem.ActionItemFixSummary;
 import net.jdesive.secy.model.actionitem.ActionItemPatchRequest;
 import net.jdesive.secy.model.actionitem.ActionItemResponse;
 import net.jdesive.secy.model.actionitem.ActionItemScore;
@@ -13,6 +14,7 @@ import net.jdesive.secy.model.actionitem.CreateActionItemRequest;
 import net.jdesive.secy.model.actionitem.RiskAcceptance;
 import net.jdesive.secy.model.finding.FindingRef;
 import net.jdesive.secy.model.finding.FindingResponse;
+import net.jdesive.secy.model.finding.FixKind;
 import net.jdesive.secy.persistence.ActionItemEventRepository;
 import net.jdesive.secy.persistence.ActionItemFindingRepository;
 import net.jdesive.secy.persistence.ActionItemRepository;
@@ -139,7 +141,13 @@ public class ActionItemService {
 
     @Transactional(readOnly = true)
     public Page<ActionItemResponse> list(int page, int size, UUID productId, UUID assetId,
-                                          UUID assigneeUserId, RemediationStatus status) {
+                                          UUID assigneeUserId, RemediationStatus status,
+                                          Collection<UUID> productIdsIn) {
+        // M1k: a non-null empty productIdsIn ("this user owns nothing") must mean "return nothing",
+        // never "unfiltered" -- an empty SQL IN() is invalid, so short-circuit before building a spec.
+        if (productIdsIn != null && productIdsIn.isEmpty()) {
+            return new PageImpl<>(List.of(), PageRequest.of(page, size), 0);
+        }
         Specification<ActionItem> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (productId != null) {
@@ -150,6 +158,11 @@ public class ActionItemService {
             }
             if (assigneeUserId != null) {
                 predicates.add(cb.equal(root.get("assigneeId"), assigneeUserId));
+            }
+            if (productIdsIn != null) {
+                // Asset-scoped items have a null productId, which never matches an IN() list --
+                // excluded by construction, matching the plan's "ownedBy excludes asset-scoped items".
+                predicates.add(root.get("productId").in(productIdsIn));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -181,6 +194,18 @@ public class ActionItemService {
                     Comparator.reverseOrder())
             .thenComparing(ActionItemResponse::updatedAt, Comparator.reverseOrder())
             .thenComparing(ActionItemResponse::id);
+
+    /**
+     * Every action item in the default tenant, with its effective status computed, unpaged — M1k's
+     * {@code LeadershipMetricsService.mttr} source. In-memory, same "hundreds not millions" volume
+     * assumption {@link #list} already relies on.
+     */
+    @Transactional(readOnly = true)
+    public List<ActionItemResponse> listAllEffective() {
+        Specification<ActionItem> spec = (root, query, cb) ->
+                cb.equal(root.get("tenantId"), net.jdesive.secy.persistence.entity.Tenant.DEFAULT_TENANT_ID);
+        return toResponses(actionItemRepository.findAll(spec));
+    }
 
     @Transactional(readOnly = true)
     public Optional<ActionItemDetailResponse> detail(UUID id) {
@@ -443,7 +468,8 @@ public class ActionItemService {
         item.setRiskApprovalNote(null);
     }
 
-    private ActionItem requireItem(UUID id) {
+    /** Package-visible for {@code ActionItemDisputeService} (M1k). */
+    ActionItem requireItem(UUID id) {
         return actionItemRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Action item not found"));
     }
@@ -496,7 +522,7 @@ public class ActionItemService {
                     f.componentName(), f.componentVersion(), f.componentPurl(),
                     f.lifecycleState(), f.createdAt(), f.lastSeenAt(), f.riskScore(),
                     f.vexStatus(), f.vexJustification(), f.vexConflict(),
-                    f.triageState(), f.snoozedUntil(), fs.status(), fs.basis(), item.getId(), f.detailPath());
+                    f.triageState(), f.snoozedUntil(), fs.status(), fs.basis(), item.getId(), f.detailPath(), f.fix());
         }).toList();
 
         String productName = item.getProductId() == null ? null
@@ -514,6 +540,7 @@ public class ActionItemService {
                 linked.size(), remainingCount(linked), countsByType(links),
                 score(linked),
                 item.getStatus() == RemediationStatus.RISK_ACCEPTED ? riskAcceptance(item, names) : null,
+                fixSummary(linked),
                 findingResponses,
                 item.getCreatedAt(), item.getCreatedById(), item.getUpdatedAt(), item.getResolvedAt());
     }
@@ -570,6 +597,7 @@ public class ActionItemService {
                     linked.size(), remainingCount(linked), countsByType(links),
                     score(linked),
                     item.getStatus() == RemediationStatus.RISK_ACCEPTED ? riskAcceptance(item, names) : null,
+                    fixSummary(linked),
                     item.getCreatedAt(), item.getCreatedById(), item.getUpdatedAt(), item.getResolvedAt()));
         }
         return result;
@@ -581,6 +609,19 @@ public class ActionItemService {
                 .filter(f -> !(f.type() == FindingType.VULNERABILITY
                         && (f.vexStatus() == VexStatus.NOT_AFFECTED || f.vexStatus() == VexStatus.FIXED)))
                 .count();
+    }
+
+    /** Same "remaining" population as {@link #remainingCount} — see {@link ActionItemFixSummary}'s Javadoc. */
+    private static ActionItemFixSummary fixSummary(List<ResolvedFinding> linked) {
+        List<ResolvedFinding> remaining = linked.stream()
+                .filter(f -> f.lifecycleState() == AlertLifecycleState.ACTIVE)
+                .filter(f -> !(f.type() == FindingType.VULNERABILITY
+                        && (f.vexStatus() == VexStatus.NOT_AFFECTED || f.vexStatus() == VexStatus.FIXED)))
+                .toList();
+        long withKnownFix = remaining.stream()
+                .filter(f -> f.fix() != null && f.fix().kind() == FixKind.UPGRADE)
+                .count();
+        return new ActionItemFixSummary(withKnownFix, remaining.size() - withKnownFix);
     }
 
     private static Map<FindingType, Long> countsByType(List<ActionItemFinding> links) {
@@ -632,6 +673,26 @@ public class ActionItemService {
     }
 
     /* ------------------------------------------------------------------ */
+    /* M1k — dispute                                                       */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Appends the {@code DISPUTED} history event for {@code ActionItemDisputeService} — the only
+     * new write this class gained for M1k's dispute flow. Stored status/VEX resolution are untouched
+     * here; the authored VEX document's own ingestion job is what eventually flips the alert's
+     * {@code vexStatus}, which {@code RemediationStatusDeriver} already knows how to turn into a
+     * NOT_AFFECTED effective status.
+     */
+    ActionItemEventResponse recordDispute(ActionItem item, UUID findingId, UUID vexDocumentId,
+                                           String impactStatement, User actingUser) {
+        ActionItemEvent event = appendEvent(item, ActionItemEventType.DISPUTED, null, null, null,
+                FindingType.VULNERABILITY, findingId, null, null, actingUser, impactStatement);
+        event.setVexDocumentId(vexDocumentId);
+        event = actionItemEventRepository.save(event);
+        return toEventResponse(event, userNames(Set.of(actingUser.getId())));
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Events                                                              */
     /* ------------------------------------------------------------------ */
 
@@ -666,7 +727,7 @@ public class ActionItemService {
         return new ActionItemEventResponse(
                 event.getId(), event.getEventType(), event.getFromStatus(), event.getToStatus(), event.getDerivation(),
                 event.getFindingType(), event.getFindingId(), event.getAssigneeId(), event.getRiskAcceptedUntil(),
-                event.getRiskApprovedById(), event.getComment(), event.getChangedById(),
+                event.getRiskApprovedById(), event.getVexDocumentId(), event.getComment(), event.getChangedById(),
                 names.get(event.getChangedById()), event.getCreatedAt());
     }
 

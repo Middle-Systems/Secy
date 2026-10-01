@@ -596,6 +596,112 @@ table).
   views. Tenant admin (connectors, feeds, VEX precedence, role assignment) is a separate
   permission, not a view. Every view links down to the same finding detail page.
 
+**Status: SHIPPED.**
+
+- **What shipped — data model.** Migration `029`: `tenant_membership.tenant_admin` (a separate
+  boolean permission, not a role) and `roles_configured` (false = unconfigured, derives to the
+  default `{SECURITY_ENGINEER}`; true = the stored set is authoritative exactly as written,
+  including empty — "no views, ask your tenant admin"); a satellite `tenant_membership_role`
+  table rather than the originally-planned `@ElementCollection` — Hibernate 6.5.3 rejects
+  `@OnDelete(CASCADE)` on an `@ElementCollection` mapped via `@CollectionTable` outright (demands a
+  direct `@JoinColumn` on the field, then rejects that very annotation as incompatible with
+  `@ElementCollection`), so `TenantMembershipRole` carries a plain, un-related `membershipId`
+  column instead — same M1c/M1e/M1j precedent used throughout this codebase for exactly the same
+  H2-cascade reason, proven by `TenantMembershipRoleCascadeTest`. Also in `029`:
+  `action_item_event.vex_document_id`, linking a new `DISPUTED` event to the authored VEX document
+  it queued.
+- **`TenantAccessService`** (`service/access`) computes effective access on every read, nothing
+  cached: `tenantAdmin = membership.tenantAdmin || globalRole == ADMIN` (global admin always wins
+  and is always reported as the source when both apply — nobody can lock everyone out by
+  revoking the membership flag), and the role/view set per the `rolesConfigured` rule above.
+  `GET /me/access` (stateless — no current-view state anywhere server-side or in the JWT; the UI
+  keeps it in `localStorage`, validated against `views` on load) and `GET /me/owned-products` are
+  open to any authenticated user; `GET /tenant/members` too (same "no admin gate" precedent as
+  `UserController`). `PATCH /tenant/members/{userId}` is **the one deliberate enforcement point in
+  this whole milestone** — gated to an effective tenant admin (403 otherwise, including a null
+  principal) — because it is intrinsic to "roles are assigned per tenant by tenant admins," not a
+  retrofit onto an existing endpoint.
+- **The ownership filter — `ownedBy=me|<uuid>` on `GET /action-items` and `GET /findings` only.**
+  Not role-tied — any authenticated user may ask about anyone's owned-product scope, composable
+  with every other filter. A non-null empty product-id set ("this user owns nothing") returns an
+  empty page immediately, never "unfiltered" — an empty SQL `IN()` is invalid and would otherwise
+  silently mean the opposite of what was asked. Asset-scoped action items and asset-derived
+  findings are always excluded (no product to match against). **This is the view-level answer to
+  the DoD's "a software engineer mapped to one product sees only that product's action items"** —
+  `GET /action-items` with no `ownedBy` stays completely unrestricted, exactly as it always has;
+  real enforcement is Tenancy hardening's job, stated plainly in both code and
+  `SoftwareEngineerViewAcceptanceTest.withoutOwnedByAllItemsRemainVisible_enforcementIsTenancyHardening`.
+- **"Concrete fix"** — `FindingFixAdvisor`, honestly partial: only `VULNERABILITY` gets a
+  data-derived answer ("Upgrade `<component>` from `<version>` to `<fixedVersions>`" off
+  `fixState`/`fixedVersions`/`fixSource`); the other four finding types get fixed, templated
+  guidance per type (there is no "fix" field to derive from for a compromise/drift/quantum/quality
+  finding). Rides on `ResolvedFinding`/`FindingResponse` as `fix`, and on
+  `ActionItemResponse`/`ActionItemDetailResponse` as a computed `fixSummary` (remaining findings
+  with a known fix vs. without, same "remaining" population `remainingFindingCount` already uses).
+- **Dispute = an authored TENANT OpenVEX statement, no new mechanism.** `VexAuthoringService`
+  builds an OpenVEX 0.2.0 JSON document from a validated `(cveId, purl, status, justification?,
+  impactStatement?)` and runs it through M1f's **existing, untouched** ingestion pipeline —
+  `VexDocumentParser.parse` → `JobService.create(VEX_UPLOAD)` → `VexIngestionService
+  .createPlaceholder`. This is what both new surfaces are built on: `POST /vex/statements`
+  (closes the one real security-engineer capability gap M1k's own audit found — there was no way
+  to assert VEX without crafting a document file) and `POST /action-items/{id}/disputes`
+  (`ActionItemDisputeService` adds only the dispute-specific validation — the finding must be a
+  `VULNERABILITY` linked to *this* item, product-scoped with a PURL resolving to its own
+  `identityKey`, else 400 naming `RISK_ACCEPTED` as the right tool for everything else — then
+  authors through the same service). A newer statement from the same (lower-cased email) author on
+  the same target supersedes an older one under VEX's existing author-supersession rule; an
+  opposing TENANT statement from someone else triggers M1f's existing conflict flagging. Takes
+  effect immediately once the queued job finishes — no approval step, matching M1j's
+  risk-acceptance precedent. No ownership/role check on who may dispute (Tenancy hardening's job).
+- **`GET /metrics/leadership`** — aggregates only, no finding rows, only ids for links. Every
+  population is built to agree with an already-pinned endpoint by construction, never a parallel
+  definition: `findingsBySeverity` and `currentRisk` reuse `ActionableService
+  .vulnerabilityPredicate`/`.vulnerabilityRollup` (the exact `/actionable` vulnerability
+  population — deliberately NOT `/stats/dashboard`'s tiles, which have always ignored VEX/triage/
+  lifecycle; `VulnerabilityAlertRepository.countActionableByAsset`'s old `TODO(M1k)` now explains
+  this is the intentional reason the two can disagree, not a bug); `openFindingsByType` reuses
+  `FindingService`'s own arm-count machinery per type, agreeing with `GET /findings?type=X` by
+  construction. `riskTrend.available` is always `false` — `vulnerability_alert.risk_score` is
+  overwritten in place on every rescore, so there is no history to plot without a snapshot table
+  and a scheduler Secy doesn't have (M1i's `DEPENDENCY_DEPTH available=false` precedent, never
+  faked). `weeklyFlow` is 12 Monday-aligned weeks of raw throughput (new findings across all five
+  tables, action items created/resolved), labelled as throughput, not risk. `mttr` is
+  action-item-only — stated honestly: measures creation-to-MOST-RECENT-resolution (a
+  reopen-and-re-resolve cycle overwrites `resolvedAt`, so earlier cycles aren't counted even
+  though the event history has them), items reopened by derivation are excluded, `resolvedAt` is
+  a human claim and `fixVerifiedCount` is how many are additionally scan-verified, and
+  finding-level MTTR doesn't exist (would touch all five reconcile services M1j deliberately left
+  untouched). `sbomStageCoverage` excludes the Unassigned bucket (its SBOMs aren't a product
+  lifecycle) and calls `RiskRollupService.forProduct` once per product (N+1, acceptable at this
+  volume, documented).
+- **This closes M1j's deferred question: `/actionable` does NOT hide risk-accepted items.**
+  It is a pinned triage-driven contract; `/action-items` already hides `RISK_ACCEPTED` by default,
+  which is the right place for that visibility rule to live.
+- **No enforcement anywhere except the one PATCH above — by design, not by omission.** No
+  `@PreAuthorize`, no 403-on-wrong-role, no `SecurityConfig` change, on any existing endpoint;
+  `anyRequest().authenticated()` is still the only gate. Every pre-M1k `@WithMockUser`-based test
+  (32 classes) passes unmodified. `ProductOwnershipController`'s owner-assignment endpoints,
+  `RiskScoreController.rescore`, and `LineageController.rebuild` all gained a reworded
+  `TODO(tenancy-hardening)` naming `TenantAccessService.accessFor`/`.requireTenantAdmin` as the
+  seam a later milestone wires up — still unenforced today.
+- **UI shipped**: a stateless `ViewSwitcher` in `Header` (renders nothing while `/me/access` is
+  loading/erroring/≤1 view, so no existing test needed to start mocking it); the
+  software-engineer "My Action Items" screen (`/my-work` — table over `ownedBy=me`, a detail sheet
+  with Start/Mark fixed/Dispute, reusing the existing `ActionableDetailPanel` for a
+  `VULNERABILITY`/`COMPROMISE` finding's own drill-down); the leadership screen (`/leadership` —
+  `StatCard`s, the existing `SeverityDonut`, a weekly-throughput bar chart, the stage-coverage
+  table, and an honest "risk trend — not yet available" card showing the backend's own note). The
+  security-engineer view needed no new screen — it already is `/`'s `ActionableView`.
+- **Deferred, stated honestly.** A role-assignment admin screen (API/Swagger only — the
+  unconfigured default means nothing breaks without it); a standalone VEX-authoring screen (API
+  only; the dispute dialog covers the engineer-facing form path); detail pages for the three
+  non-vulnerability finding types inside `/my-work` (shown as an inline summary with `fix.guidance`
+  instead); a dispute approval workflow (immediate effect, same precedent as M1j's risk
+  acceptance); team-membership resolution (M2) and asset ownership (M3) — `ownedBy` is products
+  only, and only `USER` ownership links resolve, exactly as M1b left them; feed-level enable/
+  disable toggles (the separate "M1 feeds wiring" item, not this one); finding-level MTTR; a
+  real risk-score trend; tenant enforcement of any kind (Tenancy hardening).
+
 **M1l — Dependency graph preserved.** Keep the full dependency tree from each SBOM, not
 flattened as today. Each finding records whether its component is direct or transitive, plus
 the path from the product root — feeds both M1i's scoring input and the M1d lineage graph.
@@ -740,9 +846,14 @@ Supersedes the old roadmap's single-tenant DoD checklist.
       justification shown.
 - [ ] Disabling a feed does not change existing scores; a newly ingested SBOM is scored without
       it.
-- [ ] A software engineer mapped to one product sees only that product's action items.
+- [x] A software engineer mapped to one product sees only that product's action items. **View-level
+      only** (M1k): met via `GET /action-items?ownedBy=me`/`GET /findings?ownedBy=me` — calling
+      either endpoint *without* `ownedBy` still shows everything, by design; real enforcement is
+      Tenancy hardening's job.
 - [ ] Malformed and oversized documents are rejected safely with a clear error.
-- [ ] All three role views render off the same underlying finding data.
+- [x] All three role views render off the same underlying finding data (M1k): the existing
+      Actionable Items screen (security engineer), `/my-work` (software engineer), and
+      `/leadership` (leadership) all shipped.
 
 **M2 / M3**
 - [ ] GitHub sync runs under a GitHub App, not a static PAT; ownership + product tags populate

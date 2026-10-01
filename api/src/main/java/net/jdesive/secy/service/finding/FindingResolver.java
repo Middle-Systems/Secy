@@ -2,6 +2,7 @@ package net.jdesive.secy.service.finding;
 
 import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.model.component.CorrelatableComponent;
+import net.jdesive.secy.model.finding.FindingFix;
 import net.jdesive.secy.model.finding.FindingRef;
 import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.LifecycleDriftFindingRepository;
@@ -150,6 +151,9 @@ public class FindingResolver {
         CorrelatableComponent component = alert.getCorrelatableComponent();
         Product product = productOf(alert.getComponent());
         Asset asset = assetOf(alert.getAssetComponent());
+        FindingFix fix = FindingFixAdvisor.forVulnerability(
+                alert.getFixState(), alert.getFixedVersions(), alert.getFixSource(),
+                component == null ? null : component.getName(), component == null ? null : component.getVersion());
 
         return new ResolvedFinding(
                 FindingType.VULNERABILITY,
@@ -173,7 +177,8 @@ public class FindingResolver {
                 alert.getVexJustification(),
                 alert.isVexConflict(),
                 alert.getTriageState(),
-                alert.getSnoozedUntil());
+                alert.getSnoozedUntil(),
+                fix);
     }
 
     static ResolvedFinding from(CompromiseFinding finding) {
@@ -201,7 +206,8 @@ public class FindingResolver {
                 null,
                 null, null, false,
                 finding.getTriageState(),
-                finding.getSnoozedUntil());
+                finding.getSnoozedUntil(),
+                FindingFixAdvisor.forCompromise());
     }
 
     static ResolvedFinding from(LifecycleDriftFinding f, String productName) {
@@ -221,7 +227,8 @@ public class FindingResolver {
                 f.getLifecycleState(),
                 f.getCreatedAt(),
                 f.getLastSeenAt(),
-                null, null, null, false, null, null);
+                null, null, null, false, null, null,
+                FindingFixAdvisor.forLifecycleDrift());
     }
 
     static ResolvedFinding from(QuantumVulnerabilityFinding f, String productName) {
@@ -240,7 +247,8 @@ public class FindingResolver {
                 f.getLifecycleState(),
                 f.getCreatedAt(),
                 f.getLastSeenAt(),
-                null, null, null, false, null, null);
+                null, null, null, false, null, null,
+                FindingFixAdvisor.forQuantumVulnerable());
     }
 
     static ResolvedFinding from(SbomQualityFinding f, String productName) {
@@ -259,7 +267,8 @@ public class FindingResolver {
                 f.getLifecycleState(),
                 f.getCreatedAt(),
                 f.getLastSeenAt(),
-                null, null, null, false, null, null);
+                null, null, null, false, null, null,
+                FindingFixAdvisor.forSbomQuality());
     }
 
     private static Product productOf(SBOMComponent component) {

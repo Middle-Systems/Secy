@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -91,6 +92,11 @@ public class FindingService {
 
     public Page<FindingResponse> list(int page, int size, FindingFilter filter) {
         Pageable pageable = PageRequest.of(page, size);
+        // M1k: a non-null empty productIds ("this user owns nothing") must mean "return nothing" --
+        // never "unfiltered". An empty SQL IN() is invalid, so short-circuit before any arm query.
+        if (filter.productIds() != null && filter.productIds().isEmpty()) {
+            return new PageImpl<>(List.of(), pageable, 0);
+        }
         List<Arm> arms = buildArms(filter);
 
         long[] counts = new long[arms.size()];
@@ -123,6 +129,25 @@ public class FindingService {
     public Optional<FindingResponse> detail(FindingType type, UUID id) {
         return findingResolver.resolve(type, id)
                 .map(f -> attachStatusAndMap(List.of(f), LocalDateTime.now()).get(0));
+    }
+
+    /**
+     * M1k — {@code LeadershipMetricsService.openFindingsByType}'s population, agreeing with
+     * {@code GET /findings?type=X}'s {@code totalElements} by construction: for each table-backed
+     * type, builds the same default {@link FindingFilter} that endpoint would and sums that type's
+     * arm count(s) (just one arm per type, since {@code type} is set).
+     */
+    public Map<FindingType, Long> countsByType() {
+        Map<FindingType, Long> counts = new LinkedHashMap<>();
+        for (FindingType type : FindingType.values()) {
+            if (!type.backedByTable()) {
+                continue;
+            }
+            FindingFilter filter = new FindingFilter(type, null, null, false, null, null);
+            long total = buildArms(filter).stream().mapToLong(Arm::count).sum();
+            counts.put(type, total);
+        }
+        return counts;
     }
 
     public List<FindingTypeInfo> types() {
@@ -173,17 +198,33 @@ public class FindingService {
         return arms;
     }
 
+    /**
+     * M1k: the {@code component -&gt; sbom -&gt; product} join, created ONCE when either
+     * {@code productId} or {@code productIds} is set, shared by {@link #compromiseArm} and
+     * {@link #vulnerabilityArm} — both entities have an identically-shaped {@code component}
+     * association.
+     */
+    private static <T> void addProductScopePredicates(Root<T> root, CriteriaBuilder cb,
+                                                        List<Predicate> predicates, FindingFilter filter) {
+        if (filter.productId() != null || filter.productIds() != null) {
+            Join<T, SBOMComponent> component = root.join("component", JoinType.INNER);
+            Join<SBOMComponent, SBOM> sbom = component.join("sbom", JoinType.INNER);
+            if (filter.productId() != null) {
+                predicates.add(cb.equal(sbom.get("product").get("id"), filter.productId()));
+            }
+            if (filter.productIds() != null) {
+                predicates.add(sbom.get("product").get("id").in(filter.productIds()));
+            }
+        }
+    }
+
     private Arm compromiseArm(FindingFilter filter) {
         Specification<CompromiseFinding> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (!filter.includeResolved()) {
                 predicates.add(cb.equal(root.get("lifecycleState"), AlertLifecycleState.ACTIVE));
             }
-            if (filter.productId() != null) {
-                Join<CompromiseFinding, SBOMComponent> component = root.join("component", JoinType.INNER);
-                Join<SBOMComponent, SBOM> sbom = component.join("sbom", JoinType.INNER);
-                predicates.add(cb.equal(sbom.get("product").get("id"), filter.productId()));
-            }
+            addProductScopePredicates(root, cb, predicates, filter);
             if (filter.assetId() != null) {
                 Join<CompromiseFinding, AssetComponent> assetComponent = root.join("assetComponent", JoinType.INNER);
                 predicates.add(cb.equal(assetComponent.get("asset").get("id"), filter.assetId()));
@@ -206,11 +247,7 @@ public class FindingService {
             if (!filter.includeResolved()) {
                 predicates.add(cb.equal(root.get("lifecycleState"), AlertLifecycleState.ACTIVE));
             }
-            if (filter.productId() != null) {
-                Join<VulnerabilityAlert, SBOMComponent> component = root.join("component", JoinType.INNER);
-                Join<SBOMComponent, SBOM> sbom = component.join("sbom", JoinType.INNER);
-                predicates.add(cb.equal(sbom.get("product").get("id"), filter.productId()));
-            }
+            addProductScopePredicates(root, cb, predicates, filter);
             if (filter.assetId() != null) {
                 Join<VulnerabilityAlert, AssetComponent> assetComponent = root.join("assetComponent", JoinType.INNER);
                 predicates.add(cb.equal(assetComponent.get("asset").get("id"), filter.assetId()));
@@ -238,6 +275,9 @@ public class FindingService {
             }
             if (filter.productId() != null) {
                 predicates.add(cb.equal(root.<UUID>get("productId"), filter.productId()));
+            }
+            if (filter.productIds() != null) {
+                predicates.add(root.<UUID>get("productId").in(filter.productIds()));
             }
             if (filter.linked() != null) {
                 predicates.add(linkedPredicate(root, cb, query, linkColumn, filter.linked()));
@@ -374,7 +414,7 @@ public class FindingService {
                 f.lifecycleState(), f.createdAt(), f.lastSeenAt(), f.riskScore(),
                 f.vexStatus(), f.vexJustification(), f.vexConflict(),
                 f.triageState(), f.snoozedUntil(),
-                status.status(), status.basis(), actionItemId, f.detailPath());
+                status.status(), status.basis(), actionItemId, f.detailPath(), f.fix());
     }
 
 }

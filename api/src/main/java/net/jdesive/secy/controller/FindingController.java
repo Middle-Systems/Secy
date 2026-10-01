@@ -8,9 +8,12 @@ import net.jdesive.secy.model.finding.FindingFilter;
 import net.jdesive.secy.model.finding.FindingResponse;
 import net.jdesive.secy.model.finding.FindingTypeInfo;
 import net.jdesive.secy.persistence.entity.FindingType;
+import net.jdesive.secy.security.AppUserPrincipal;
+import net.jdesive.secy.service.access.OwnedByResolver;
 import net.jdesive.secy.service.finding.FindingService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -34,6 +38,7 @@ import java.util.UUID;
 public class FindingController {
 
     private final FindingService findingService;
+    private final OwnedByResolver ownedByResolver;
 
     @Operation(
             summary = "List findings across all five finding tables, paged and filtered",
@@ -61,9 +66,15 @@ public class FindingController {
             @RequestParam(defaultValue = "false") boolean includeResolved,
             @Parameter(description = "true: only findings attached to an action item. false: only "
                     + "unattached ones. Omit for no restriction.")
-            @RequestParam(required = false) Boolean linked) {
+            @RequestParam(required = false) Boolean linked,
+            @Parameter(description = "M1k: `me` or a user UUID -- restrict to findings scoped to a "
+                    + "product that user owns (asset-derived rows always excluded). Omit for no "
+                    + "restriction, which is this endpoint's only behavior until Tenancy hardening.")
+            @RequestParam(required = false) String ownedBy,
+            @AuthenticationPrincipal AppUserPrincipal principal) {
 
-        FindingFilter filter = new FindingFilter(type, productId, assetId, includeResolved, linked);
+        Set<UUID> productIds = ownedByResolver.resolveProductIds(ownedBy, principal);
+        FindingFilter filter = new FindingFilter(type, productId, assetId, includeResolved, linked, productIds);
         return findingService.list(page, size, filter);
     }
 

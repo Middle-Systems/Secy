@@ -30,8 +30,9 @@ public class LineageController {
 
     private final JobService jobService;
 
-    // TODO(M1k/tenancy-hardening): gate this to tenant admins once role-based access exists —
-    // today every authenticated user can trigger a rebuild, same as every other ingest endpoint.
+    // TODO(tenancy-hardening): restrict to an effective tenant admin (TenantAccessService
+    // .requireTenantAdmin, which now exists per M1k) — today every authenticated user can trigger a
+    // rebuild, same as every other ingest endpoint.
     @Operation(
             summary = "Queue a full lineage-graph rebuild",
             description = "Rebuilds every tenant's Apache AGE lineage graph from Postgres. 503 when "

@@ -71,4 +71,12 @@ public interface SBOMRepository extends JpaRepository<SBOM, UUID> {
     /** The placeholder row a {@code SBOM_UPLOAD} job was enqueued for — see {@code SBOM.jobId}. */
     Optional<SBOM> findByJobId(UUID jobId);
 
+    /**
+     * M1k — {@code LeadershipMetricsService.sbomStageCoverage}'s raw rows: every active SBOM's
+     * product and stage (null = legacy/unstaged), excluding the Unassigned bucket (its SBOMs aren't
+     * a product lifecycle).
+     */
+    @Query("select s.product.id, s.lifecycleStage from SBOM s where s.active = true and s.product.unassigned = false")
+    List<Object[]> findActiveStageRowsForNonBucketProducts();
+
 }

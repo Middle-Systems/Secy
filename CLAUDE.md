@@ -74,7 +74,32 @@ items: KEV-listed OR EPSS > 0.1.
   (derived from its findings, never client-supplied); status machine OPEN/IN_PROGRESS/RISK_ACCEPTED/
   RESOLVED with derived NOT_AFFECTED (all linked active findings VEX not-affected), auto-reopen (a
   resolved item's finding reappears) and risk-acceptance expiry, all computed on read, never a cron
-  job. `TriageState` is unchanged and never written by any of this.
+  job. `TriageState` is unchanged and never written by any of this. `/action-items` and `/findings`
+  (M1k — Role-based views) both gained `?ownedBy=me|<uuid>`: restricts to product-scoped rows that
+  user owns (asset-scoped rows always excluded); omit for no restriction, which both endpoints'
+  default is — **no enforcement anywhere in M1k**, `GET /action-items` without `ownedBy` still shows
+  everything. `ActionItemResponse`/`ActionItemDetailResponse` gained a computed `fixSummary`
+  (remaining findings with/without a known fix), and every `FindingResponse` gained a `fix` block
+  (`FindingFixAdvisor` — data-derived for `VULNERABILITY` off `fixState`/`fixedVersions`/`fixSource`,
+  fixed templated guidance for the other four types). New: `GET /me/access` (which views —
+  `LEADERSHIP`/`SECURITY_ENGINEER`/`SOFTWARE_ENGINEER` — the caller may pick; stateless, no
+  current-view state anywhere server-side), `GET /me/owned-products`, `GET /tenant/members` (open to
+  any authenticated user) and `PATCH /tenant/members/{userId}` (sets `roles`/`resetRolesToDefault`/
+  `tenantAdmin` — **the one deliberate enforcement point in all of M1k**: 403 unless the caller is an
+  effective tenant admin, i.e. `membership.tenantAdmin` or global `Role.ADMIN`). `POST
+  /vex/statements` (author a TENANT-origin VEX statement directly, closing the one real
+  security-engineer gap — `?origin=`/document-upload was the only way before) and `POST
+  /action-items/{id}/disputes` (a dispute IS one of those statements, authored on the caller's
+  behalf and run through the same M1f ingestion pipeline — no new review mechanism) both return 202
+  with a `VEX_UPLOAD` job to poll. `GET /metrics/leadership` (aggregates only, no finding rows,
+  `?mttrWindowDays=` default 90): severity/currentRisk reuse `ActionableService`'s exact
+  `/actionable` vulnerability population (deliberately not `/stats/dashboard`'s, which has always
+  ignored VEX/triage/lifecycle), `openFindingsByType` agrees with `/findings?type=X` by
+  construction, `riskTrend.available` is always `false` (no score-history snapshot table exists),
+  `mttr` is action-item-only with honest reopen/derivation caveats, `sbomStageCoverage` excludes the
+  Unassigned bucket. `/actionable` does **not** hide risk-accepted items (closes M1j's deferred
+  question) — `/action-items` already hides `RISK_ACCEPTED` by default, which is the right layer
+  for that.
 - Paged responses are Spring `Page` shape: `content`, `totalElements`, `totalPages`, 0-indexed.
 - Every endpoint except `/auth/**`, `/actuator/health` and the OpenAPI docs requires
   `Authorization: Bearer <jwt>`. Get one from `POST /auth/login`; the first account created via

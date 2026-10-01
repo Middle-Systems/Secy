@@ -45,8 +45,8 @@ public class ProductOwnershipController {
         return ownershipService.listProductOwners(productId);
     }
 
-    // TODO(M1k): restrict POST/DELETE to the security-engineer role (owner assignment/reassignment
-    // is that view's job per ROADMAP.md M1k).
+    // TODO(tenancy-hardening): restrict POST/DELETE to SECURITY_ENGINEER (M1k's role model:
+    // TenantAccessService.accessFor — owner assignment/reassignment is that view's job).
     @Operation(summary = "Manually assign an owner to a product")
     @PostMapping
     public ResponseEntity<ProductOwnerResponse> assign(
@@ -58,8 +58,8 @@ public class ProductOwnershipController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    // TODO(M1k): restrict POST/DELETE to the security-engineer role (owner assignment/reassignment
-    // is that view's job per ROADMAP.md M1k).
+    // TODO(tenancy-hardening): restrict POST/DELETE to SECURITY_ENGINEER (M1k's role model:
+    // TenantAccessService.accessFor — owner assignment/reassignment is that view's job).
     @Operation(summary = "Remove a manual ownership link")
     @DeleteMapping("/{ownerId}")
     public ResponseEntity<Void> remove(@PathVariable UUID productId, @PathVariable UUID ownerId) {

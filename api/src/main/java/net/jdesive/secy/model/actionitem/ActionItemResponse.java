@@ -47,6 +47,7 @@ public record ActionItemResponse(
         Map<FindingType, Long> findingCountsByType,
         ActionItemScore score,
         RiskAcceptance riskAcceptance,
+        ActionItemFixSummary fixSummary,
         LocalDateTime createdAt,
         UUID createdById,
         LocalDateTime updatedAt,

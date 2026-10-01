@@ -8,7 +8,9 @@ import { epssDatabaseRoute } from '@/routes/epss-database';
 import { indexRoute } from '@/routes/index';
 import { infrastructureRoute } from '@/routes/infrastructure';
 import { kevDatabaseRoute } from '@/routes/kev-database';
+import { leadershipRoute } from '@/routes/leadership';
 import { loginRoute } from '@/routes/login';
+import { myWorkRoute } from '@/routes/my-work';
 import { productCatalogRoute } from '@/routes/product-catalog';
 
 /**
@@ -47,5 +49,7 @@ export const routeTree = rootRoute.addChildren([
     infrastructureRoute,
     complianceRoute,
     connectorsRoute,
+    myWorkRoute,
+    leadershipRoute,
   ]),
 ]);

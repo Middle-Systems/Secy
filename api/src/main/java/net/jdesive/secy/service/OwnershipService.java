@@ -151,7 +151,9 @@ public class OwnershipService {
 
     /**
      * The products a user owns within a tenant — M1k's seam for the software-engineer "my products"
-     * filter. No caller yet in M1b.
+     * filter. First called by {@code net.jdesive.secy.service.access.OwnedByResolver} (M1k), via
+     * {@code GET /action-items?ownedBy=}/{@code GET /findings?ownedBy=} and
+     * {@code GET /me/owned-products}.
      */
     @Transactional(readOnly = true)
     public List<UUID> productIdsOwnedBy(UUID tenantId, UUID userId) {

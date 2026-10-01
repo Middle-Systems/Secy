@@ -10,6 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.auth.dto.ErrorResponse;
 import net.jdesive.secy.config.VexProperties;
 import net.jdesive.secy.job.JobService;
+import net.jdesive.secy.model.vex.AuthorVexStatementRequest;
+import net.jdesive.secy.model.vex.AuthoredVexResponse;
 import net.jdesive.secy.model.vex.ParsedVexDocument;
 import net.jdesive.secy.model.vex.VexDocumentResponse;
 import net.jdesive.secy.model.vex.VexPrecedenceSettingsRequest;
@@ -34,6 +36,8 @@ import net.jdesive.secy.service.vex.VexDocumentParser;
 import net.jdesive.secy.service.vex.VexDocumentRejectedException;
 import net.jdesive.secy.service.vex.VexDocumentTooLargeException;
 import net.jdesive.secy.service.vex.VexIngestionService;
+import net.jdesive.secy.service.vex.AuthoredVex;
+import net.jdesive.secy.service.vex.VexAuthoringService;
 import net.jdesive.secy.service.vex.VexResolutionService;
 import net.jdesive.secy.service.vex.VexResolutionService.VexReconcileSummary;
 import org.springframework.data.domain.Page;
@@ -70,7 +74,9 @@ import java.util.UUID;
  * alert reconciliation run as a {@code VEX_UPLOAD} job — poll {@code GET /jobs/{id}}.
  *
  * <p>TODO(tenancy-hardening): every operation here reads/writes {@link Tenant#DEFAULT_TENANT_ID},
- * matching every other controller in this codebase today. No role gating either (M1k).
+ * matching every other controller in this codebase today. No role gating on any endpoint here
+ * either — M1k's {@code POST /vex/statements} (below) closes the VEX-authoring gap but adds no
+ * enforcement; any authenticated user may call it.
  */
 @Slf4j
 @Tag(name = "VEX", description = "OpenVEX / CSAF 2.0 / CycloneDX VEX ingestion and statement browsing (M1f)")
@@ -86,11 +92,13 @@ public class VexController {
     private final VexStatementRepository vexStatementRepository;
     private final ProductRepository productRepository;
     private final JobService jobService;
+    private final VexAuthoringService vexAuthoringService;
 
     public VexController(VexProperties vexProperties, VexDocumentParser vexDocumentParser,
                          VexIngestionService vexIngestionService, VexResolutionService vexResolutionService,
                          VexDocumentRepository vexDocumentRepository, VexStatementRepository vexStatementRepository,
-                         ProductRepository productRepository, JobService jobService) {
+                         ProductRepository productRepository, JobService jobService,
+                         VexAuthoringService vexAuthoringService) {
         this.vexProperties = vexProperties;
         this.vexDocumentParser = vexDocumentParser;
         this.vexIngestionService = vexIngestionService;
@@ -99,6 +107,32 @@ public class VexController {
         this.vexStatementRepository = vexStatementRepository;
         this.productRepository = productRepository;
         this.jobService = jobService;
+        this.vexAuthoringService = vexAuthoringService;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* M1k — authoring (security-engineer VEX authoring / dispute)        */
+    /* ------------------------------------------------------------------ */
+
+    @Operation(summary = "Author a TENANT-origin VEX statement directly (M1k)",
+            description = "Closes the one genuinely missing security-engineer capability: there was no "
+                    + "way to assert VEX without crafting a document file. Validates synchronously -- same "
+                    + "contract as POST /vex -- then runs the EXISTING ingestion pipeline unchanged: a newer "
+                    + "statement from the same author on the same target supersedes an older one under the "
+                    + "existing author-supersession rule, and an opposing TENANT statement from someone else "
+                    + "triggers the existing conflict flagging. Requires authentication (author is the caller).")
+    @ApiResponse(responseCode = "202", description = "Statement validated; ingest queued")
+    @ApiResponse(responseCode = "400", description = "Bad cveId/purl/status/justification combination, or Unassigned productId")
+    @ApiResponse(responseCode = "401", description = "No authenticated principal")
+    @ApiResponse(responseCode = "404", description = "Unknown productId")
+    @PostMapping(value = "/statements", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<AuthoredVexResponse> authorStatement(@RequestBody AuthorVexStatementRequest request,
+                                                                Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        AuthoredVex authored = vexAuthoringService.author(request, principal.getName(), principal);
+        return new ResponseEntity<>(new AuthoredVexResponse(authored.job(), authored.documentId()), HttpStatus.ACCEPTED);
     }
 
     /* ------------------------------------------------------------------ */

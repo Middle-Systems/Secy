@@ -375,7 +375,8 @@ class RemediationStatusDeriverTest {
                 null,
                 false,
                 triageState,
-                snoozedUntil);
+                snoozedUntil,
+                null);
     }
 
 }

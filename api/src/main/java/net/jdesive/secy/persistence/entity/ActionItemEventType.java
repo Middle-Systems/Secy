@@ -29,6 +29,13 @@ public enum ActionItemEventType {
     COMMENTED,
 
     /** Title/description edited. */
-    EDITED
+    EDITED,
+
+    /**
+     * A linked vulnerability finding was disputed via {@code POST /action-items/{id}/disputes} (M1k)
+     * — an authored TENANT OpenVEX {@code not_affected} statement was queued on the caller's behalf.
+     * See {@code ActionItemDisputeService}.
+     */
+    DISPUTED
 
 }

@@ -18,11 +18,13 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Shared, stateless helpers for the three format parsers in this package. Package-private on
- * purpose — nothing outside {@code service.vex.parser} should need to spell a CVE regex or a PURL
- * fallback rule a second way.
+ * Shared, stateless helpers for the three format parsers in this package. {@link #cveIds} and
+ * {@link #purlTarget} are also used by {@code net.jdesive.secy.service.vex.VexAuthoringService}
+ * (M1k — authoring a dispute/VEX statement needs the exact same CVE/PURL validation the parsers
+ * use), hence {@code public} rather than package-private — nothing else outside
+ * {@code service.vex} should need to spell a CVE regex or a PURL fallback rule a second way.
  */
-final class VexParsing {
+public final class VexParsing {
 
     private static final Pattern CVE_PATTERN = Pattern.compile("^CVE-\\d{4}-\\d{4,}$", Pattern.CASE_INSENSITIVE);
 
@@ -35,7 +37,7 @@ final class VexParsing {
      * Every candidate string that is exactly a CVE id (case-insensitive), upper-cased, de-duplicated,
      * in first-seen order. Blank/null candidates are ignored.
      */
-    static List<String> cveIds(String... candidates) {
+    public static List<String> cveIds(String... candidates) {
         Set<String> seen = new LinkedHashSet<>();
         if (candidates != null) {
             for (String candidate : candidates) {
@@ -60,7 +62,7 @@ final class VexParsing {
      *                    null means this statement can never match any alert
      * @param matchVersion the PURL's own version, or null when it declared none (matches all versions)
      */
-    record PurlTarget(String targetPurl, String matchKey, String matchVersion) {
+    public record PurlTarget(String targetPurl, String matchKey, String matchVersion) {
 
         static final PurlTarget UNMATCHABLE = new PurlTarget(null, null, null);
     }
@@ -71,7 +73,7 @@ final class VexParsing {
      * unmatchable (with the raw text still carried in {@link PurlTarget#targetPurl()} when it fit),
      * rather than losing the statement.
      */
-    static PurlTarget purlTarget(String candidate) {
+    public static PurlTarget purlTarget(String candidate) {
         if (candidate == null) {
             return PurlTarget.UNMATCHABLE;
         }

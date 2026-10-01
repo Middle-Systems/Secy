@@ -13,11 +13,15 @@ import net.jdesive.secy.model.actionitem.ActionItemPatchRequest;
 import net.jdesive.secy.model.actionitem.ActionItemResponse;
 import net.jdesive.secy.model.actionitem.AttachFindingsRequest;
 import net.jdesive.secy.model.actionitem.CreateActionItemRequest;
+import net.jdesive.secy.model.actionitem.DisputeFindingRequest;
+import net.jdesive.secy.model.actionitem.DisputeResponse;
 import net.jdesive.secy.persistence.AppUserRepository;
 import net.jdesive.secy.persistence.entity.FindingType;
 import net.jdesive.secy.persistence.entity.RemediationStatus;
 import net.jdesive.secy.persistence.entity.User;
 import net.jdesive.secy.security.AppUserPrincipal;
+import net.jdesive.secy.service.access.OwnedByResolver;
+import net.jdesive.secy.service.actionitem.ActionItemDisputeService;
 import net.jdesive.secy.service.actionitem.ActionItemService;
 import net.jdesive.secy.service.actionitem.InvalidActionItemException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -38,12 +42,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 
 /**
  * The M1j {@code ActionItem} surface — the concrete remediation task over one or more findings, and
  * its status machine. Parallel to {@code /findings} and {@code /actionable}; neither is touched here.
- * No role gating yet (M1k).
+ * No role gating on any endpoint here — M1k added the {@code ownedBy} view-level filter below, not
+ * enforcement; {@code GET /action-items} with no {@code ownedBy} is unrestricted until Tenancy
+ * hardening.
  */
 @Slf4j
 @Tag(name = "Action items",
@@ -55,7 +62,9 @@ import java.util.UUID;
 public class ActionItemController {
 
     private final ActionItemService actionItemService;
+    private final ActionItemDisputeService actionItemDisputeService;
     private final AppUserRepository userRepository;
+    private final OwnedByResolver ownedByResolver;
 
     @Operation(
             summary = "Create an action item over one or more findings",
@@ -75,7 +84,10 @@ public class ActionItemController {
             description = "`status` matches the EFFECTIVE status. Omitted, the default hides effective "
                     + "RESOLVED/NOT_AFFECTED/RISK_ACCEPTED — an expired acceptance or a reopen already "
                     + "reads as OPEN, so it stays visible. Sorted: effective OPEN, then IN_PROGRESS, "
-                    + "then the rest, then score desc (nulls last), then updatedAt desc, then id.")
+                    + "then the rest, then score desc (nulls last), then updatedAt desc, then id. "
+                    + "`ownedBy` (M1k) is `me` or a user UUID — restricts to items scoped to a product "
+                    + "that user owns (asset-scoped items are always excluded by it); omit for no "
+                    + "restriction, which is this endpoint's only behavior until Tenancy hardening.")
     @GetMapping
     public Page<ActionItemResponse> list(
             @RequestParam(defaultValue = "0") int page,
@@ -83,8 +95,11 @@ public class ActionItemController {
             @RequestParam(required = false) UUID productId,
             @RequestParam(required = false) UUID assetId,
             @RequestParam(required = false) UUID assigneeUserId,
-            @RequestParam(required = false) RemediationStatus status) {
-        return actionItemService.list(page, size, productId, assetId, assigneeUserId, status);
+            @RequestParam(required = false) RemediationStatus status,
+            @RequestParam(required = false) String ownedBy,
+            @AuthenticationPrincipal AppUserPrincipal principal) {
+        Set<UUID> productIdsIn = ownedByResolver.resolveProductIds(ownedBy, principal);
+        return actionItemService.list(page, size, productId, assetId, assigneeUserId, status, productIdsIn);
     }
 
     @Operation(summary = "One action item in full, with every linked finding's own derived status")
@@ -141,6 +156,24 @@ public class ActionItemController {
     @GetMapping("/{id}/history")
     public List<ActionItemEventResponse> history(@PathVariable UUID id) {
         return actionItemService.history(id);
+    }
+
+    @Operation(
+            summary = "Dispute a linked vulnerability finding with a VEX justification (M1k)",
+            description = """
+                    A dispute IS an authored TENANT OpenVEX not_affected statement, run through the \
+                    existing M1f ingestion pipeline -- no new review mechanism, no new status logic. \
+                    400 when findingId isn't linked to THIS item, is a non-vulnerability finding type \
+                    (use RISK_ACCEPTED instead), is asset-derived, or impactStatement is blank. \
+                    404 for an unknown item. No ownership/role check on who may dispute (Tenancy \
+                    hardening's job). Takes effect immediately once the queued job finishes, no \
+                    approval step.""")
+    @PostMapping("/{id}/disputes")
+    public ResponseEntity<DisputeResponse> dispute(@PathVariable UUID id, @RequestBody DisputeFindingRequest request,
+                                                     @AuthenticationPrincipal AppUserPrincipal appUserPrincipal,
+                                                     java.security.Principal principal) {
+        DisputeResponse response = actionItemDisputeService.dispute(id, request, actingUser(appUserPrincipal), principal);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
     /** The authenticated account behind the JWT, as the {@link User} entity the service attributes events to. */

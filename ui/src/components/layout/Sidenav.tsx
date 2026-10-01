@@ -5,6 +5,7 @@ import {
   ClipboardCheck,
   Database,
   Flame,
+  ListChecks,
   Percent,
   Plug,
   Server,
@@ -37,6 +38,10 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Actionable Items', to: '/', icon: Target },
       { label: 'Dashboard', to: '/dashboard', icon: ChartLine },
+      // M1k: no role gating -- every nav item stays visible to everyone regardless of their
+      // `/me/access` views, same as the rest of this milestone's "no enforcement" scope.
+      { label: 'My Action Items', to: '/my-work', icon: ListChecks },
+      { label: 'Leadership', to: '/leadership', icon: ChartLine },
     ],
   },
   {

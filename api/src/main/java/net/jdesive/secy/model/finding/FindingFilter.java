@@ -2,6 +2,7 @@ package net.jdesive.secy.model.finding;
 
 import net.jdesive.secy.persistence.entity.FindingType;
 
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -23,13 +24,21 @@ import java.util.UUID;
  *                         ACTIVE}; true also returns {@code AUTO_RESOLVED} rows.
  * @param linked          null: no restriction. {@code true}: only findings attached to an
  *                         {@code ActionItem}. {@code false}: only unattached findings.
+ * @param productIds      M1k's {@code ownedBy} restriction — null: unrestricted. Non-null: only
+ *                         findings scoped to one of these products (vulnerability/compromise via
+ *                         their component's SBOM's product, the three plain-{@code productId} types
+ *                         directly); asset-derived rows are always excluded, same reasoning as
+ *                         {@link #assetId}'s interaction with the three plain-productId types. An
+ *                         empty (non-null) set means "this user owns nothing" and must return
+ *                         nothing — never "unfiltered".
  */
 public record FindingFilter(
         FindingType type,
         UUID productId,
         UUID assetId,
         boolean includeResolved,
-        Boolean linked) {
+        Boolean linked,
+        Set<UUID> productIds) {
 
     public boolean includesVulnerability() {
         return type == null || type == FindingType.VULNERABILITY;

@@ -77,6 +77,15 @@ public class ActionItemEvent extends TenantOwnedEntity {
     @Column(name = "risk_approved_by_id")
     private UUID riskApprovedById;
 
+    /**
+     * The authored VEX document a {@code DISPUTED} event queued — M1k. Plain UUID, with a real FK
+     * in Postgres (migration {@code 029c}) but {@code on delete set null}, matching the "history
+     * outlives a deleted referent" discipline above for {@link #findingId}, one step short: this one
+     * DOES get an FK since {@code vex_document} rows are never deleted, only deactivated.
+     */
+    @Column(name = "vex_document_id")
+    private UUID vexDocumentId;
+
     @Column(length = 4096)
     private String comment;
 

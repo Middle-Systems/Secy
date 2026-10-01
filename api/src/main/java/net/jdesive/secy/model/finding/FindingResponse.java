@@ -41,5 +41,6 @@ public record FindingResponse(
         RemediationStatus status,
         FindingStatusBasis statusBasis,
         UUID actionItemId,
-        String detailPath) {
+        String detailPath,
+        FindingFix fix) {
 }
