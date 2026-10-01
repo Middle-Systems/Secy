@@ -85,13 +85,18 @@ public final class RiskScorer {
         checkpoint = addFactor(factors, ScoreInput.VEX_STATUS, ScoreEffect.MULTIPLY, vex.name(),
                 vexWeight, running, checkpoint, true, null);
 
-        // 7. DEPENDENCY_DEPTH (MULTIPLY) -- always UNKNOWN until M1l; see DependencyDepth's Javadoc.
+        // 7. DEPENDENCY_DEPTH (MULTIPLY) -- M1l: a real DIRECT/TRANSITIVE/UNKNOWN value now reaches
+        // here (RiskScoreInputs.dependencyDepthOf); `available` reflects whether this alert's
+        // component actually had a classifiable position, not a blanket "not yet tracked".
         DependencyDepth depth = inputs.depth() == null ? DependencyDepth.UNKNOWN : inputs.depth();
         double depthWeight = weights.dependencyDepthFactor().get(depth);
         running = running.multiply(BigDecimal.valueOf(depthWeight));
+        boolean depthAvailable = depth != DependencyDepth.UNKNOWN;
+        String depthNote = depthAvailable ? null
+                : "Not known for this component — asset/scanner finding, no usable dependency graph "
+                        + "in the SBOM, component unreachable from the root, or ingested before M1l. Neutral.";
         checkpoint = addFactor(factors, ScoreInput.DEPENDENCY_DEPTH, ScoreEffect.MULTIPLY, depth.name(),
-                depthWeight, running, checkpoint, false,
-                "Not yet tracked — supplied by M1l (dependency graph preserved). Neutral until then.");
+                depthWeight, running, checkpoint, depthAvailable, depthNote);
 
         // 8. FIX_AVAILABILITY (MULTIPLY)
         FixState fixState = inputs.fixState() == null ? FixState.UNKNOWN : inputs.fixState();

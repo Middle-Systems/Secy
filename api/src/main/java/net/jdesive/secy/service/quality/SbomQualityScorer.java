@@ -35,8 +35,12 @@ import java.util.List;
  *   <li>{@code UNIQUE_IDENTIFIER} — a PURL, or a declared CPE/SWID identifier, or a declared hash</li>
  *   <li>{@code DEPENDENCY_RELATIONSHIP} — the component has a bom-ref AND that bom-ref appears in
  *       {@link NormalizedSbom#dependencyRelationshipRefs()} (exact, case-sensitive match). A
- *       component with no bom-ref automatically fails this test — presence-only, per M1l's future
- *       real graph</li>
+ *       component with no bom-ref automatically fails this test — deliberately presence-only
+ *       even after M1l's real directed graph shipped (ROADMAP.md, M1l — "Dependency graph
+ *       preserved"): {@code dependencyRelationshipRefs} stays exactly as M1h defined it (all 15
+ *       SPDX relationship types, the explicit {@code {ref:X, dependsOn:[]}} assertion), and this
+ *       NTIA check was never meant to validate the real dependency graph — see {@link
+ *       net.jdesive.secy.model.component.DependencyGraphAnalyzer} for that</li>
  * </ul>
  *
  * <p>Two are document-level, all-or-nothing (0 or 1, doubling as "coverage" for the formula below):

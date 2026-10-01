@@ -149,6 +149,39 @@ public class SBOMComponent implements CorrelatableComponent {
     private IdentityConfidence identityConfidence;
 
     /**
+     * How far this component sits from the product's root in the document's own dependency graph
+     * (M1l) — null means "not assessed" (a pre-M1l row, or a component built directly by a test/
+     * scanner path that never goes through {@code SBOMService#ingestDocument}). Set explicitly by
+     * {@code SBOMService}, deliberately NOT in {@code @PrePersist}/{@code @PreUpdate} — same
+     * reasoning as {@link #identityConfidence}: the classification is computed once from the whole
+     * document's edge graph, not re-derivable from this one row on every flush.
+     *
+     * @see net.jdesive.secy.model.component.DependencyGraphAnalyzer
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "dependency_depth", length = 16)
+    private DependencyDepth dependencyDepth;
+
+    /**
+     * Hop distance from the product root to this component (1 = direct) — null unless {@link
+     * #dependencyDepth} is {@code DIRECT}/{@code TRANSITIVE} (M1l).
+     */
+    @Column(name = "dependency_distance")
+    private Integer dependencyDistance;
+
+    /**
+     * One representative shortest path from the product root to this component, as a JSON array of
+     * bom-refs (root first, this component's own ref last) — null when {@link #dependencyDepth} is
+     * {@code UNKNOWN}/not assessed, or when the path exceeds {@code
+     * DependencyGraphAnalyzer#MAX_PATH_HOPS} hops (M1l). {@code @JsonIgnore}d — exposed only via
+     * {@code GET /actionable/{id}}'s {@code dependency} block, to avoid double-encoded JSON reaching
+     * the UI through this entity's own serialization.
+     */
+    @Column(name = "dependency_path", columnDefinition = "text")
+    @JsonIgnore
+    private String dependencyPath;
+
+    /**
      * The CycloneDX 1.6 {@code cryptoProperties} row for this component, when it is a
      * {@code cryptographic-asset} on a document that supports CBOM (M1g) — at most one, enforced by
      * {@code uq_sbom_component_crypto_asset_component}. Read path is {@code GET /cbom/assets}, not

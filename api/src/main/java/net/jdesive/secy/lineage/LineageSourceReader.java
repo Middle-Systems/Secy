@@ -6,6 +6,7 @@ import net.jdesive.secy.lineage.source.AssetComponentRow;
 import net.jdesive.secy.lineage.source.AssetRow;
 import net.jdesive.secy.lineage.source.ComponentRow;
 import net.jdesive.secy.lineage.source.CompromiseFindingRow;
+import net.jdesive.secy.lineage.source.DependencyEdgeRow;
 import net.jdesive.secy.lineage.source.LineageSourceData;
 import net.jdesive.secy.lineage.source.ProductRow;
 import net.jdesive.secy.lineage.source.SbomRow;
@@ -37,6 +38,9 @@ import java.util.UUID;
  *   <li>Every nullable single-valued association is read through an explicit {@code left join} —
  *       never an implicit {@code x.y.id} dot-path, which JPQL turns into an inner join in the
  *       {@code select} clause and would silently drop rows whose association is null.</li>
+ *   <li>M1l: {@code sbom_component_dependency} rows are scoped the same way — joined through their
+ *       {@code sbomId} to the owning (active, this-tenant) {@code SBOM}, with {@code fromRoot}
+ *       computed by comparing {@code componentId} against that SBOM's root/metadata component.</li>
  * </ul>
  */
 @Component
@@ -134,6 +138,18 @@ public class LineageSourceReader {
                 .setParameter("tenantId", tenantId)
                 .getResultList();
 
+        List<DependencyEdgeRow> dependencyEdges = entityManager.createQuery("""
+                        select new net.jdesive.secy.lineage.source.DependencyEdgeRow(
+                            e.sbomId, e.componentId, e.dependsOnComponentId,
+                            case when root.id = e.componentId then true else false end)
+                        from SBOMComponentDependency e
+                        join SBOM s on s.id = e.sbomId
+                        left join s.component root
+                        where s.tenantId = :tenantId and s.active = true
+                        """, DependencyEdgeRow.class)
+                .setParameter("tenantId", tenantId)
+                .getResultList();
+
         return new LineageSourceData(
                 sortedById(products, ProductRow::id),
                 sortedById(sboms, SbomRow::id),
@@ -142,7 +158,17 @@ public class LineageSourceReader {
                 sortedById(assetComponents, AssetComponentRow::id),
                 sortedByStringId(vulnerabilities, VulnerabilityRow::id),
                 sortedById(alerts, VulnerabilityAlertRow::id),
-                sortedById(compromiseFindings, CompromiseFindingRow::id));
+                sortedById(compromiseFindings, CompromiseFindingRow::id),
+                sortedDependencyEdges(dependencyEdges));
+    }
+
+    /** {@code (sbomId, componentId, dependsOnComponentId)} — matches this reader's other sort calls. */
+    private static List<DependencyEdgeRow> sortedDependencyEdges(List<DependencyEdgeRow> rows) {
+        return rows.stream()
+                .sorted(Comparator.comparing(DependencyEdgeRow::sbomId)
+                        .thenComparing(DependencyEdgeRow::componentId)
+                        .thenComparing(DependencyEdgeRow::dependsOnComponentId))
+                .toList();
     }
 
     private static <T> List<T> sortedById(List<T> rows, java.util.function.Function<T, UUID> idOf) {

@@ -10,5 +10,7 @@ public record LineageSourceData(List<ProductRow> products,
                                  List<AssetComponentRow> assetComponents,
                                  List<VulnerabilityRow> vulnerabilities,
                                  List<VulnerabilityAlertRow> alerts,
-                                 List<CompromiseFindingRow> compromiseFindings) {
+                                 List<CompromiseFindingRow> compromiseFindings,
+                                 /** M1l: resolved {@code sbom_component_dependency} rows, last — see {@code EdgeType#DEPENDS_ON}. */
+                                 List<DependencyEdgeRow> dependencyEdges) {
 }

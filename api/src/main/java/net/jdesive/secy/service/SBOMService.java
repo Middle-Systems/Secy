@@ -8,10 +8,13 @@ import net.jdesive.secy.model.cbom.CryptoAssetIdentity;
 import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
 import net.jdesive.secy.model.cbom.QuantumAssessment;
 import net.jdesive.secy.model.component.ComponentIdentityAssessor;
+import net.jdesive.secy.model.component.DependencyEdge;
+import net.jdesive.secy.model.component.DependencyGraphAnalyzer;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
+import net.jdesive.secy.persistence.SBOMComponentDependencyRepository;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.entity.*;
 import net.jdesive.secy.service.cbom.QuantumVulnerabilityClassifier;
@@ -26,7 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -78,6 +84,7 @@ public class SBOMService {
     private final ObjectMapper objectMapper;
     private final SbomParser sbomParser;
     private final ComponentIdentityService componentIdentityService;
+    private final SBOMComponentDependencyRepository dependencyRepository;
 
     /** {@code sbom_component.description}. SPDX descriptions routinely run past this. */
     private static final int MAX_DESCRIPTION = 1024;
@@ -92,12 +99,14 @@ public class SBOMService {
     @Autowired
     public SBOMService(SBOMRepository sbomRepository, ApplicationEventPublisher eventPublisher,
                        ObjectMapper objectMapper, SbomParser sbomParser,
-                       ComponentIdentityService componentIdentityService) {
+                       ComponentIdentityService componentIdentityService,
+                       SBOMComponentDependencyRepository dependencyRepository) {
         this.sbomRepository = sbomRepository;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
         this.sbomParser = sbomParser;
         this.componentIdentityService = componentIdentityService;
+        this.dependencyRepository = dependencyRepository;
     }
 
     /**
@@ -237,6 +246,12 @@ public class SBOMService {
      * publishes {@link SbomUploadedEvent} exactly as before — so {@code VulnerabilityScanner}'s async
      * scan (and the {@code PROCESSING -> COMPLETED/FAILED} transition it performs) fires for both
      * callers identically.
+     *
+     * <p>M1l: also classifies every component's DIRECT/TRANSITIVE/UNKNOWN position (see {@link
+     * #applyDependencyPosition}) and, once every component has an id, persists the resolvable
+     * directed edges themselves (see {@link #persistDependencyEdges}) — both driven off {@code
+     * document.dependencyEdges()}/{@code dependencyRootRefs()}, self-contained to this document, so
+     * computed inline here, same as the M1g/M1h/M1c Pass A work already in this method.
      */
     @Transactional
     public IngestResult ingestDocument(SBOM sbom, NormalizedSbom document, JobProgress progress) {
@@ -244,6 +259,8 @@ public class SBOMService {
         sbomRepository.saveAndFlush(sbom);
 
         if (document.rootComponent() != null) {
+            // Dependency fields stay null on the root — it is never correlated, so it is never a BFS
+            // target either (M1l).
             sbom.setComponent(toEntity(document.rootComponent(), sbom, null));
         }
         // M1g: classify every crypto asset up front, index-aligned with document.components() — see
@@ -252,8 +269,16 @@ public class SBOMService {
         // after-commit step — see QuantumFindingListener.
         List<QuantumAssessment> assessments = QuantumVulnerabilityClassifier.assess(document.components());
         List<NormalizedComponent> components = document.components();
+        // M1l: classify every component's DIRECT/TRANSITIVE/UNKNOWN position up front, from the whole
+        // document's ref graph (root included via dependencyRootRefs) — a cycle-safe BFS, see
+        // DependencyGraphAnalyzer. Self-contained to this document, so computed inline (M1c Pass A
+        // pattern), same as the quantum-asset classification just above.
+        DependencyGraphAnalyzer.Analysis dependencyGraph =
+                DependencyGraphAnalyzer.analyze(document.dependencyRootRefs(), document.dependencyEdges(), components);
         for (int i = 0; i < components.size(); i++) {
-            sbom.getComponents().add(toEntity(components.get(i), sbom, assessments.get(i)));
+            SBOMComponent entity = toEntity(components.get(i), sbom, assessments.get(i));
+            applyDependencyPosition(entity, dependencyGraph.positionOf(components.get(i).bomRef()));
+            sbom.getComponents().add(entity);
         }
         for (NormalizedSbom.NormalizedTool tool : document.tools()) {
             SBOMTool sbomTool = new SBOMTool();
@@ -283,6 +308,10 @@ public class SBOMService {
         // on this SBOM has an id and a computed identityKey to compare against the rest of the tenant.
         componentIdentityService.flagHashIdentityCollisions(saved);
 
+        // M1l: persist the resolvable directed edges themselves, now that every component has an id
+        // — see persistDependencyEdges' Javadoc for which edges qualify.
+        persistDependencyEdges(saved, document);
+
         int componentCount = document.components().size();
         progress.report(componentCount, "Persisted " + componentCount + " components; vulnerability scan starting");
 
@@ -290,6 +319,101 @@ public class SBOMService {
         eventPublisher.publishEvent(new SbomUploadedEvent(saved.getId()));
 
         return IngestResult.of(componentCount, document.format().label() + " SBOM components ingested");
+    }
+
+    /**
+     * Applies one {@link DependencyGraphAnalyzer.Position} onto a freshly-built, not-yet-persisted
+     * {@link SBOMComponent} (M1l). Deliberately NOT in {@code @PrePersist}/{@code @PreUpdate} — same
+     * reasoning as {@link SBOMComponent#getIdentityConfidence()}: the classification is computed once
+     * from the whole document's graph, not re-derivable from this one row. {@code path} is serialized
+     * via {@link #objectMapper}, each bom-ref truncated to {@link SBOMComponent#getBomRef()}'s own
+     * limit first (truncation can make two distinct refs collide, but a display path tolerates that
+     * far better than losing the row entirely); a null/overflowed path writes a null column.
+     */
+    private void applyDependencyPosition(SBOMComponent entity, DependencyGraphAnalyzer.Position position) {
+        entity.setDependencyDepth(position.depth());
+        entity.setDependencyDistance(position.distance());
+        if (position.path() == null) {
+            entity.setDependencyPath(null);
+            return;
+        }
+        List<String> truncatedPath = position.path().stream().map(ref -> truncate(ref, MAX_SHORT_TEXT)).toList();
+        try {
+            entity.setDependencyPath(objectMapper.writeValueAsString(truncatedPath));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            // A list of short strings cannot fail to serialize in practice; degrade to no path
+            // rather than failing the whole ingest over a display-only field.
+            log.warn("Failed to serialize dependency path for component '{}': {}", entity.getBomRef(), e.getMessage());
+            entity.setDependencyPath(null);
+        }
+    }
+
+    /**
+     * Persists the resolvable directed edges from {@code document.dependencyEdges()} into {@code
+     * sbom_component_dependency} (M1l) — called after {@code saved} has been flushed, so every
+     * component has an id. An edge qualifies only when BOTH its {@code fromRef} and {@code toRef}
+     * resolve, via {@link SBOMComponent#getBomRef()} (truncated the same way {@link #toEntity} wrote
+     * it), to exactly one persisted component of this SBOM — the root row included, since the root's
+     * own direct dependencies are real edges even though the root itself is never correlated. A ref
+     * shared by two or more components is ambiguous and is dropped from this map entirely (matching
+     * {@link DependencyGraphAnalyzer}'s own ambiguity rule), and a self-edge once two different refs
+     * truncate to the same persisted component is skipped. This is a strict subset of what the BFS
+     * in {@code ingestDocument} already classified every component against — unresolvable edges still
+     * fully informed each component's {@code dependencyDepth}/{@code dependencyDistance}/{@code
+     * dependencyPath}; they are simply not replayable here as a (component_id, component_id) row.
+     *
+     * <p>Iterates {@code saved.getComponents()} — the managed instances returned by {@code
+     * saveAndFlush} — never the transient instances {@code toEntity} built earlier: {@code
+     * saveAndFlush} on an entity that may be merged can hand back different instances than the ones
+     * this method's caller originally attached.
+     */
+    private void persistDependencyEdges(SBOM saved, NormalizedSbom document) {
+        if (document.dependencyEdges().isEmpty()) {
+            return;
+        }
+        Map<String, SBOMComponent> byRef = new java.util.HashMap<>();
+        Set<String> ambiguous = new java.util.HashSet<>();
+        for (SBOMComponent c : saved.getComponents()) {
+            String ref = c.getBomRef();
+            if (ref == null) {
+                continue;
+            }
+            if (byRef.containsKey(ref) || ambiguous.contains(ref)) {
+                ambiguous.add(ref);
+                byRef.remove(ref);
+                continue;
+            }
+            byRef.put(ref, c);
+        }
+        // The root wins over a duplicate — a generator that repeats metadata.component inside
+        // components[] should not cost the root its own outgoing edges.
+        SBOMComponent root = saved.getComponent();
+        if (root != null && root.getBomRef() != null) {
+            byRef.put(root.getBomRef(), root);
+            ambiguous.remove(root.getBomRef());
+        }
+
+        List<SBOMComponentDependency> rows = new ArrayList<>();
+        Set<String> seenPairs = new java.util.HashSet<>();
+        for (DependencyEdge edge : document.dependencyEdges()) {
+            SBOMComponent from = byRef.get(truncate(edge.fromRef(), MAX_SHORT_TEXT));
+            SBOMComponent to = byRef.get(truncate(edge.toRef(), MAX_SHORT_TEXT));
+            if (from == null || to == null || from.getId().equals(to.getId())) {
+                continue;
+            }
+            String pairKey = from.getId() + ":" + to.getId();
+            if (!seenPairs.add(pairKey)) {
+                continue;
+            }
+            SBOMComponentDependency row = new SBOMComponentDependency();
+            row.setSbomId(saved.getId());
+            row.setComponentId(from.getId());
+            row.setDependsOnComponentId(to.getId());
+            rows.add(row);
+        }
+        if (!rows.isEmpty()) {
+            dependencyRepository.saveAll(rows);
+        }
     }
 
     /**

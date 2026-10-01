@@ -1,5 +1,8 @@
 package net.jdesive.secy.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Tuple;
@@ -23,6 +26,7 @@ import net.jdesive.secy.model.scoring.RiskScoreBreakdown;
 import net.jdesive.secy.model.scoring.RiskScoreResult;
 import net.jdesive.secy.model.vex.VexExplanation;
 import net.jdesive.secy.persistence.CompromiseFindingRepository;
+import net.jdesive.secy.persistence.SBOMComponentDependencyRepository;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.*;
 import net.jdesive.secy.service.scoring.RiskScoreInputs;
@@ -87,6 +91,11 @@ public class ActionableService {
 
     /** M1i: {@code GET /actionable/{id}}'s risk-score breakdown block. */
     private final RiskScoringService riskScoringService;
+
+    /** M1l: resolves {@code dependency.path} bom-refs back to a component's name/version. */
+    private final SBOMComponentDependencyRepository dependencyRepository;
+
+    private final ObjectMapper objectMapper;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -591,7 +600,61 @@ public class ActionableService {
                 toReferences(cve),
                 toVex(alert),
                 alert.getRiskScore(),
-                toRiskBreakdown(alert));
+                toRiskBreakdown(alert),
+                toDependencyContext(alert));
+    }
+
+    /**
+     * M1l: null for an asset alert ({@code alert.component == null} — {@code AssetComponent} has no
+     * dependency graph); otherwise the component's stored depth (null column read as UNKNOWN,
+     * mirroring {@code RiskScoreInputs.dependencyDepthOf}), distance, and its stored shortest path
+     * resolved back to component names/versions. A null/absent path reads as an empty list, not a
+     * null one, so the UI never has to tell "no path" apart from "not computed".
+     */
+    private ActionableDetailResponse.DependencyContext toDependencyContext(VulnerabilityAlert alert) {
+        SBOMComponent component = alert.getComponent();
+        if (component == null) {
+            return null;
+        }
+        DependencyDepth depth = component.getDependencyDepth() == null
+                ? DependencyDepth.UNKNOWN : component.getDependencyDepth();
+        List<String> refs = parsePath(component.getDependencyPath());
+        List<ActionableDetailResponse.PathHop> hops = toPathHops(component.getSbom().getId(), refs);
+        return new ActionableDetailResponse.DependencyContext(depth, component.getDependencyDistance(), hops);
+    }
+
+    private List<String> parsePath(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {
+            });
+        } catch (JsonProcessingException e) {
+            // A display-only field -- degrade to "no path" rather than failing the whole detail read.
+            return List.of();
+        }
+    }
+
+    /** Resolves each bom-ref against {@code sbomId}'s components; zero or multiple matches both read as unresolved. */
+    private List<ActionableDetailResponse.PathHop> toPathHops(UUID sbomId, List<String> refs) {
+        if (refs.isEmpty()) {
+            return List.of();
+        }
+        List<SBOMComponent> matches = dependencyRepository.findComponentsBySbomIdAndBomRefIn(sbomId, refs);
+        java.util.Map<String, List<SBOMComponent>> byRef = matches.stream()
+                .collect(java.util.stream.Collectors.groupingBy(SBOMComponent::getBomRef));
+        List<ActionableDetailResponse.PathHop> hops = new ArrayList<>(refs.size());
+        for (String ref : refs) {
+            List<SBOMComponent> candidates = byRef.get(ref);
+            if (candidates == null || candidates.size() != 1) {
+                hops.add(new ActionableDetailResponse.PathHop(ref, null, null, null));
+            } else {
+                SBOMComponent c = candidates.get(0);
+                hops.add(new ActionableDetailResponse.PathHop(ref, c.getId(), c.getName(), c.getVersion()));
+            }
+        }
+        return hops;
     }
 
     /** M1i: the alert's stored risk score/model/scoredAt alongside a freshly recomputed breakdown. */

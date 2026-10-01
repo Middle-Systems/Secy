@@ -75,7 +75,26 @@ public record ActionableDetailResponse(
          * recomputed against this alert's <em>current</em> snapshots, the same stored-vs-fresh pattern
          * as {@link #vex}. {@code current} is false when a re-enrichment or rescore is due.
          */
-        RiskScoreBreakdown riskScoreBreakdown) {
+        RiskScoreBreakdown riskScoreBreakdown,
+        /**
+         * M1l: this alert's component's position in the SBOM's dependency graph — null for an asset
+         * alert ({@code alert.component == null}), since {@code AssetComponent} has no dependency
+         * graph at all (see ROADMAP.md, M1l — "Dependency graph preserved").
+         */
+        DependencyContext dependency) {
+
+    /** The alert's component's DIRECT/TRANSITIVE/UNKNOWN classification, distance and shortest path (M1l). */
+    public record DependencyContext(net.jdesive.secy.persistence.entity.DependencyDepth depth, Integer distance,
+                                    List<PathHop> path) {
+    }
+
+    /**
+     * One hop of a {@link DependencyContext#path()}, root first — {@code componentId}/{@code name}/
+     * {@code version} are null when the bom-ref resolved to zero or more than one persisted
+     * component of the SBOM (M1l).
+     */
+    public record PathHop(String bomRef, UUID componentId, String name, String version) {
+    }
 
     /** The CVE itself, flattened out of {@code Vulnerability}. */
     public record Cve(

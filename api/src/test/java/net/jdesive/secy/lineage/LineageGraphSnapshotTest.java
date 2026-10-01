@@ -42,6 +42,31 @@ class LineageGraphSnapshotTest {
     }
 
     @Test
+    void dependsOnAcceptsComponentToComponentAndSbomToComponent() {
+        GraphNode sbom = node(NodeLabel.SBOM, "s1", Map.of());
+        GraphNode a = node(NodeLabel.COMPONENT, "a", Map.of());
+        GraphNode b = node(NodeLabel.COMPONENT, "b", Map.of());
+        GraphEdge sbomToA = new GraphEdge(EdgeType.DEPENDS_ON, sbom.ref(), a.ref());
+        GraphEdge aToB = new GraphEdge(EdgeType.DEPENDS_ON, a.ref(), b.ref());
+
+        LineageGraphSnapshot snapshot =
+                new LineageGraphSnapshot(TENANT, List.of(sbom, a, b), List.of(sbomToA, aToB));
+
+        assertThat(snapshot.edges()).containsExactlyInAnyOrder(sbomToA, aToB);
+    }
+
+    @Test
+    void dependsOnRejectsProductToComponent() {
+        GraphNode product = node(NodeLabel.PRODUCT, "p1", Map.of());
+        GraphNode component = node(NodeLabel.COMPONENT, "c1", Map.of());
+        GraphEdge edge = new GraphEdge(EdgeType.DEPENDS_ON, product.ref(), component.ref());
+
+        assertThatThrownBy(() -> new LineageGraphSnapshot(TENANT, List.of(product, component), List.of(edge)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not allow");
+    }
+
+    @Test
     void rejectsADisallowedLabelPair() {
         GraphNode product = node(NodeLabel.PRODUCT, "p1", Map.of());
         GraphNode component = node(NodeLabel.COMPONENT, "c1", Map.of());

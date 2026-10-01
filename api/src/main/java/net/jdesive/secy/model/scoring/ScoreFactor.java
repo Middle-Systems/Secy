@@ -17,9 +17,11 @@ import net.jdesive.secy.service.scoring.ScoreInput;
  *                    rounded checkpoint after this step minus the checkpoint before it. Every
  *                    factor's {@code points} sums to the final score exactly.
  * @param runningScore the running score's rounded checkpoint after this step
- * @param available   false only for {@code DEPENDENCY_DEPTH} until M1l supplies a real value
+ * @param available   false for {@code DEPENDENCY_DEPTH} when the component's position is
+ *                     {@code UNKNOWN} (asset/scanner alert, no usable graph, unreachable from the
+ *                     root, or a pre-M1l row) — see {@code RiskScorer} step 7
  * @param note        a short explanation when the value needed one (a suppression, a fallback, the
- *                    M1l placeholder), or null
+ *                    {@code DEPENDENCY_DEPTH} UNKNOWN explanation), or null
  */
 public record ScoreFactor(
         ScoreInput input,

@@ -41,9 +41,22 @@ import java.util.Set;
  *                             {@code Organization:} with the prefix stripped. Deduplicated, document
  *                             order
  * @param dependencyRelationshipRefs (M1h) the bom-refs/SPDXIDs that take part in at least one
- *                             declared dependency relationship. <b>Presence only, not a graph</b> —
- *                             M1l will replace this with a real edge list; see
+ *                             declared dependency relationship. <b>Presence only, not a graph</b>
+ *                             — stays exactly as M1h defined it (the NTIA completeness check
+ *                             this feeds covers all 15 SPDX relationship types and the explicit
+ *                             {@code {ref:X, dependsOn:[]}} assertion deliberately). M1l's directed
+ *                             edges are the separate {@link #dependencyEdges} field below; see
  *                             {@code SbomQualityScorer}
+ * @param dependencyEdges      (M1l) every directed "from depends on to" edge the document declared
+ *                             — CycloneDX {@code dependencies[]}; SPDX {@code DEPENDS_ON} and
+ *                             the seven {@code *_DEPENDENCY_OF} types only (see {@code SpdxNormalizer}'s
+ *                             direction table). Empty when the document declared no edges, or when
+ *                             {@link DependencyEdgeCollector} overflowed (see its Javadoc)
+ * @param dependencyRootRefs   (M1l) the bom-refs/SPDXIDs the document identifies as its own root
+ *                             — CycloneDX {@code metadata.component}'s bom-ref; SPDX's
+ *                             {@code describedElementIds} (both {@code documentDescribes} and
+ *                             {@code DESCRIBES} relationship targets). {@link DependencyGraphAnalyzer}'s
+ *                             BFS seeds from every ref in this set
  */
 @Builder
 public record NormalizedSbom(SbomFormat format,
@@ -56,7 +69,9 @@ public record NormalizedSbom(SbomFormat format,
                              int cryptoAssetsIgnoredForSpecVersion,
                              LocalDateTime documentTimestamp,
                              @Singular List<String> authors,
-                             @Singular Set<String> dependencyRelationshipRefs) {
+                             @Singular Set<String> dependencyRelationshipRefs,
+                             @Singular List<DependencyEdge> dependencyEdges,
+                             @Singular Set<String> dependencyRootRefs) {
 
     /** An SBOM generator. CycloneDX {@code metadata.tools}, SPDX {@code creationInfo.creators}. */
     public record NormalizedTool(String name, String version, String group, String type) {
@@ -67,6 +82,8 @@ public record NormalizedSbom(SbomFormat format,
         tools = tools == null ? List.of() : List.copyOf(tools);
         authors = authors == null ? List.of() : List.copyOf(authors);
         dependencyRelationshipRefs = dependencyRelationshipRefs == null ? Set.of() : Set.copyOf(dependencyRelationshipRefs);
+        dependencyEdges = dependencyEdges == null ? List.of() : List.copyOf(dependencyEdges);
+        dependencyRootRefs = dependencyRootRefs == null ? Set.of() : Set.copyOf(dependencyRootRefs);
     }
 
     /**

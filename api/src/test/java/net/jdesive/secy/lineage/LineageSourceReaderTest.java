@@ -6,6 +6,7 @@ import net.jdesive.secy.persistence.AssetComponentRepository;
 import net.jdesive.secy.persistence.AssetRepository;
 import net.jdesive.secy.persistence.CompromiseFindingRepository;
 import net.jdesive.secy.persistence.ProductRepository;
+import net.jdesive.secy.persistence.SBOMComponentDependencyRepository;
 import net.jdesive.secy.persistence.SBOMComponentRepository;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.TenantRepository;
@@ -26,6 +27,7 @@ import net.jdesive.secy.persistence.entity.MatchConfidence;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
 import net.jdesive.secy.persistence.entity.SBOMComponent;
+import net.jdesive.secy.persistence.entity.SBOMComponentDependency;
 import net.jdesive.secy.persistence.entity.Tenant;
 import net.jdesive.secy.persistence.entity.TriageState;
 import net.jdesive.secy.persistence.entity.Vulnerability;
@@ -80,6 +82,9 @@ class LineageSourceReaderTest {
     @Autowired
     private CompromiseFindingRepository findingRepository;
 
+    @Autowired
+    private SBOMComponentDependencyRepository dependencyRepository;
+
     private final LineagePlanner planner = new LineagePlanner();
 
     // Both before AND after: the H2 database is shared by every @SpringBootTest context in the
@@ -98,6 +103,7 @@ class LineageSourceReaderTest {
     }
 
     private void cleanUp() {
+        dependencyRepository.deleteAll();
         findingRepository.deleteAll();
         alertRepository.deleteAll();
         assetRepository.deleteAll();
@@ -153,6 +159,18 @@ class LineageSourceReaderTest {
                 fixtureB.asset.getId().toString(),
                 fixtureB.acPresent.getId().toString());
 
+        // M1l: exactly the two active-SBOM edges, with the right fromRoot resolution; the inactive
+        // SBOM's edge never surfaces.
+        List<net.jdesive.secy.lineage.model.GraphEdge> dependsOnEdges = snapshotA.edges().stream()
+                .filter(e -> e.type() == EdgeType.DEPENDS_ON).toList();
+        assertThat(dependsOnEdges).containsExactlyInAnyOrder(
+                new net.jdesive.secy.lineage.model.GraphEdge(EdgeType.DEPENDS_ON,
+                        new net.jdesive.secy.lineage.model.NodeRef(NodeLabel.SBOM, fixtureA.activeSbom.getId().toString()),
+                        new net.jdesive.secy.lineage.model.NodeRef(NodeLabel.COMPONENT, fixtureA.compA.getId().toString())),
+                new net.jdesive.secy.lineage.model.GraphEdge(EdgeType.DEPENDS_ON,
+                        new net.jdesive.secy.lineage.model.NodeRef(NodeLabel.COMPONENT, fixtureA.compA.getId().toString()),
+                        new net.jdesive.secy.lineage.model.NodeRef(NodeLabel.COMPONENT, fixtureA.compB.getId().toString())));
+
         // Calling plan twice gives equal snapshots.
         LineageGraphSnapshot snapshotAAgain = planner.plan(tenantA, reader.read(tenantA));
         assertThat(snapshotA).isEqualTo(snapshotAAgain);
@@ -200,6 +218,10 @@ class LineageSourceReaderTest {
         f.compA = sbomComponentRepository.save(newComponent(f.activeSbom, "lodash", "pkg:npm/lodash@4.17.21"));
         f.compB = sbomComponentRepository.save(newComponent(f.activeSbom, "left-pad", "pkg:npm/left-pad@1.0.0"));
 
+        // M1l: root -[DEPENDS_ON]-> compA -[DEPENDS_ON]-> compB, on the active SBOM.
+        dependencyRepository.save(dependencyRow(f.activeSbom.getId(), f.rootComponent.getId(), f.compA.getId()));
+        dependencyRepository.save(dependencyRow(f.activeSbom.getId(), f.compA.getId(), f.compB.getId()));
+
         // Inactive SBOM -- excluded entirely, including its component.
         SBOM inactiveSbom = new SBOM();
         inactiveSbom.setActive(false);
@@ -208,6 +230,10 @@ class LineageSourceReaderTest {
         applyTenant(inactiveSbom, explicitTenantId);
         f.inactiveSbom = sbomRepository.save(inactiveSbom);
         f.inactiveComponent = sbomComponentRepository.save(newComponent(f.inactiveSbom, "old-dep", "pkg:npm/old-dep@1.0.0"));
+        SBOMComponent inactiveComponent2 = sbomComponentRepository.save(
+                newComponent(f.inactiveSbom, "old-dep-2", "pkg:npm/old-dep-2@1.0.0"));
+        // M1l: an edge on an inactive SBOM -- must never surface in the plan.
+        dependencyRepository.save(dependencyRow(f.inactiveSbom.getId(), f.inactiveComponent.getId(), inactiveComponent2.getId()));
 
         // The Unassigned bucket's own active SBOM + component.
         SBOM unassignedSbom = new SBOM();
@@ -295,6 +321,14 @@ class LineageSourceReaderTest {
             v.setCveStatus(CveStatus.PUBLISHED);
             return vulnerabilityRepository.save(v);
         });
+    }
+
+    private static SBOMComponentDependency dependencyRow(UUID sbomId, UUID componentId, UUID dependsOnComponentId) {
+        SBOMComponentDependency row = new SBOMComponentDependency();
+        row.setSbomId(sbomId);
+        row.setComponentId(componentId);
+        row.setDependsOnComponentId(dependsOnComponentId);
+        return row;
     }
 
     private static SBOMComponent newComponent(SBOM sbom, String name, String purl) {

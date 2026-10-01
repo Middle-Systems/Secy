@@ -168,6 +168,29 @@ class RiskScorerTest {
                 LifecyclePresence.DEPLOYED, VexScoringState.NONE, depth, FixState.UNKNOWN);
     }
 
+    /**
+     * M1l: {@code available}/{@code note} now reflect the real classification, not a blanket
+     * "not yet tracked" placeholder — the fix the plan's "one-line change" claim missed (both
+     * {@code RiskScoreInputs} and this class needed changing).
+     */
+    @Test
+    void dependencyDepthAvailabilityReflectsTheRealClassification() {
+        ScoreFactor direct = RiskScorer.score(fixedInputsWithDepth(DependencyDepth.DIRECT), ScoringWeights.DEFAULT)
+                .factors().get(6);
+        assertThat(direct.available()).isTrue();
+        assertThat(direct.note()).isNull();
+
+        ScoreFactor transitive = RiskScorer.score(fixedInputsWithDepth(DependencyDepth.TRANSITIVE), ScoringWeights.DEFAULT)
+                .factors().get(6);
+        assertThat(transitive.available()).isTrue();
+        assertThat(transitive.note()).isNull();
+
+        ScoreFactor unknown = RiskScorer.score(fixedInputsWithDepth(DependencyDepth.UNKNOWN), ScoringWeights.DEFAULT)
+                .factors().get(6);
+        assertThat(unknown.available()).isFalse();
+        assertThat(unknown.note()).isNotNull();
+    }
+
     /* ------------------------------------------------------------------ */
     /* Lifecycle ordering                                                  */
     /* ------------------------------------------------------------------ */

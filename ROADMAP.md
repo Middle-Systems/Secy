@@ -263,9 +263,11 @@ honest state of things:
   for whoever next has Docker/Postgres access to run — see `api/README.md`'s runbook.
 - **(C) Explicitly deferred, not built**: live incremental sync, Repo nodes, Build nodes (SBOMs are
   labeled `SBOM`, not invented as `Build`, until M1e/M3 land real build entities), Build→Image /
-  Image→Workload edges, Finding/ActionItem nodes (M1j), Owner nodes (M2), dependency/root-component
-  edges (M1l), any graph-read API or UI, RLS-equivalent tenant isolation at the AGE label-table
-  level (Tenancy hardening), and scheduled/automatic rebuilds.
+  Image→Workload edges, Finding/ActionItem nodes (M1j), Owner nodes (M2), any graph-read API or UI,
+  RLS-equivalent tenant isolation at the AGE label-table level (Tenancy hardening), and scheduled/
+  automatic rebuilds. Dependency edges shipped in M1l as `EdgeType.DEPENDS_ON`
+  (`Component -[:DEPENDS_ON]-> Component` or `SBOM -[:DEPENDS_ON]-> Component` for a root's own
+  direct dependency) — see M1l's own status block.
 
 **M1e — SBOM lifecycle stages + diffing.** Every SBOM is tagged with its stage (Source / Build /
 Analyzed / Deployed) at ingestion, by upload metadata or API field. A diff engine runs
@@ -416,9 +418,12 @@ becomes its own finding category, surfaced per product.
   KEV/EPSS/CVSS to rank it by).
 - **Dependency relationship is checked for PRESENCE only.** `dependencyRelationshipRefs` records
   which bom-refs/SPDXIDs take part in at least one declared dependency relationship — it does
-  **not** build or validate the dependency graph. That is explicitly M1l's job; this milestone never
-  traverses edges, only checks whether a component's own bom-ref appears in the declared set (a
-  component with no bom-ref automatically fails this element).
+  **not** build or validate the dependency graph; it only checks whether a component's own bom-ref
+  appears in the declared set (a component with no bom-ref automatically fails this element). M1l
+  shipped the real directed graph (`DependencyEdge`/`DependencyGraphAnalyzer`) **alongside**, not
+  instead of, this presence set — `dependencyRelationshipRefs` is untouched (still all 15 SPDX
+  relationship types, still the explicit `{ref:X, dependsOn:[]}` assertion) precisely so this NTIA
+  score never shifts; see M1l's own status block.
 - **Not done, deliberately.** A manual rescore/re-reconcile endpoint; backfilling a score onto
   pre-M1h SBOMs (their raw bodies are already gone by the time this shipped — `pendingRawBody` is
   cleared at ingest); nested `components[].components[]` (existing parser limitation, all formats);
@@ -483,18 +488,21 @@ become tenant-configurable later (future-expansion item, not M1 scope).
   different product — correlating Deployed first and Source second (so Source has the *newer*
   `createdAt`) and still getting Deployed first in the default listing proves score, not recency,
   drives the order.
-- **The dependency-depth placeholder, and the roadmap's own order inconsistency.** M1i's input list
-  above names "dependency depth (direct vs. transitive, from M1l)" as an input, and the "Suggested
-  order" diagram below places M1i *before* M1l — so M1i cannot literally read a real depth value yet.
-  Resolved with a declared neutral placeholder rather than waiting on M1l: `DependencyDepth`
-  (`DIRECT`/`TRANSITIVE`/`UNKNOWN`) lives in `persistence.entity` (not `service.scoring`) precisely so
-  M1l can `@Enumerated` it onto a real column later without a package move, `RiskScoreInputs.from`
-  hard-codes `UNKNOWN` for every alert today (`// TODO(M1l): read component.getDependencyDepth()`),
-  and `UNKNOWN`'s weight (`1.0`) equals `DIRECT`'s — neutral, not a discount — so nothing in the score
-  changes the day M1l starts supplying real values; only `TRANSITIVE` (`0.9`) will move existing
-  scores, and only downward. The breakdown surfaces this today as `DEPENDENCY_DEPTH` with
-  `available=false` and an explanatory note, so a client can grey it out rather than presenting a
-  fake number as authoritative.
+- **The dependency-depth placeholder — resolved by M1l.** M1i's input list above names "dependency
+  depth (direct vs. transitive, from M1l)" as an input, and the "Suggested order" diagram below
+  placed M1i *before* M1l — so M1i originally shipped with a declared neutral placeholder:
+  `DependencyDepth` (`DIRECT`/`TRANSITIVE`/`UNKNOWN`) living in `persistence.entity` (not
+  `service.scoring`) precisely so M1l could `@Enumerated` it onto a real column later without a
+  package move, `RiskScoreInputs.from` hard-coding `UNKNOWN` for every alert, and `UNKNOWN`'s weight
+  (`1.0`) equalling `DIRECT`'s so nothing in the score would change the day M1l shipped. M1l has now
+  shipped (see its own status block): `RiskScoreInputs.from` reads the alert's component's real
+  ingest-time classification, and `UNKNOWN`'s weight is still `1.0` — only `TRANSITIVE` (`0.9`) moves
+  a score, and only downward. **M1l also found and fixed a second bug the original "one-line change"
+  plan missed**: `RiskScorer`'s own `DEPENDENCY_DEPTH` step hard-coded `available=false` and a fixed
+  "not yet tracked" note regardless of the depth value passed in — so even with a real depth reaching
+  `RiskScoreInputs`, the breakdown would have kept reporting it as unavailable. Both
+  `RiskScoreInputs.from` (the data) and `RiskScorer` step 7 (the reporting) needed the fix; `available`
+  is now `depth != UNKNOWN` and the note is non-null only for the `UNKNOWN` case.
 - **Out of scope, deliberately (M1j's territory).** `LifecycleDriftFinding`, `QuantumVulnerabilityFinding`
   and `SbomQualityFinding` are not scored (see above) — their Javadoc's old "M1j (triage) and M1i
   (scoring) territory" notes now read "M1j (triage consolidation **and** scoring)", since M1j's
@@ -506,7 +514,7 @@ become tenant-configurable later (future-expansion item, not M1 scope).
   it only lays down `risk_score_model` as the snapshot seed feeds-wiring will need to revisit when it
   implements per-feed toggles.
 - **Not done, deliberately.** Tenant-configurable weights (`ScoringWeightsProvider` is a stub);
-  asset/product rollup persistence (computed on read, every time); a real dependency-depth value (M1l);
+  asset/product rollup persistence (computed on read, every time);
   `identityConfidence`/REJECTED-DISPUTED-veto/triage/SSVC as scoring inputs; UI (M1k).
 
 **M1j — Finding & Action-item model.** Broaden the alert model beyond `VulnerabilityAlert` /
@@ -705,6 +713,73 @@ table).
 **M1l — Dependency graph preserved.** Keep the full dependency tree from each SBOM, not
 flattened as today. Each finding records whether its component is direct or transitive, plus
 the path from the product root — feeds both M1i's scoring input and the M1d lineage graph.
+
+**Status: SHIPPED.**
+- **What shipped.** A cycle-safe BFS (`DependencyGraphAnalyzer`, pure, no Spring/JPA, same pattern as
+  `ComponentIdentityAssessor`) over a new directed edge model (`DependencyEdge`/
+  `DependencyEdgeCollector`) extracted by both normalizers: CycloneDX from `dependencies[]` (one edge
+  per `{ref, dependsOn[]}` pair, `provides[]` still ignored); SPDX from `DEPENDS_ON` (A→B) and the
+  seven `*_DEPENDENCY_OF` types (B→A) only — `CONTAINS`/`CONTAINED_BY` deliberately excluded, since a
+  Syft-style document declares `root CONTAINS <every package>` flatly alongside real dependency
+  edges, and counting it would make everything `DIRECT` and erase the transitive signal entirely.
+  Every component is classified once at ingest (`SBOMService.ingestDocument`, M1c Pass-A pattern) as
+  `DIRECT` (one hop from a root), `TRANSITIVE` (two+ hops), or `UNKNOWN` — a null bom-ref, a bom-ref
+  shared by two or more components, a bom-ref equal to a root ref, or simple unreachability from
+  every root all resolve to `UNKNOWN`, never an invented fallback or the `TRANSITIVE` discount
+  ("unknown is not harmless"). Persisted as a derived summary directly on `sbom_component`
+  (`dependency_depth`/`dependency_distance`/one shortest `dependency_path` as a JSON array of
+  bom-refs, capped at 32 hops before the path itself is dropped — depth/distance stay exact beyond
+  that) **and** as raw resolved edges in a new satellite table, `sbom_component_dependency`
+  (migration `030`, plain-UUID columns, no JPA associations — the 029b/`TenantMembershipRole`
+  precedent, so Postgres gets real cascading FKs while H2 tests never get a blocking FK). Both M1i
+  (reads the derived column, zero extra queries) and M1d (reads the raw edges, see below) are served
+  from the same BFS pass; no backfill is possible or attempted — pre-M1l rows stay `NULL`/`UNKNOWN`
+  until their next re-upload, since `pendingRawBody` is already cleared by the time this shipped.
+- **M1i wiring — and the second bug the "one-line change" plan missed.** `RiskScoreInputs.from` now
+  reads `alert.getComponent().getDependencyDepth()` (null column reads as `UNKNOWN`) instead of
+  hard-coding it. The plan that scoped this work assumed that was the only change needed; it was not.
+  `RiskScorer`'s own `DEPENDENCY_DEPTH` step independently hard-coded `available=false` and a fixed
+  "not yet tracked" note, **regardless of the depth value it was given** — so a real `DIRECT`/
+  `TRANSITIVE` value reaching `RiskScoreInputs` would still have rendered as "not available" in every
+  breakdown. Both call sites needed fixing: `available` is now `depth != UNKNOWN`, and the note is
+  non-null only for the `UNKNOWN` case. `ScoringWeights`/`ScoreFactor`/`ScoreInput` needed no code
+  change — the weights (`DIRECT 1.0` / `TRANSITIVE 0.9` / `UNKNOWN 1.0`) were already correct — only
+  Javadoc. The model version stays `m1i.1`: the formula and weights are unchanged, only the input
+  data improved, same precedent as new EPSS/KEV data moving a score without a model bump. No rescore
+  job runs at deploy; existing rows stay `NULL`/`UNKNOWN` until the next re-upload or `reEnrichAll`
+  pass naturally rescoring them.
+- **M1d wiring, fully additive.** A new last `EdgeType.DEPENDS_ON` value
+  (`Component -[:DEPENDS_ON]-> Component`, or `SBOM -[:DEPENDS_ON]-> Component` for a root's own
+  direct dependency — the root itself is still never a lineage node), a new `DependencyEdgeRow`,
+  `LineageSourceData` gaining one trailing field, a new `LineageSourceReader` query joining
+  `sbom_component_dependency` back to its (active, this-tenant) `SBOM` to compute `fromRoot`, and one
+  new `LineagePlanner.addDependencyEdges` method. No existing `NodeLabel`/`EdgeType`/`addX` method
+  touched; `AgeSql` creates the new elabel automatically on the next rebuild with no migration
+  needed, and `AgeSqlTest` covers it by iterating `EdgeType.values()`.
+- **API — detail only, no UI.** `GET /actionable/{id}` gained a trailing `dependency` block
+  (`depth`/`distance`/`path`, each path hop resolved to a component id/name/version where the bom-ref
+  resolves to exactly one persisted component of the SBOM) — null for an asset/scanner alert, since
+  `AssetComponent` carries no dependency graph at all (Grype has none; Trivy's optional
+  `Packages[]`/`DependsOn` fields are not read — a stated non-goal). No UI rendering; this is API
+  surface for a future milestone to consume.
+- **Narrower than the roadmap text — documented honestly, not relitigated.** "Full dependency tree"
+  means every declared *resolvable* edge persisted in `sbom_component_dependency`, plus the complete
+  ref graph used for classification — an edge through a ref with no matching `sbom_component` row
+  (ambiguous/duplicate bom-ref, or simply absent) is not stored in that table, though its effect is
+  still fully reflected in the affected component's own depth/distance/path, since the BFS runs over
+  the whole ref graph, not just the rows that end up persisted. "The path" means one representative
+  shortest path (BFS, first-discovered-in-document-order tie-break), not every path through a DAG —
+  the lineage graph's own edge set already represents every path, and M1i only needs the 3-way
+  classification. SPDX's pre-existing multi-`DESCRIBES` quirk (last-wins `rootComponent`, others
+  silently dropped from `components`) is not fixed — the BFS still seeds from every described ref
+  regardless, so classification is unaffected even though the dropped duplicate's own row never
+  exists to classify. Asset/scanner-derived components stay `UNKNOWN` permanently — stated non-goal,
+  not an oversight.
+- **Not done, deliberately.** Backfilling pre-M1l rows (no raw body survives ingest to re-derive
+  from); a UI rendering of the dependency path; CycloneDX `provides[]` as an edge source; SPDX
+  `CONTAINS`/`CONTAINED_BY`/`DEPENDENCY_MANIFEST_OF`/`STATIC_LINK`/`DYNAMIC_LINK`/
+  `PREREQUISITE_FOR`/`HAS_PREREQUISITE` as edge sources (see above); fixing the SPDX multi-`DESCRIBES`
+  quirk; scanner/asset dependency data (Trivy `--list-all-pkgs` is not read).
 
 **M1 feeds wiring.** No new feed engineering — reuse all 8 existing feeds as-is. Add: a
 per-tenant enable/disable toggle per feed; rescore-going-forward semantics (existing findings

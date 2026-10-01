@@ -8,6 +8,7 @@ import net.jdesive.secy.lineage.source.AssetComponentRow;
 import net.jdesive.secy.lineage.source.AssetRow;
 import net.jdesive.secy.lineage.source.ComponentRow;
 import net.jdesive.secy.lineage.source.CompromiseFindingRow;
+import net.jdesive.secy.lineage.source.DependencyEdgeRow;
 import net.jdesive.secy.lineage.source.LineageSourceData;
 import net.jdesive.secy.lineage.source.ProductRow;
 import net.jdesive.secy.lineage.source.SbomRow;
@@ -57,6 +58,7 @@ public class LineagePlanner {
         addProducts(data.products(), tenantIdStr, nodes, productIds);
         addSboms(data.sboms(), tenantIdStr, productIds, nodes, edges, sbomRefs);
         addComponents(data.components(), tenantIdStr, sbomRefs, nodes, edges, componentRefs);
+        addDependencyEdges(data.dependencyEdges(), sbomRefs, componentRefs, edges);
         addAssets(data.assets(), tenantIdStr, productIds, nodes, edges, assetRefs);
         addAssetComponents(data.assetComponents(), tenantIdStr, assetRefs, nodes, edges, assetComponentRefs);
         addAlerts(data.alerts(), tenantIdStr, componentRefs, assetComponentRefs, vulnerabilityById,
@@ -153,6 +155,33 @@ public class LineagePlanner {
             nodes.add(new GraphNode(NodeLabel.COMPONENT, key, props));
             componentRefs.put(row.id(), ref);
             edges.add(new GraphEdge(EdgeType.CONTAINS, sbomRef, ref));
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Dependency edges (M1l)                                             */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * {@code Component -[:DEPENDS_ON]-> Component}, or {@code SBOM -[:DEPENDS_ON]-> Component} when
+     * {@link DependencyEdgeRow#fromRoot()} is true (the root is not a lineage node). Either end
+     * missing from this snapshot (its SBOM/component was not included — inactive, filtered upstream,
+     * or the root itself has no outgoing-edge node to reuse) skips the row rather than producing a
+     * dangling edge. The table's own unique constraint plus one root row per SBOM means no duplicate
+     * edge is possible here.
+     */
+    private void addDependencyEdges(List<DependencyEdgeRow> rows, Map<UUID, NodeRef> sbomRefs,
+                                     Map<UUID, NodeRef> componentRefs, List<GraphEdge> edges) {
+        for (DependencyEdgeRow row : rows) {
+            NodeRef to = componentRefs.get(row.dependsOnComponentId());
+            if (to == null) {
+                continue;
+            }
+            NodeRef from = row.fromRoot() ? sbomRefs.get(row.sbomId()) : componentRefs.get(row.componentId());
+            if (from == null) {
+                continue;
+            }
+            edges.add(new GraphEdge(EdgeType.DEPENDS_ON, from, to));
         }
     }
 

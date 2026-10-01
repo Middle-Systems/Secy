@@ -3,6 +3,7 @@ package net.jdesive.secy.service.sbom;
 import com.fasterxml.jackson.databind.JsonNode;
 import net.jdesive.secy.model.cbom.CryptoAssets;
 import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
+import net.jdesive.secy.model.component.DependencyEdgeCollector;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.component.SbomFormat;
@@ -19,6 +20,7 @@ import net.jdesive.secy.model.component.SecondaryIdentifiers;
 import net.jdesive.secy.model.cyclonedx.CycloneDXLifecycle;
 import net.jdesive.secy.persistence.entity.ComponentHash;
 import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.ZoneId;
@@ -51,6 +53,7 @@ import java.util.Set;
  * (top-level {@code "bomFormat": "CBOM"}) are already rejected by {@code SbomParser}'s
  * {@code bomFormat} check, before this class ever runs — deliberately unsupported, not a bug.
  */
+@Slf4j
 @Component
 public class CycloneDXNormalizer {
 
@@ -61,11 +64,14 @@ public class CycloneDXNormalizer {
                 .version(file.getVersion());
 
         CycloneDXMetadata metadata = file.getMetadata();
+        String rootBomRef = null;
         if (metadata != null) {
             if (metadata.getComponent() != null) {
                 // Root is never crypto-classified, even when it is itself a cryptographic-asset and
                 // the document supports CBOM — see this class's Javadoc.
-                builder.rootComponent(component(metadata.getComponent(), false));
+                NormalizedComponent root = component(metadata.getComponent(), false);
+                builder.rootComponent(root);
+                rootBomRef = root.bomRef();
             }
             if (metadata.getTools() != null && metadata.getTools().getComponents() != null) {
                 for (CycloneDXTool tool : metadata.getTools().getComponents()) {
@@ -99,6 +105,17 @@ public class CycloneDXNormalizer {
         }
         builder.cryptoAssetsIgnoredForSpecVersion(ignoredForSpecVersion);
         builder.dependencyRelationshipRefs(dependencyRefs(file.getDependencies()));
+
+        // M1l: the directed edge list and the document's own root ref(s) — see dependencyEdges' and
+        // dependencyRootRefs' Javadoc on NormalizedSbom.
+        DependencyEdgeCollector collector = new DependencyEdgeCollector();
+        collectDependencyEdges(file.getDependencies(), collector);
+        if (collector.overflowed()) {
+            log.warn("CycloneDX document declared too many dependency edges — discarding the whole "
+                    + "dependency graph; every component will classify as UNKNOWN depth");
+        }
+        builder.dependencyEdges(collector.edges());
+        builder.dependencyRootRefs(rootBomRef == null ? java.util.Set.of() : java.util.Set.of(rootBomRef));
 
         return builder.build();
     }
@@ -215,6 +232,39 @@ public class CycloneDXNormalizer {
             }
         }
         return out;
+    }
+
+    /**
+     * Top-level {@code dependencies[]} (M1l) → the directed edge list: for each {@code {ref,
+     * dependsOn[]}} object entry, one {@code ref -> d} edge per textual non-blank element of {@code
+     * dependsOn[]}. An empty {@code dependsOn[]} adds no edge (unlike {@link #dependencyRefs}'s
+     * presence set, which still records {@code ref} itself). Malformed shapes (not an array, entries
+     * not objects, a non-array {@code dependsOn}) degrade to no edges, never throw. CycloneDX 1.6
+     * {@code provides[]} is deliberately ignored, same as {@link #dependencyRefs}.
+     */
+    private static void collectDependencyEdges(JsonNode dependencies, DependencyEdgeCollector collector) {
+        if (dependencies == null || !dependencies.isArray()) {
+            return;
+        }
+        for (JsonNode entry : dependencies) {
+            if (entry == null || !entry.isObject()) {
+                continue;
+            }
+            JsonNode ref = entry.get("ref");
+            String from = ref != null && ref.isTextual() ? ref.asText() : null;
+            if (from == null || from.isBlank()) {
+                continue;
+            }
+            JsonNode dependsOn = entry.get("dependsOn");
+            if (dependsOn == null || !dependsOn.isArray()) {
+                continue;
+            }
+            for (JsonNode dep : dependsOn) {
+                if (dep != null && dep.isTextual() && !dep.asText().isBlank()) {
+                    collector.add(from, dep.asText());
+                }
+            }
+        }
     }
 
     /**

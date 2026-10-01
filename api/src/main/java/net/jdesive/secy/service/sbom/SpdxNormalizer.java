@@ -1,6 +1,7 @@
 package net.jdesive.secy.service.sbom;
 
 import lombok.extern.slf4j.Slf4j;
+import net.jdesive.secy.model.component.DependencyEdgeCollector;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.component.SbomFormat;
@@ -57,6 +58,16 @@ import java.util.Set;
  * {@code SbomQualityScorer}'s NTIA completeness check. This is still not a graph traversal: no
  * edges are stored, no tree is built, nothing here changes the "relationship graph is not
  * traversed" statement above for correlation purposes.
+ *
+ * <h2>M1l: directed dependency edges — a narrower set of types</h2>
+ *
+ * <p>{@link #dependencyEdges} reads only {@code DEPENDS_ON} and the seven {@code *_DEPENDENCY_OF}
+ * types (never the other six {@link #DEPENDENCY_RELATIONSHIP_TYPES} entries) to build a directed
+ * edge list for {@code DependencyGraphAnalyzer}'s BFS classification. {@code CONTAINS}/{@code
+ * CONTAINED_BY} are deliberately excluded here: a Syft-style document declares {@code root CONTAINS
+ * <every package>} flatly alongside any real dependency edges, and counting it would make every
+ * component DIRECT, erasing the transitive signal entirely. Correlation itself remains a flat-set
+ * operation over {@code packages[]} — this still does not change that.
  */
 @Slf4j
 @Component
@@ -76,6 +87,21 @@ public class SpdxNormalizer {
             "DEPENDS_ON", "DEPENDENCY_OF", "DEV_DEPENDENCY_OF", "BUILD_DEPENDENCY_OF", "RUNTIME_DEPENDENCY_OF",
             "OPTIONAL_DEPENDENCY_OF", "PROVIDED_DEPENDENCY_OF", "TEST_DEPENDENCY_OF", "DEPENDENCY_MANIFEST_OF",
             "CONTAINS", "CONTAINED_BY", "STATIC_LINK", "DYNAMIC_LINK", "PREREQUISITE_FOR", "HAS_PREREQUISITE");
+
+    /**
+     * M1l: {@code spdxElementId -> relatedSpdxElement} (A -> B) edges — the one SPDX relationship
+     * type whose declared direction already matches "A depends on B".
+     */
+    private static final Set<String> FORWARD_DEPENDENCY_TYPES = Set.of("DEPENDS_ON");
+
+    /**
+     * M1l: {@code relatedSpdxElement -> spdxElementId} (B -> A) edges — these seven types are all
+     * phrased "A is a dependency OF B", so the dependency edge runs the other way from the
+     * relationship's own A/B order.
+     */
+    private static final Set<String> REVERSE_DEPENDENCY_TYPES = Set.of(
+            "DEPENDENCY_OF", "BUILD_DEPENDENCY_OF", "DEV_DEPENDENCY_OF", "OPTIONAL_DEPENDENCY_OF",
+            "PROVIDED_DEPENDENCY_OF", "TEST_DEPENDENCY_OF", "RUNTIME_DEPENDENCY_OF");
 
     /**
      * SPDX 2.3 {@code primaryPackagePurpose} → the CycloneDX {@code type} vocabulary the rest of Secy
@@ -146,6 +172,17 @@ public class SpdxNormalizer {
         }
         builder.authors(authors(document));
         builder.dependencyRelationshipRefs(dependencyRefs(document));
+
+        // M1l: directed dependency edges (a narrower type set than dependencyRefs above) and the
+        // document's own root refs — see this class's Javadoc and NormalizedSbom's field docs.
+        DependencyEdgeCollector collector = new DependencyEdgeCollector();
+        collectDependencyEdges(document, collector);
+        if (collector.overflowed()) {
+            log.warn("SPDX document declared too many dependency edges — discarding the whole "
+                    + "dependency graph; every component will classify as UNKNOWN depth");
+        }
+        builder.dependencyEdges(collector.edges());
+        builder.dependencyRootRefs(rootIds);
 
         return builder.build();
     }
@@ -478,6 +515,39 @@ public class SpdxNormalizer {
             }
         }
         return out;
+    }
+
+    /**
+     * {@code relationships[]} entries whose {@code relationshipType} is {@code DEPENDS_ON} or one of
+     * the seven {@code *_DEPENDENCY_OF} types (M1l) — see this class's Javadoc and {@link
+     * #FORWARD_DEPENDENCY_TYPES}/{@link #REVERSE_DEPENDENCY_TYPES} for the direction table. Either
+     * end being null/blank/{@code NONE}/{@code NOASSERTION} (case-insensitively, via {@link #value})
+     * drops the edge entirely rather than keeping a one-sided fragment. {@code CONTAINS}/{@code
+     * CONTAINED_BY}/{@code DEPENDENCY_MANIFEST_OF}/{@code STATIC_LINK}/{@code DYNAMIC_LINK}/{@code
+     * PREREQUISITE_FOR}/{@code HAS_PREREQUISITE}/{@code DESCRIBES}/{@code DESCRIBED_BY} never become
+     * edges here, even though several of them are in {@link #DEPENDENCY_RELATIONSHIP_TYPES} for the
+     * unrelated M1h presence check.
+     */
+    private static void collectDependencyEdges(SpdxDocument document, DependencyEdgeCollector collector) {
+        if (document.getRelationships() == null) {
+            return;
+        }
+        for (SpdxRelationship relationship : document.getRelationships()) {
+            if (relationship == null || relationship.getRelationshipType() == null) {
+                continue;
+            }
+            String type = relationship.getRelationshipType().trim().toUpperCase(Locale.ROOT);
+            String a = value(relationship.getSpdxElementId());
+            String b = value(relationship.getRelatedSpdxElement());
+            if (a == null || b == null) {
+                continue;
+            }
+            if (FORWARD_DEPENDENCY_TYPES.contains(type)) {
+                collector.add(a, b);
+            } else if (REVERSE_DEPENDENCY_TYPES.contains(type)) {
+                collector.add(b, a);
+            }
+        }
     }
 
     /* ------------------------------------------------------------------ */

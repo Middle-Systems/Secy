@@ -18,11 +18,12 @@ public class CycloneDXFile {
     private List<CycloneDXComponent> components;
 
     /**
-     * Top-level {@code dependencies[]} (M1h) — {@code {ref, dependsOn[]}} entries. Bound as a raw
-     * tree, same reasoning as {@link CycloneDXComponent#getCryptoProperties()}: M1h only checks
-     * presence of a bom-ref in this structure (see {@code CycloneDXNormalizer#dependencyRefs}), never
-     * builds or validates the graph (M1l's job), so a typed POJO would buy nothing but a new way to
-     * reject an otherwise-valid document.
+     * Top-level {@code dependencies[]} ({@code {ref, dependsOn[]}} entries) — bound as a raw tree,
+     * same reasoning as {@link CycloneDXComponent#getCryptoProperties()}: a typed POJO would buy
+     * nothing but a new way to reject an otherwise-valid document. Read twice downstream: M1h's
+     * {@code CycloneDXNormalizer#dependencyRefs} for presence-only NTIA scoring, and M1l's {@code
+     * CycloneDXNormalizer#collectDependencyEdges} for the real directed edge graph (ROADMAP.md,
+     * M1l — "Dependency graph preserved").
      */
     private JsonNode dependencies;
 

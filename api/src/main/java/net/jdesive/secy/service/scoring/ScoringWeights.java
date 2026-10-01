@@ -37,8 +37,10 @@ import java.util.Map;
  *                               KEV-listed (KEV implies {@code IN_THE_WILD})
  * @param lifecycleFactor        multiplier per {@link LifecyclePresence}
  * @param vexFactor              multiplier per {@link VexScoringState}
- * @param dependencyDepthFactor  multiplier per {@link DependencyDepth} — every alert is
- *                               {@code UNKNOWN} until M1l
+ * @param dependencyDepthFactor  multiplier per {@link DependencyDepth} — a real DIRECT/TRANSITIVE
+ *                               value reaches this since M1l (ROADMAP.md — "Dependency graph
+ *                               preserved"); asset/scanner alerts and pre-M1l rows stay
+ *                               {@code UNKNOWN}
  * @param fixFactor              multiplier per {@link FixState}
  */
 public record ScoringWeights(

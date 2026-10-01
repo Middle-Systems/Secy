@@ -8,6 +8,7 @@ import net.jdesive.secy.lineage.source.AssetComponentRow;
 import net.jdesive.secy.lineage.source.AssetRow;
 import net.jdesive.secy.lineage.source.ComponentRow;
 import net.jdesive.secy.lineage.source.CompromiseFindingRow;
+import net.jdesive.secy.lineage.source.DependencyEdgeRow;
 import net.jdesive.secy.lineage.source.LineageSourceData;
 import net.jdesive.secy.lineage.source.ProductRow;
 import net.jdesive.secy.lineage.source.SbomRow;
@@ -259,6 +260,81 @@ class LineagePlannerTest {
     }
 
     /* ------------------------------------------------------------------ */
+    /* M1l: dependency edges                                              */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void componentToComponentDependencyEdgeAppears() {
+        UUID sbomId = UUID.randomUUID();
+        UUID aId = UUID.randomUUID();
+        UUID bId = UUID.randomUUID();
+        SbomRow sbom = sbomRow(sbomId, null);
+        ComponentRow a = componentRow(aId, sbomId);
+        ComponentRow b = componentRow(bId, sbomId);
+        DependencyEdgeRow edge = new DependencyEdgeRow(sbomId, aId, bId, false);
+
+        LineageGraphSnapshot snapshot = planner.plan(TENANT, dataWith(List.of(), List.of(sbom), List.of(a, b),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(edge)));
+
+        assertThat(snapshot.edges()).contains(
+                new GraphEdge(EdgeType.DEPENDS_ON, new NodeRef(NodeLabel.COMPONENT, aId.toString()),
+                        new NodeRef(NodeLabel.COMPONENT, bId.toString())));
+    }
+
+    @Test
+    void fromRootRowGivesSbomToComponentDependsOnEdge() {
+        UUID sbomId = UUID.randomUUID();
+        UUID rootId = UUID.randomUUID();
+        UUID aId = UUID.randomUUID();
+        SbomRow sbom = sbomRow(sbomId, null);
+        ComponentRow a = componentRow(aId, sbomId);
+        DependencyEdgeRow edge = new DependencyEdgeRow(sbomId, rootId, aId, true);
+
+        LineageGraphSnapshot snapshot = planner.plan(TENANT, dataWith(List.of(), List.of(sbom), List.of(a),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(edge)));
+
+        assertThat(snapshot.edges()).contains(
+                new GraphEdge(EdgeType.DEPENDS_ON, new NodeRef(NodeLabel.SBOM, sbomId.toString()),
+                        new NodeRef(NodeLabel.COMPONENT, aId.toString())));
+    }
+
+    @Test
+    void edgeTargetingAMissingComponentIsSkippedWithoutDanglingEdgeException() {
+        UUID sbomId = UUID.randomUUID();
+        UUID aId = UUID.randomUUID();
+        UUID missingComponentId = UUID.randomUUID();
+        UUID missingSbomId = UUID.randomUUID();
+        SbomRow sbom = sbomRow(sbomId, null);
+        ComponentRow a = componentRow(aId, sbomId);
+        // "to" not in this snapshot.
+        DependencyEdgeRow edgeToMissing = new DependencyEdgeRow(sbomId, aId, missingComponentId, false);
+        // fromRoot, but that SBOM is not in this snapshot either.
+        DependencyEdgeRow edgeFromMissingRoot = new DependencyEdgeRow(missingSbomId, UUID.randomUUID(), aId, true);
+
+        LineageGraphSnapshot snapshot = planner.plan(TENANT, dataWith(List.of(), List.of(sbom), List.of(a),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(edgeToMissing, edgeFromMissingRoot)));
+
+        assertThat(snapshot.edges()).noneMatch(e -> e.type() == EdgeType.DEPENDS_ON);
+    }
+
+    @Test
+    void noDependencyRowsLeavesExistingEdgeOrderUnchanged() {
+        UUID sbomId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
+        ProductRow product = productRow(productId);
+        SbomRow sbom = sbomRow(sbomId, productId);
+        UUID componentId = UUID.randomUUID();
+        ComponentRow component = componentRow(componentId, sbomId);
+
+        LineageGraphSnapshot withEmptyEdges = planner.plan(TENANT, dataWith(List.of(product), List.of(sbom),
+                List.of(component), List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
+        LineageGraphSnapshot withoutEdgesField = planner.plan(TENANT, dataWith(List.of(product), List.of(sbom),
+                List.of(component), List.of(), List.of(), List.of(), List.of(), List.of()));
+
+        assertThat(withEmptyEdges).isEqualTo(withoutEdgesField);
+    }
+
+    /* ------------------------------------------------------------------ */
 
     private static ProductRow productRow(UUID id) {
         return new ProductRow(id, "Product " + id, null, false, LocalDateTime.now());
@@ -286,8 +362,20 @@ class LineagePlannerTest {
                                                List<VulnerabilityRow> vulnerabilities,
                                                List<VulnerabilityAlertRow> alerts,
                                                List<CompromiseFindingRow> compromiseFindings) {
+        return dataWith(products, sboms, components, assets, assetComponents, vulnerabilities, alerts,
+                compromiseFindings, List.of());
+    }
+
+    /** M1l overload — every other existing call site defaults {@code dependencyEdges} to empty. */
+    private static LineageSourceData dataWith(List<ProductRow> products, List<SbomRow> sboms,
+                                               List<ComponentRow> components, List<AssetRow> assets,
+                                               List<AssetComponentRow> assetComponents,
+                                               List<VulnerabilityRow> vulnerabilities,
+                                               List<VulnerabilityAlertRow> alerts,
+                                               List<CompromiseFindingRow> compromiseFindings,
+                                               List<DependencyEdgeRow> dependencyEdges) {
         return new LineageSourceData(products, sboms, components, assets, assetComponents, vulnerabilities, alerts,
-                compromiseFindings);
+                compromiseFindings, dependencyEdges);
     }
 
 }

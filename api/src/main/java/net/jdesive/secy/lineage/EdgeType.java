@@ -39,7 +39,15 @@ public enum EdgeType {
      * {@code AssetComponent -[:HAS_COMPROMISE_FINDING]-> CompromiseFinding}
      */
     HAS_COMPROMISE_FINDING(pair(NodeLabel.COMPONENT, NodeLabel.COMPROMISE_FINDING),
-            pair(NodeLabel.ASSET_COMPONENT, NodeLabel.COMPROMISE_FINDING));
+            pair(NodeLabel.ASSET_COMPONENT, NodeLabel.COMPROMISE_FINDING)),
+
+    /**
+     * {@code Component -[:DEPENDS_ON]-> Component} (a declared dependency edge between two non-root
+     * components) or {@code SBOM -[:DEPENDS_ON]-> Component} (the product root's own direct
+     * dependency — the root is not a node, M1d) (M1l). Persisted edges only — see
+     * {@code sbom_component_dependency}.
+     */
+    DEPENDS_ON(pair(NodeLabel.COMPONENT, NodeLabel.COMPONENT), pair(NodeLabel.SBOM, NodeLabel.COMPONENT));
 
     /** Every edge carries exactly this one property. */
     public static final List<String> PROPERTY_KEYS = List.of("tenant_id");

@@ -30,7 +30,7 @@ public enum ScoreInput {
     /** VEX resolution status, multiplicative. */
     VEX_STATUS,
 
-    /** Direct vs. transitive dependency (M1l placeholder), multiplicative. */
+    /** Direct vs. transitive dependency (M1l, ROADMAP.md — "Dependency graph preserved"), multiplicative. */
     DEPENDENCY_DEPTH,
 
     /** Whether a fix is available, multiplicative. */

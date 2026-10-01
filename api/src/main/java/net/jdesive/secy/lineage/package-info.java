@@ -21,6 +21,9 @@
  * versus what is real but only user-verifiable against a live Postgres+AGE instance (migration
  * {@code 022}, {@link net.jdesive.secy.lineage.AgeLineageGraphWriter}'s actual JDBC execution, the
  * Postgres Docker image change) versus what is explicitly deferred (live incremental sync, Repo/
- * Build nodes, dependency edges, Finding/ActionItem, Owner nodes, any graph read API or UI).
+ * Build nodes, Finding/ActionItem, Owner nodes, any graph read API or UI). Dependency edges shipped
+ * in M1l (ROADMAP.md — "Dependency graph preserved") as {@link net.jdesive.secy.lineage.EdgeType#DEPENDS_ON},
+ * read from {@code sbom_component_dependency} by {@link net.jdesive.secy.lineage.LineageSourceReader}
+ * and emitted by {@link net.jdesive.secy.lineage.LineagePlanner}.
  */
 package net.jdesive.secy.lineage;

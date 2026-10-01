@@ -4,6 +4,7 @@ import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.DependencyDepth;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.persistence.entity.SBOMComponent;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
 
 /**
@@ -35,9 +36,18 @@ public record RiskScoreInputs(
                 alert.getExploitMaturity(),
                 LifecyclePresence.of(alert),
                 VexScoringState.of(alert),
-                // TODO(M1l): read component.getDependencyDepth(); scanner/asset components stay UNKNOWN.
-                DependencyDepth.UNKNOWN,
+                dependencyDepthOf(alert),
                 alert.getFixState());
+    }
+
+    /**
+     * M1l: the alert's SBOM component's ingest-time classification; asset/scanner alerts, pre-M1l
+     * rows and directly-built components (no {@code component}, or a null {@code dependencyDepth}
+     * column) are all {@link DependencyDepth#UNKNOWN}.
+     */
+    static DependencyDepth dependencyDepthOf(VulnerabilityAlert alert) {
+        SBOMComponent c = alert.getComponent();
+        return c == null || c.getDependencyDepth() == null ? DependencyDepth.UNKNOWN : c.getDependencyDepth();
     }
 
     /**
