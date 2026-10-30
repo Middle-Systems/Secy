@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,7 +51,8 @@ import java.util.List;
 @Service
 public class GitHubApiClient {
 
-    private static final String API_BASE = "https://api.github.com";
+    private static final String API_HOST = "api.github.com";
+    private static final String API_BASE = "https://" + API_HOST;
     private static final int PER_PAGE = 100;
 
     private final RestTemplate restTemplate;
@@ -146,11 +149,37 @@ public class GitHubApiClient {
                     int start = trimmed.indexOf('<');
                     int end = trimmed.indexOf('>');
                     if (start >= 0 && end > start) {
-                        return trimmed.substring(start + 1, end);
+                        return sameOriginOrNull(trimmed.substring(start + 1, end));
                     }
                 }
             }
         }
+        return null;
+    }
+
+    /**
+     * The {@code Link} header is response data, and every request carries the instance-wide token, so
+     * a next-page URL is only followed when it points back at {@code https://api.github.com} — and is
+     * then rebuilt on the fixed base rather than used verbatim, so nothing in the header can steer the
+     * token to another host. Anything else ends pagination with a warning.
+     */
+    private static String sameOriginOrNull(String link) {
+        try {
+            URI uri = new URI(link);
+            boolean sameOrigin = "https".equalsIgnoreCase(uri.getScheme())
+                    && API_HOST.equalsIgnoreCase(uri.getHost())
+                    && uri.getRawUserInfo() == null
+                    && (uri.getPort() == -1 || uri.getPort() == 443)
+                    && uri.getRawPath() != null
+                    && uri.getRawPath().startsWith("/");
+            if (sameOrigin) {
+                String query = uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery();
+                return "https://api.github.com/" + uri.getRawPath().substring(1) + query;
+            }
+        } catch (URISyntaxException e) {
+            // fall through
+        }
+        log.warn("Ignoring next-page link that does not point at {}: {}", API_BASE, link);
         return null;
     }
 
