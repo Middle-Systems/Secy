@@ -48,6 +48,15 @@ public class SBOMComponent implements CorrelatableComponent {
     private String purl;
 
     /**
+     * The organization that supplied this component instance (M1h) — CycloneDX
+     * {@code component.supplier.name}, SPDX {@code PackageSupplier} with its
+     * {@code Organization:}/{@code Person:} prefix stripped. Null when the document declared none.
+     * Feeds {@code SbomQualityScorer}'s {@code SUPPLIER} coverage test.
+     */
+    @Column(name = "supplier_name", length = 255)
+    private String supplierName;
+
+    /**
      * Stable identity of this component within its product, across SBOM versions.
      *
      * <p>The version-less PURL ({@code maven/org.apache.logging.log4j:log4j-core}), or
@@ -98,6 +107,92 @@ public class SBOMComponent implements CorrelatableComponent {
     @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
     private List<VulnerabilityAlert> vulnerabilityAlerts;
+
+    /**
+     * Declared CPE/SWID identifiers for this component instance (M1c). {@code @JsonIgnore}d —
+     * {@code open-in-view} would otherwise turn every serialized {@code SBOMComponent} (this SBOM's
+     * tree, every alert's {@code component}) into an N+1; {@code ComponentIdentityService#describe}
+     * is the read path for these.
+     *
+     * @see SBOMComponentIdentifier
+     */
+    @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    private List<SBOMComponentIdentifier> identifiers = new ArrayList<>();
+
+    /**
+     * Detected disagreements between this component's declared identifiers and its primary identity,
+     * or with another component's content digest (M1c). Same {@code @JsonIgnore} reasoning as
+     * {@link #identifiers}.
+     *
+     * @see SBOMComponentIdentityConflict
+     */
+    @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    private List<SBOMComponentIdentityConflict> identityConflicts = new ArrayList<>();
+
+    /**
+     * Whether this component's own declared secondary identifiers corroborate, say nothing about, or
+     * conflict with its {@link #identityKey} (M1c). Computed by {@code ComponentIdentityService}/
+     * {@code SBOMService} at ingest — <b>deliberately NOT in {@code @PrePersist}/{@code @PreUpdate}</b>,
+     * unlike {@link #identityKey}: the cross-instance hash-collision pass
+     * ({@code ComponentIdentityService#flagHashIdentityCollisions}) sets this to {@code CONFLICTING}
+     * on already-persisted rows (including rows outside the current SBOM, via a bulk update), and a
+     * lifecycle callback re-deriving it on the next flush/update would silently overwrite that later
+     * verdict. {@code null} means "not assessed" — see {@link IdentityConfidence}'s Javadoc for the
+     * orthogonality note versus {@link MatchConfidence}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "identity_confidence", length = 16)
+    private IdentityConfidence identityConfidence;
+
+    /**
+     * How far this component sits from the product's root in the document's own dependency graph
+     * (M1l) — null means "not assessed" (a pre-M1l row, or a component built directly by a test/
+     * scanner path that never goes through {@code SBOMService#ingestDocument}). Set explicitly by
+     * {@code SBOMService}, deliberately NOT in {@code @PrePersist}/{@code @PreUpdate} — same
+     * reasoning as {@link #identityConfidence}: the classification is computed once from the whole
+     * document's edge graph, not re-derivable from this one row on every flush.
+     *
+     * @see net.jdesive.secy.model.component.DependencyGraphAnalyzer
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "dependency_depth", length = 16)
+    private DependencyDepth dependencyDepth;
+
+    /**
+     * Hop distance from the product root to this component (1 = direct) — null unless {@link
+     * #dependencyDepth} is {@code DIRECT}/{@code TRANSITIVE} (M1l).
+     */
+    @Column(name = "dependency_distance")
+    private Integer dependencyDistance;
+
+    /**
+     * One representative shortest path from the product root to this component, as a JSON array of
+     * bom-refs (root first, this component's own ref last) — null when {@link #dependencyDepth} is
+     * {@code UNKNOWN}/not assessed, or when the path exceeds {@code
+     * DependencyGraphAnalyzer#MAX_PATH_HOPS} hops (M1l). {@code @JsonIgnore}d — exposed only via
+     * {@code GET /actionable/{id}}'s {@code dependency} block, to avoid double-encoded JSON reaching
+     * the UI through this entity's own serialization.
+     */
+    @Column(name = "dependency_path", columnDefinition = "text")
+    @JsonIgnore
+    private String dependencyPath;
+
+    /**
+     * The CycloneDX 1.6 {@code cryptoProperties} row for this component, when it is a
+     * {@code cryptographic-asset} on a document that supports CBOM (M1g) — at most one, enforced by
+     * {@code uq_sbom_component_crypto_asset_component}. Read path is {@code GET /cbom/assets}, not
+     * this collection — {@code @JsonIgnore}d for the same N+1 reason as {@link #identifiers}.
+     *
+     * @see SBOMComponentCryptoAsset
+     */
+    @OneToMany(mappedBy = "component", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    private List<SBOMComponentCryptoAsset> cryptoAssets = new ArrayList<>();
 
     /**
      * Keep {@link #identityKey} in lockstep with the fields it is derived from.

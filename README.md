@@ -125,8 +125,13 @@ The app **does not** start a database for you — run one and point the backend 
 the ingested NVD/EPSS/KEV feeds, so you want it persistent, not per-run.
 
 ```bash
-docker compose -f api/compose.yaml up -d        # Postgres on :5433, named volume
+docker compose -f api/compose.yaml up -d --build   # Postgres (+ Apache AGE) on :5433, named volume
 ```
+
+`--build` is needed because `api/compose.yaml`'s Postgres is now a local build (Apache AGE layered
+onto `postgres:16`, for M1d's lineage graph — see `api/docker/postgres-age/Dockerfile`) rather than
+a plain pulled image; your existing `secy-pgdata` volume is preserved either way. The lineage graph
+itself stays off unless you also set `SECY_LINEAGE_ENABLED=true` — see `CLAUDE.md`.
 
 Or use a native install / a hosted database and set `SECY_DB_URL` accordingly.
 
@@ -158,7 +163,7 @@ override. See `api/src/main/resources/application.properties` for every setting 
 <summary><strong>Using the devcontainer</strong></summary>
 
 The devcontainer image is Node 20 + JDK 17 and has **no Docker** of its own. Run Postgres on your
-host (`docker compose -f api/compose.yaml up -d`); inside the container `SECY_DB_URL` is preset to
+host (`docker compose -f api/compose.yaml up -d --build`); inside the container `SECY_DB_URL` is preset to
 `host.docker.internal:5433`, so `./gradlew bootRun` reaches it with no extra config. Likewise,
 when the frontend runs in the container and the backend on the host, the Vite proxy targets
 `host.docker.internal:8080` automatically (`API_TARGET` overrides).

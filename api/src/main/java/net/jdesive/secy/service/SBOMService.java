@@ -2,13 +2,24 @@ package net.jdesive.secy.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.events.SbomUploadedEvent;
+import net.jdesive.secy.model.cbom.CryptoAssetIdentity;
+import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
+import net.jdesive.secy.model.cbom.QuantumAssessment;
+import net.jdesive.secy.model.component.ComponentIdentityAssessor;
+import net.jdesive.secy.model.component.DependencyEdge;
+import net.jdesive.secy.model.component.DependencyGraphAnalyzer;
 import net.jdesive.secy.model.component.NormalizedComponent;
 import net.jdesive.secy.model.component.NormalizedSbom;
 import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
+import net.jdesive.secy.persistence.SBOMComponentDependencyRepository;
 import net.jdesive.secy.persistence.SBOMRepository;
 import net.jdesive.secy.persistence.entity.*;
+import net.jdesive.secy.service.cbom.QuantumVulnerabilityClassifier;
+import net.jdesive.secy.service.quality.SbomQualityScorer;
+import net.jdesive.secy.service.sbom.ComponentIdentityService;
 import net.jdesive.secy.service.sbom.SbomParser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
@@ -18,6 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -60,6 +75,7 @@ import java.util.UUID;
  * key {@code CorrelationService} upserts alerts on. So the same dependency in v1 and v2 has two rows
  * and one identity, and its alerts follow the identity.
  */
+@Slf4j
 @Service
 public class SBOMService {
 
@@ -67,6 +83,8 @@ public class SBOMService {
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
     private final SbomParser sbomParser;
+    private final ComponentIdentityService componentIdentityService;
+    private final SBOMComponentDependencyRepository dependencyRepository;
 
     /** {@code sbom_component.description}. SPDX descriptions routinely run past this. */
     private static final int MAX_DESCRIPTION = 1024;
@@ -75,13 +93,20 @@ public class SBOMService {
     private static final int MAX_PURL = 512;
     private static final int MAX_SHORT_TEXT = 255;
 
+    /** {@code sbom.document_authors} (M1h). */
+    private static final int MAX_DOCUMENT_AUTHORS = 1024;
+
     @Autowired
     public SBOMService(SBOMRepository sbomRepository, ApplicationEventPublisher eventPublisher,
-                       ObjectMapper objectMapper, SbomParser sbomParser) {
+                       ObjectMapper objectMapper, SbomParser sbomParser,
+                       ComponentIdentityService componentIdentityService,
+                       SBOMComponentDependencyRepository dependencyRepository) {
         this.sbomRepository = sbomRepository;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
         this.sbomParser = sbomParser;
+        this.componentIdentityService = componentIdentityService;
+        this.dependencyRepository = dependencyRepository;
     }
 
     /**
@@ -98,6 +123,49 @@ public class SBOMService {
     @Transactional
     public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
                                   String rawBody, UUID jobId) {
+        return createPlaceholder(product, document, productVersion, rawBody, jobId, null, null);
+    }
+
+    /**
+     * The same placeholder creation, additionally recording M1c provenance: which channel the upload
+     * came through and, for a connector sync, which {@link SourceConnector}. The 5-arg overload above
+     * delegates here with both null. Delegates to the 8-arg overload with a null {@code explicitStage}
+     * — the document's own declared stage (if any) still applies; see that overload.
+     */
+    @Transactional
+    public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
+                                  String rawBody, UUID jobId, SbomIngestionSource ingestionSource,
+                                  UUID sourceConnectorId) {
+        return createPlaceholder(product, document, productVersion, rawBody, jobId, ingestionSource,
+                sourceConnectorId, null);
+    }
+
+    /**
+     * The same placeholder creation, additionally resolving and recording the M1e lifecycle stage.
+     *
+     * <h2>Stage resolution</h2>
+     *
+     * <p>{@code explicitStage} — the {@code ?stage=} API param, or {@link SbomLifecycleStage#SOURCE}
+     * for a GitHub connector sync — wins when given. Otherwise the document's own declared stage
+     * (CycloneDX {@code metadata.lifecycles[]}; always null for SPDX) is used. If both are given and
+     * disagree, the explicit one wins and the disagreement is logged — an operator naming
+     * {@code ?stage=build} on a document that itself declares {@code pre-build} almost certainly knows
+     * something the document's metadata does not.
+     *
+     * <h2>The active-SBOM slot (M1e)</h2>
+     *
+     * <p>The active slot key is {@code (product, lifecycleStage)}, not {@code product} alone — see
+     * {@link #deactivateSupersededSboms}. Skipped entirely for the Unassigned bucket (M1a): its SBOMs
+     * are unrelated documents that happened to arrive untagged, not versions of one another or of each
+     * other's stage, so there is no "old version" to deactivate — every bucket SBOM stays active,
+     * whatever stage it records. See {@code Product}'s class Javadoc and
+     * {@code CorrelationService}/{@code CompromiseDetectionService}, which correlate a bucket SBOM at
+     * its own scope rather than the whole-product scope this deactivation exists to serve.
+     */
+    @Transactional
+    public SBOM createPlaceholder(Product product, NormalizedSbom document, String productVersion,
+                                  String rawBody, UUID jobId, SbomIngestionSource ingestionSource,
+                                  UUID sourceConnectorId, SbomLifecycleStage explicitStage) {
         SBOM sbom = new SBOM();
         sbom.setFormat(document.format().label());
         sbom.setSpecVersion(truncate(document.specVersion(), MAX_SHORT_TEXT));
@@ -108,11 +176,34 @@ public class SBOMService {
         sbom.setUploadDate(LocalDateTime.now());
         sbom.setPendingRawBody(rawBody);
         sbom.setJobId(jobId);
+        sbom.setIngestionSource(ingestionSource);
+        sbom.setSourceConnectorId(sourceConnectorId);
 
-        // Versioning logic: the new upload becomes the active SBOM immediately, matching the old
-        // synchronous behaviour — the upload is "the current one" from the moment it is accepted,
-        // even while its components are still being persisted.
-        deactivateOldSboms(product);
+        SbomLifecycleStage documentStage = document.declaredLifecycleStage();
+        SbomLifecycleStage resolved = explicitStage != null ? explicitStage : documentStage;
+        if (explicitStage != null && documentStage != null && explicitStage != documentStage) {
+            log.warn("SBOM upload declares lifecycle stage {} in its document metadata but the "
+                    + "request specified {} — the explicit stage wins", documentStage, explicitStage);
+        }
+        sbom.setLifecycleStage(resolved);
+
+        // The new upload becomes the active SBOM immediately, matching the old synchronous
+        // behaviour — the upload is "the current one" from the moment it is accepted, even while its
+        // components are still being persisted.
+        if (!product.isUnassigned()) {
+            int deactivated = deactivateSupersededSboms(product, resolved);
+            // M1g (D1): a standalone CBOM (every component is a cryptographic-asset) uploaded to a
+            // normal product slot replaces that slot's whole active SBOM, and therefore its
+            // vulnerability alerts, exactly like any other upload — no separate "supplementary CBOM"
+            // slot exists (see ROADMAP.md's D1). This is a deliberate, documented limitation; the WARN
+            // just makes the surprising case visible in the logs.
+            if (document.isCryptoOnly() && deactivated > 0) {
+                log.warn("Standalone CBOM uploaded to product {} ({}) deactivated {} previously-active "
+                                + "SBOM(s) — its vulnerability alerts will auto-resolve until a real SBOM is "
+                                + "next uploaded to this slot. See ROADMAP.md M1g decision D1.",
+                        product.getId(), product.getName(), deactivated);
+            }
+        }
         sbom.setActive(true);
 
         return sbomRepository.saveAndFlush(sbom);
@@ -155,6 +246,12 @@ public class SBOMService {
      * publishes {@link SbomUploadedEvent} exactly as before — so {@code VulnerabilityScanner}'s async
      * scan (and the {@code PROCESSING -> COMPLETED/FAILED} transition it performs) fires for both
      * callers identically.
+     *
+     * <p>M1l: also classifies every component's DIRECT/TRANSITIVE/UNKNOWN position (see {@link
+     * #applyDependencyPosition}) and, once every component has an id, persists the resolvable
+     * directed edges themselves (see {@link #persistDependencyEdges}) — both driven off {@code
+     * document.dependencyEdges()}/{@code dependencyRootRefs()}, self-contained to this document, so
+     * computed inline here, same as the M1g/M1h/M1c Pass A work already in this method.
      */
     @Transactional
     public IngestResult ingestDocument(SBOM sbom, NormalizedSbom document, JobProgress progress) {
@@ -162,10 +259,26 @@ public class SBOMService {
         sbomRepository.saveAndFlush(sbom);
 
         if (document.rootComponent() != null) {
-            sbom.setComponent(toEntity(document.rootComponent(), sbom));
+            // Dependency fields stay null on the root — it is never correlated, so it is never a BFS
+            // target either (M1l).
+            sbom.setComponent(toEntity(document.rootComponent(), sbom, null));
         }
-        for (NormalizedComponent component : document.components()) {
-            sbom.getComponents().add(toEntity(component, sbom));
+        // M1g: classify every crypto asset up front, index-aligned with document.components() — see
+        // QuantumVulnerabilityClassifier. Extraction/classification has no cross-document dependency,
+        // so it runs inline here (M1c's Pass A pattern); finding *reconciliation* is a separate,
+        // after-commit step — see QuantumFindingListener.
+        List<QuantumAssessment> assessments = QuantumVulnerabilityClassifier.assess(document.components());
+        List<NormalizedComponent> components = document.components();
+        // M1l: classify every component's DIRECT/TRANSITIVE/UNKNOWN position up front, from the whole
+        // document's ref graph (root included via dependencyRootRefs) — a cycle-safe BFS, see
+        // DependencyGraphAnalyzer. Self-contained to this document, so computed inline (M1c Pass A
+        // pattern), same as the quantum-asset classification just above.
+        DependencyGraphAnalyzer.Analysis dependencyGraph =
+                DependencyGraphAnalyzer.analyze(document.dependencyRootRefs(), document.dependencyEdges(), components);
+        for (int i = 0; i < components.size(); i++) {
+            SBOMComponent entity = toEntity(components.get(i), sbom, assessments.get(i));
+            applyDependencyPosition(entity, dependencyGraph.positionOf(components.get(i).bomRef()));
+            sbom.getComponents().add(entity);
         }
         for (NormalizedSbom.NormalizedTool tool : document.tools()) {
             SBOMTool sbomTool = new SBOMTool();
@@ -177,9 +290,27 @@ public class SBOMService {
             sbom.getTools().add(sbomTool);
         }
 
+        // M1h: the document's own declared timestamp/authors, and the NTIA minimum-elements
+        // completeness score — self-contained to this document, so computed inline (M1c Pass A
+        // pattern). Finding reconciliation is a separate after-commit step — see
+        // SbomQualityFindingListener.
+        sbom.setDocumentTimestamp(document.documentTimestamp());
+        sbom.setDocumentAuthors(truncate(document.authors().isEmpty() ? null : String.join("; ", document.authors()),
+                MAX_DOCUMENT_AUTHORS));
+        sbom.setQuality(SbomQualityScorer.score(document));
+
         // Consumed — no reason to keep a (possibly large) copy of the raw upload around.
         sbom.setPendingRawBody(null);
         SBOM saved = sbomRepository.saveAndFlush(sbom);
+
+        // M1c Pass B: the cross-instance hash-identity-collision sweep, tenant-wide. Runs inside this
+        // same transaction (REQUIRED propagation) and after the save/flush above so every component
+        // on this SBOM has an id and a computed identityKey to compare against the rest of the tenant.
+        componentIdentityService.flagHashIdentityCollisions(saved);
+
+        // M1l: persist the resolvable directed edges themselves, now that every component has an id
+        // — see persistDependencyEdges' Javadoc for which edges qualify.
+        persistDependencyEdges(saved, document);
 
         int componentCount = document.components().size();
         progress.report(componentCount, "Persisted " + componentCount + " components; vulnerability scan starting");
@@ -188,6 +319,113 @@ public class SBOMService {
         eventPublisher.publishEvent(new SbomUploadedEvent(saved.getId()));
 
         return IngestResult.of(componentCount, document.format().label() + " SBOM components ingested");
+    }
+
+    /**
+     * Applies one {@link DependencyGraphAnalyzer.Position} onto a freshly-built, not-yet-persisted
+     * {@link SBOMComponent} (M1l). Deliberately NOT in {@code @PrePersist}/{@code @PreUpdate} — same
+     * reasoning as {@link SBOMComponent#getIdentityConfidence()}: the classification is computed once
+     * from the whole document's graph, not re-derivable from this one row. {@code path} is serialized
+     * via {@link #objectMapper}, each bom-ref truncated to {@link SBOMComponent#getBomRef()}'s own
+     * limit first (truncation can make two distinct refs collide, but a display path tolerates that
+     * far better than losing the row entirely); a null/overflowed path writes a null column.
+     */
+    private void applyDependencyPosition(SBOMComponent entity, DependencyGraphAnalyzer.Position position) {
+        entity.setDependencyDepth(position.depth());
+        entity.setDependencyDistance(position.distance());
+        if (position.path() == null) {
+            entity.setDependencyPath(null);
+            return;
+        }
+        List<String> truncatedPath = position.path().stream().map(ref -> truncate(ref, MAX_SHORT_TEXT)).toList();
+        try {
+            entity.setDependencyPath(objectMapper.writeValueAsString(truncatedPath));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            // A list of short strings cannot fail to serialize in practice; degrade to no path
+            // rather than failing the whole ingest over a display-only field.
+            log.warn("Failed to serialize dependency path for component '{}': {}", entity.getBomRef(), e.getMessage());
+            entity.setDependencyPath(null);
+        }
+    }
+
+    /**
+     * Persists the resolvable directed edges from {@code document.dependencyEdges()} into {@code
+     * sbom_component_dependency} (M1l) — called after {@code saved} has been flushed, so every
+     * component has an id. An edge qualifies only when BOTH its {@code fromRef} and {@code toRef}
+     * resolve, via {@link SBOMComponent#getBomRef()} (truncated the same way {@link #toEntity} wrote
+     * it), to exactly one persisted component of this SBOM — the root row included, since the root's
+     * own direct dependencies are real edges even though the root itself is never correlated. A ref
+     * shared by two or more components is ambiguous and is dropped from this map entirely (matching
+     * {@link DependencyGraphAnalyzer}'s own ambiguity rule), and a self-edge once two different refs
+     * truncate to the same persisted component is skipped. This is a strict subset of what the BFS
+     * in {@code ingestDocument} already classified every component against — unresolvable edges still
+     * fully informed each component's {@code dependencyDepth}/{@code dependencyDistance}/{@code
+     * dependencyPath}; they are simply not replayable here as a (component_id, component_id) row.
+     *
+     * <p>Iterates {@code saved.getComponents()} — the managed instances returned by {@code
+     * saveAndFlush} — never the transient instances {@code toEntity} built earlier: {@code
+     * saveAndFlush} on an entity that may be merged can hand back different instances than the ones
+     * this method's caller originally attached.
+     */
+    private void persistDependencyEdges(SBOM saved, NormalizedSbom document) {
+        if (document.dependencyEdges().isEmpty()) {
+            return;
+        }
+        // Resolve by the document's own RAW, untruncated bom-refs — the exact same strings
+        // DependencyGraphAnalyzer.analyze used to decide ambiguity/reachability a moment ago in
+        // this same ingestDocument call — rather than reading back SBOMComponent.getBomRef(),
+        // which is truncated to MAX_SHORT_TEXT(255) at persist time. Two distinct refs over 255
+        // characters that share an identical 255-char prefix would otherwise look identical here
+        // but not there, silently dropping or misattributing edges. Components are zipped to their
+        // persisted entity by index: ingestDocument built `saved.getComponents()` from this exact
+        // `document.components()` list, in order, two steps ago, and nothing reorders either list
+        // in between.
+        List<NormalizedComponent> rawComponents = document.components();
+        List<SBOMComponent> persistedComponents = saved.getComponents();
+        Map<String, SBOMComponent> byRef = new java.util.HashMap<>();
+        Set<String> ambiguous = new java.util.HashSet<>();
+        for (int i = 0; i < rawComponents.size() && i < persistedComponents.size(); i++) {
+            String ref = rawComponents.get(i).bomRef();
+            if (ref == null) {
+                continue;
+            }
+            if (byRef.containsKey(ref) || ambiguous.contains(ref)) {
+                ambiguous.add(ref);
+                byRef.remove(ref);
+                continue;
+            }
+            byRef.put(ref, persistedComponents.get(i));
+        }
+        // The root wins over a duplicate — a generator that repeats metadata.component inside
+        // components[] should not cost the root its own outgoing edges.
+        NormalizedComponent rawRoot = document.rootComponent();
+        SBOMComponent root = saved.getComponent();
+        if (root != null && rawRoot != null && rawRoot.bomRef() != null) {
+            byRef.put(rawRoot.bomRef(), root);
+            ambiguous.remove(rawRoot.bomRef());
+        }
+
+        List<SBOMComponentDependency> rows = new ArrayList<>();
+        Set<String> seenPairs = new java.util.HashSet<>();
+        for (DependencyEdge edge : document.dependencyEdges()) {
+            SBOMComponent from = byRef.get(edge.fromRef());
+            SBOMComponent to = byRef.get(edge.toRef());
+            if (from == null || to == null || from.getId().equals(to.getId())) {
+                continue;
+            }
+            String pairKey = from.getId() + ":" + to.getId();
+            if (!seenPairs.add(pairKey)) {
+                continue;
+            }
+            SBOMComponentDependency row = new SBOMComponentDependency();
+            row.setSbomId(saved.getId());
+            row.setComponentId(from.getId());
+            row.setDependsOnComponentId(to.getId());
+            rows.add(row);
+        }
+        if (!rows.isEmpty()) {
+            dependencyRepository.saveAll(rows);
+        }
     }
 
     /**
@@ -224,10 +462,39 @@ public class SBOMService {
         return sbomParser.parse(root);
     }
 
-    private void deactivateOldSboms(Product product) {
-        // Find current active SBOM for this product and set active = false
-        sbomRepository.findByProductIdAndActiveTrue(product.getId())
-                .ifPresent(old -> old.setActive(false));
+    /**
+     * The M1e active-SBOM slot rule. The active slot key is {@code (product, lifecycleStage)}, not
+     * {@code product} alone: a normal product holds either exactly one active stage-less SBOM (legacy
+     * mode, the pre-M1e behaviour), or at most one active SBOM per stage with no stage-less one
+     * (staged mode) — the two modes never mix.
+     *
+     * <ul>
+     *   <li><b>{@code stage} is non-null (a staged upload):</b> deactivate every active SBOM of the
+     *       product whose stage is {@code stage} OR null. A stage-less SBOM was the pre-M1e "whole
+     *       product" truth; adopting stages supersedes it.</li>
+     *   <li><b>{@code stage} is null (an unstaged upload):</b> deactivate EVERY active SBOM of the
+     *       product, staged or not — exactly the pre-M1e meaning, "this is the product's whole truth
+     *       now".</li>
+     * </ul>
+     *
+     * <p>Called before the new row is saved, so {@code findAllByProductIdAndActiveTrue} never sees it
+     * — every row this touches is an existing, already-persisted one, and it dirty-flushes through the
+     * normal managed-entity mechanism, same as the pre-M1e code.
+     *
+     * <p>Deliberately no DB-level uniqueness constraint enforces this — the Unassigned bucket
+     * legitimately holds many active SBOMs and a partial index cannot see {@code products.unassigned}
+     * — so a race between two concurrent same-stage uploads is possible, exactly as a race on the old
+     * whole-product slot was. Read paths use {@code findFirst...OrderByUploadDateDesc} to tolerate it.
+     */
+    private int deactivateSupersededSboms(Product product, SbomLifecycleStage stage) {
+        int deactivated = 0;
+        for (SBOM old : sbomRepository.findAllByProductIdAndActiveTrue(product.getId())) {
+            if (stage == null || old.getLifecycleStage() == null || old.getLifecycleStage() == stage) {
+                old.setActive(false);
+                deactivated++;
+            }
+        }
+        return deactivated;
     }
 
     /**
@@ -236,8 +503,12 @@ public class SBOMService {
      *
      * <p>{@code identityKey} is not set here — {@link SBOMComponent#refreshIdentityKey()} derives it
      * on persist, so it is right for every writer, not just this one.
+     *
+     * @param assessment the M1g quantum-vulnerability verdict for this component, or null when it has
+     *                   no {@link NormalizedComponent#crypto()} (including the root, which is never
+     *                   classified — callers pass null for it)
      */
-    private SBOMComponent toEntity(NormalizedComponent component, SBOM sbom) {
+    private SBOMComponent toEntity(NormalizedComponent component, SBOM sbom, QuantumAssessment quantumAssessment) {
         SBOMComponent entity = new SBOMComponent();
         entity.setName(truncate(component.name(), MAX_SHORT_TEXT));
         entity.setDescription(truncate(component.description(), MAX_DESCRIPTION));
@@ -245,6 +516,7 @@ public class SBOMService {
         entity.setType(truncate(component.type(), MAX_SHORT_TEXT));
         entity.setBomRef(truncate(component.bomRef(), MAX_SHORT_TEXT));
         entity.setPurl(truncate(component.purl(), MAX_PURL));
+        entity.setSupplierName(truncate(component.supplier(), MAX_SHORT_TEXT));
         entity.setSbom(sbom);
 
         for (String license : component.licenses()) {
@@ -273,7 +545,136 @@ public class SBOMService {
             }
         }
 
+        // M1c: declared CPE/SWID identifiers, persisted verbatim (the normalizer already dropped
+        // over-long values — never truncate identifierValue here, same reasoning as the hash loop
+        // above). declaredName/declaredVersion are already length-bounded by SecondaryIdentifiers.
+        for (NormalizedComponent.Identifier identifier : component.identifiers()) {
+            SBOMComponentIdentifier row = new SBOMComponentIdentifier();
+            row.setIdentifierType(identifier.type());
+            row.setIdentifierValue(identifier.value());
+            row.setDeclaredName(identifier.declaredName());
+            row.setDeclaredVersion(identifier.declaredVersion());
+            row.setSource(identifier.source());
+            row.setComponent(entity);
+            entity.getIdentifiers().add(row);
+        }
+
+        // M1c Pass A: does this instance's own declared identifiers corroborate or conflict with its
+        // primary identity? CVE-independent, computed once here rather than at correlation time — see
+        // ComponentIdentityAssessor's Javadoc and IdentityConfidence's orthogonality note versus
+        // MatchConfidence. Deliberately not in @PrePersist/@PreUpdate: Pass B (flagHashIdentityCollisions)
+        // runs after this and must be able to set CONFLICTING on an already-assessed row without a
+        // lifecycle callback clobbering it back on the next flush.
+        ComponentIdentityAssessor.IdentityAssessment assessment = ComponentIdentityAssessor.assess(component);
+        entity.setIdentityConfidence(assessment.confidence());
+        for (ComponentIdentityAssessor.DetectedConflict conflict : assessment.conflicts()) {
+            SBOMComponentIdentityConflict row = new SBOMComponentIdentityConflict();
+            row.setConflictType(conflict.type());
+            row.setIdentifierType(conflict.identifierType());
+            row.setIdentifierValue(truncate(conflict.identifierValue(), MAX_DESCRIPTION));
+            row.setDetail(truncate(conflict.detail(), MAX_DESCRIPTION));
+            row.setOtherComponentId(null);
+            row.setOtherIdentityKey(null);
+            row.setDetectedAt(LocalDateTime.now());
+            row.setComponent(entity);
+            entity.getIdentityConflicts().add(row);
+        }
+
+        // M1g: one sbom_component_crypto_asset row per cryptographic-asset component whose
+        // cryptoProperties were extracted (see CycloneDXNormalizer/CryptoPropertiesExtractor — null
+        // below the CycloneDX 1.6 floor, or for a non-crypto component, or for the root).
+        if (component.crypto() != null) {
+            entity.getCryptoAssets().add(cryptoAssetEntity(component, entity, quantumAssessment));
+        }
+
         return entity;
+    }
+
+    /**
+     * {@link NormalizedComponent#crypto()} → {@link SBOMComponentCryptoAsset}, with the M1g quantum
+     * classification folded in. String lists are joined with {@code ", "} (cipher suites use suite
+     * names only) then truncated to the column length.
+     */
+    private SBOMComponentCryptoAsset cryptoAssetEntity(NormalizedComponent component, SBOMComponent owner,
+                                                        QuantumAssessment assessment) {
+        NormalizedCryptoAsset crypto = component.crypto();
+        SBOMComponentCryptoAsset row = new SBOMComponentCryptoAsset();
+        row.setComponent(owner);
+        row.setAssetType(crypto.assetType());
+        row.setDeclaredAssetType(truncate(crypto.declaredAssetType(), 64));
+        row.setOid(truncate(crypto.oid(), 255));
+        row.setCryptoIdentityKey(CryptoAssetIdentity.keyOf(crypto.assetType(), component.name(), crypto.oid()));
+
+        NormalizedCryptoAsset.Algorithm algorithm = crypto.algorithm();
+        if (algorithm != null) {
+            row.setPrimitive(truncate(algorithm.primitive(), 32));
+            row.setParameterSetIdentifier(truncate(algorithm.parameterSetIdentifier(), 128));
+            row.setCurve(truncate(algorithm.curve(), 128));
+            row.setExecutionEnvironment(truncate(algorithm.executionEnvironment(), 64));
+            row.setImplementationPlatform(truncate(algorithm.implementationPlatform(), 64));
+            row.setCertificationLevels(truncate(joined(algorithm.certificationLevels()), 512));
+            row.setAlgorithmMode(truncate(algorithm.mode(), 32));
+            row.setPadding(truncate(algorithm.padding(), 32));
+            row.setCryptoFunctions(truncate(joined(algorithm.cryptoFunctions()), 512));
+            row.setClassicalSecurityLevel(algorithm.classicalSecurityLevel());
+            row.setNistQuantumSecurityLevel(algorithm.nistQuantumSecurityLevel());
+        }
+
+        NormalizedCryptoAsset.Certificate certificate = crypto.certificate();
+        if (certificate != null) {
+            row.setSubjectName(truncate(certificate.subjectName(), 1024));
+            row.setIssuerName(truncate(certificate.issuerName(), 1024));
+            row.setNotValidBefore(certificate.notValidBefore());
+            row.setNotValidAfter(certificate.notValidAfter());
+            row.setSignatureAlgorithmRef(truncate(certificate.signatureAlgorithmRef(), 255));
+            row.setSubjectPublicKeyRef(truncate(certificate.subjectPublicKeyRef(), 255));
+            row.setCertificateFormat(truncate(certificate.certificateFormat(), 64));
+            row.setCertificateExtension(truncate(certificate.certificateExtension(), 64));
+        }
+
+        NormalizedCryptoAsset.RelatedMaterial material = crypto.relatedMaterial();
+        if (material != null) {
+            row.setMaterialType(truncate(material.type(), 32));
+            row.setMaterialId(truncate(material.id(), 255));
+            row.setMaterialState(truncate(material.state(), 32));
+            row.setAlgorithmRef(truncate(material.algorithmRef(), 255));
+            row.setMaterialCreationDate(material.creationDate());
+            row.setMaterialActivationDate(material.activationDate());
+            row.setMaterialUpdateDate(material.updateDate());
+            row.setMaterialExpirationDate(material.expirationDate());
+            row.setMaterialSize(material.size());
+            row.setMaterialFormat(truncate(material.format(), 64));
+            row.setSecuredByMechanism(truncate(material.securedByMechanism(), 64));
+            row.setSecuredByAlgorithmRef(truncate(material.securedByAlgorithmRef(), 255));
+        }
+
+        NormalizedCryptoAsset.Protocol protocol = crypto.protocol();
+        if (protocol != null) {
+            row.setProtocolType(truncate(protocol.type(), 32));
+            row.setProtocolVersion(truncate(protocol.version(), 64));
+            if (protocol.cipherSuites() != null) {
+                String suiteNames = String.join(", ", protocol.cipherSuites().stream()
+                        .map(NormalizedCryptoAsset.CipherSuite::name)
+                        .filter(java.util.Objects::nonNull)
+                        .toList());
+                row.setCipherSuites(truncate(suiteNames, 4096));
+            }
+            row.setCryptoRefs(truncate(joined(protocol.cryptoRefs()), 2048));
+        }
+
+        QuantumAssessment effective = assessment == null ? QuantumAssessment.UNKNOWN : assessment;
+        row.setQuantumStatus(effective.status());
+        row.setQuantumFamily(effective.family());
+        row.setQuantumBasis(effective.basis());
+        row.setQuantumIndicator(truncate(effective.indicator(), 255));
+
+        row.setCryptoPropertiesJson(crypto.sanitizedJson());
+
+        return row;
+    }
+
+    private static String joined(List<String> values) {
+        return values == null || values.isEmpty() ? null : String.join(", ", values);
     }
 
     /**

@@ -4,8 +4,15 @@ import net.jdesive.secy.persistence.entity.ActionableReason;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixSource;
 import net.jdesive.secy.persistence.entity.FixState;
+import net.jdesive.secy.model.vex.VexStatementRole;
 import net.jdesive.secy.persistence.entity.AlertLifecycleState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
+import net.jdesive.secy.persistence.entity.VexDocumentFormat;
+import net.jdesive.secy.persistence.entity.VexJustification;
+import net.jdesive.secy.persistence.entity.VexOrigin;
+import net.jdesive.secy.persistence.entity.VexPrecedencePolicy;
+import net.jdesive.secy.persistence.entity.VexStatus;
+import net.jdesive.secy.model.scoring.RiskScoreBreakdown;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -50,7 +57,44 @@ public record ActionableDetailResponse(
         /** The FIRST EPSS entry, or null when the CVE has no EPSS row. */
         EpssEvidence epss,
         /** CVE references from NVD. */
-        List<ReferenceLink> references) {
+        List<ReferenceLink> references,
+        /**
+         * M1f: the alert's VEX resolution, plus every statement that applied and its role
+         * ({@code WON}/{@code AGREES}/{@code CONFLICTING}/{@code OVERRIDDEN}/{@code SUPERSEDED}) — how
+         * an operator sees which statements factored into the verdict, not just the verdict itself.
+         * {@code status}/{@code justification}/{@code conflict}/{@code winningStatementId}/
+         * {@code updatedAt} come from the alert's own stored columns (consistent with the list
+         * endpoint); {@code statements} and {@code policy} are freshly computed by
+         * {@code VexResolutionService.explain} so a stale precedence-policy read never happens.
+         */
+        Vex vex,
+        /** M1i: the alert's stored risk score — matches the list row exactly. */
+        Double riskScore,
+        /**
+         * M1i: the fresh, full breakdown behind {@link #riskScore} — {@code RiskScoringService.explain}
+         * recomputed against this alert's <em>current</em> snapshots, the same stored-vs-fresh pattern
+         * as {@link #vex}. {@code current} is false when a re-enrichment or rescore is due.
+         */
+        RiskScoreBreakdown riskScoreBreakdown,
+        /**
+         * M1l: this alert's component's position in the SBOM's dependency graph — null for an asset
+         * alert ({@code alert.component == null}), since {@code AssetComponent} has no dependency
+         * graph at all (see ROADMAP.md, M1l — "Dependency graph preserved").
+         */
+        DependencyContext dependency) {
+
+    /** The alert's component's DIRECT/TRANSITIVE/UNKNOWN classification, distance and shortest path (M1l). */
+    public record DependencyContext(net.jdesive.secy.persistence.entity.DependencyDepth depth, Integer distance,
+                                    List<PathHop> path) {
+    }
+
+    /**
+     * One hop of a {@link DependencyContext#path()}, root first — {@code componentId}/{@code name}/
+     * {@code version} are null when the bom-ref resolved to zero or more than one persisted
+     * component of the SBOM (M1l).
+     */
+    public record PathHop(String bomRef, UUID componentId, String name, String version) {
+    }
 
     /** The CVE itself, flattened out of {@code Vulnerability}. */
     public record Cve(
@@ -119,6 +163,20 @@ public record ActionableDetailResponse(
 
     /** An NVD reference URL. */
     public record ReferenceLink(String url, String source, String tags) {
+    }
+
+    /** M1f's VEX block — see the field Javadoc above. Empty {@code statements} when nothing applies. */
+    public record Vex(VexStatus status, VexJustification justification, boolean conflict, UUID winningStatementId,
+                      VexPrecedencePolicy policy, LocalDateTime updatedAt, List<AppliedVexStatement> statements) {
+    }
+
+    /** One statement that applied to this alert, with the role {@code VexResolver} gave it. */
+    public record AppliedVexStatement(UUID statementId, UUID documentId, VexDocumentFormat format, VexOrigin origin,
+                                      String author, VexStatus status, String sourceStatus,
+                                      VexJustification justification, String sourceJustification,
+                                      String impactStatement, String actionStatement, String productRef,
+                                      String targetPurl, String matchVersion, LocalDateTime statementTimestamp,
+                                      VexStatementRole role) {
     }
 
 }

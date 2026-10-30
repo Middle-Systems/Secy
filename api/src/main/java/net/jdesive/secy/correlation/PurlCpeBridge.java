@@ -41,6 +41,10 @@ import java.util.Set;
  */
 public final class PurlCpeBridge {
 
+    // TODO(post-M1c): a declared CPE (sbom_component_identifier, type CPE) could replace the
+    // vendor/product guess for no-PURL components — deliberately not done in M1c: it changes alert
+    // sets/confidence and needs its own golden fixtures.
+
     /**
      * One CPE identity to look for.
      *

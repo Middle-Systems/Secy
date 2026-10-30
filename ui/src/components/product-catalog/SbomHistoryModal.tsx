@@ -97,6 +97,11 @@ export function SbomHistoryModal({ product, onOpenChange }: SbomHistoryModalProp
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
+                        {sbom.active && sbom.lifecycleStage && (
+                          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-secondary-foreground">
+                            {sbom.lifecycleStage}
+                          </span>
+                        )}
                         {sbom.active && (
                           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
                             Active

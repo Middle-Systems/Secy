@@ -1,0 +1,127 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": { "type": "application", "name": "acme-crypto-app", "version": "1.0.0" }
+  },
+  "components": [
+    {
+      "type": "cryptographic-asset", "bom-ref": "rsa-algo", "name": "RSA-2048",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "oid": "1.2.840.113549.1.1.1",
+        "algorithmProperties": {
+          "primitive": "PKE",
+          "parameterSetIdentifier": "2048",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "generic",
+          "certificationLevel": ["none"],
+          "padding": "oaep",
+          "cryptoFunctions": ["encrypt", "decrypt"],
+          "classicalSecurityLevel": 112,
+          "nistQuantumSecurityLevel": 0
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "sha256withrsa", "name": "SHA256withRSA",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature",
+          "cryptoFunctions": ["sign", "verify"]
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "aes128gcm", "name": "AES-128-GCM",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "ae",
+          "mode": "gcm",
+          "classicalSecurityLevel": 128,
+          "cryptoFunctions": ["encrypt", "decrypt"]
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "mlkem768", "name": "ML-KEM-768",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "oid": "2.16.840.1.101.3.4.4.2",
+        "algorithmProperties": {
+          "primitive": "kem",
+          "parameterSetIdentifier": "768",
+          "nistQuantumSecurityLevel": 3
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "x25519mlkem768", "name": "X25519MLKEM768",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": { "primitive": "key-agree" }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "foocipher", "name": "FooCipher",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": { "primitive": "pke", "nistQuantumSecurityLevel": 0 }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "cert1", "name": "example.com certificate",
+      "cryptoProperties": {
+        "assetType": "certificate",
+        "certificateProperties": {
+          "subjectName": "CN=example.com",
+          "issuerName": "CN=Example CA",
+          "notValidBefore": "2024-01-01T00:00:00Z",
+          "notValidAfter": "2025-01-01T00:00:00Z",
+          "signatureAlgorithmRef": "sha256withrsa",
+          "subjectPublicKeyRef": "rsa-algo",
+          "certificateFormat": "X.509",
+          "certificateExtension": "crt"
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "pubkey-material", "name": "RSA Private Key",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "private-key",
+          "id": "key-1",
+          "state": "active",
+          "algorithmRef": "rsa-algo",
+          "creationDate": "2024-01-01T00:00:00Z",
+          "size": 2048,
+          "format": "PEM",
+          "value": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC-FAKE"
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "tls-protocol", "name": "TLS 1.2",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "version": "1.2",
+          "cipherSuites": [
+            { "name": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "algorithms": ["rsa-algo"] }
+          ],
+          "cryptoRefArray": ["aes128gcm"]
+        }
+      }
+    },
+    {
+      "type": "library", "bom-ref": "left-pad", "name": "left-pad", "version": "1.3.0",
+      "purl": "pkg:npm/left-pad@1.3.0",
+      "cryptoProperties": { "assetType": "algorithm", "algorithmProperties": { "primitive": "hash" } }
+    }
+  ]
+}

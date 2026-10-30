@@ -29,6 +29,9 @@ import type {
   ActionableDetail,
   ActionableFilters,
   ActionableItem,
+  ActionItem,
+  ActionItemDetail,
+  ActionItemPatchPayload,
   AssetDeletionSummary,
   AssetDetail,
   AssetSummary,
@@ -45,14 +48,21 @@ import type {
   CreateProductPayload,
   CreateSourceConnectorPayload,
   DashboardStats,
+  DisputeFindingPayload,
+  DisputeResponse,
   EPSS,
   Job,
   JobStatus,
   JobType,
   KEV,
+  LeadershipMetrics,
+  MyAccess,
+  OwnedProduct,
   Page,
   PageParams,
   Product,
+  RemediationStatus,
+  SbomLifecycleStage,
   SourceConnector,
   TriageCommentPayload,
   TriageEvent,
@@ -132,6 +142,21 @@ export const queryKeys = {
     all: ['users'] as const,
     list: () => [...queryKeys.users.all, 'list'] as const,
   },
+  me: {
+    all: ['me'] as const,
+    access: () => [...queryKeys.me.all, 'access'] as const,
+    ownedProducts: () => [...queryKeys.me.all, 'ownedProducts'] as const,
+  },
+  actionItems: {
+    all: ['actionItems'] as const,
+    page: (params: ActionItemListParams) => [...queryKeys.actionItems.all, 'page', params] as const,
+    detail: (id: string) => [...queryKeys.actionItems.all, 'detail', id] as const,
+  },
+  leadership: {
+    all: ['leadership'] as const,
+    metrics: (mttrWindowDays: number) =>
+      [...queryKeys.leadership.all, 'metrics', mttrWindowDays] as const,
+  },
 } as const;
 
 /** Options a caller may override on any of the query hooks below. */
@@ -203,6 +228,13 @@ const FEED_KEYS: Record<JobType, readonly (readonly unknown[])[]> = {
     queryKeys.actionable.all,
     queryKeys.stats.all,
   ],
+  // M1d: a rebuild only writes the Apache AGE lineage graph, which has no read endpoint or
+  // browser view in this milestone -- nothing in the UI's cache needs invalidating.
+  LINEAGE_REBUILD: [],
+  // M1k: a VEX document (an authored dispute, or a direct POST /vex/statements) changes
+  // vexStatus/riskScore on whatever alerts it resolves against, which the actionable list and
+  // any action item deriving NOT_AFFECTED off it both need to re-read.
+  VEX_UPLOAD: [queryKeys.actionable.all, queryKeys.actionItems.all],
 };
 
 /**
@@ -732,6 +764,8 @@ export interface UploadSbomVariables {
   /** Parsed CycloneDX or SPDX (2.2/2.3 JSON) document. */
   sbom: unknown;
   productVersion?: string;
+  /** M1e: where in the SDLC this upload was captured. Omitted lets the document's own metadata (or nothing) decide. */
+  stage?: SbomLifecycleStage;
 }
 
 /**
@@ -750,8 +784,8 @@ export interface UploadSbomVariables {
 export function useUploadSbom(options?: MutationOverrides<Job, UploadSbomVariables>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ productId, sbom, productVersion = 'Unknown' }: UploadSbomVariables) =>
-      api.post<Job>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion } }),
+    mutationFn: ({ productId, sbom, productVersion = 'Unknown', stage }: UploadSbomVariables) =>
+      api.post<Job>(`/sbom/${productId}/sboms`, sbom, { query: { productVersion, stage } }),
     ...options,
     onSuccess: (...args) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
@@ -1126,6 +1160,122 @@ export function useUsers(options?: QueryOverrides<User[]>) {
     queryKey: queryKeys.users.list(),
     queryFn: () => api.get<User[]>('/users'),
     staleTime: USERS_STALE_TIME_MS,
+    ...options,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* M1k — role-based views                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * GET /api/me/access — which views the caller may pick, stateless (no
+ * current-view state lives server-side). `ViewSwitcher` renders nothing while
+ * this is loading or erroring, so a 401 here (unauthenticated) just means no
+ * switcher shows — never a visible error.
+ */
+export function useMyAccess(options?: QueryOverrides<MyAccess>) {
+  return useQuery({
+    queryKey: queryKeys.me.access(),
+    queryFn: () => api.get<MyAccess>('/me/access'),
+    staleTime: USERS_STALE_TIME_MS,
+    retry: false,
+    ...options,
+  });
+}
+
+/** GET /api/me/owned-products — the software-engineer view's empty-state check and product filter. */
+export function useMyOwnedProducts(options?: QueryOverrides<OwnedProduct[]>) {
+  return useQuery({
+    queryKey: queryKeys.me.ownedProducts(),
+    queryFn: () => api.get<OwnedProduct[]>('/me/owned-products'),
+    ...options,
+  });
+}
+
+/** Filters accepted by `GET /api/action-items`. */
+export interface ActionItemListParams {
+  page: number;
+  size: number;
+  ownedBy?: string;
+  productId?: string;
+  assetId?: string;
+  assigneeUserId?: string;
+  status?: RemediationStatus;
+}
+
+/** GET /api/action-items — paged, filtered. `ownedBy: 'me'` is the software-engineer view's whole trick. */
+export function useActionItemsPage(
+  { page = 0, size = DEFAULT_PAGE_SIZE, ...filters }: Partial<ActionItemListParams> = {},
+  options?: QueryOverrides<Page<ActionItem>>,
+) {
+  const params: ActionItemListParams = { page, size, ...filters };
+  return useQuery({
+    queryKey: queryKeys.actionItems.page(params),
+    queryFn: () => api.get<Page<ActionItem>>('/action-items', { query: { page, size, ...filters } }),
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+/** GET /api/action-items/:id — full detail, including every linked finding's `fix`. */
+export function useActionItemDetail(id: string | undefined, options?: QueryOverrides<ActionItemDetail>) {
+  return useQuery({
+    queryKey: queryKeys.actionItems.detail(id ?? ''),
+    queryFn: () => api.get<ActionItemDetail>(`/action-items/${id}`),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+function invalidateActionItemCaches(queryClient: ReturnType<typeof useQueryClient>, id: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.actionItems.all });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.actionItems.detail(id) });
+}
+
+/** PATCH /api/action-items/:id — status transitions (Start/Mark fixed), assignment, edits. */
+export function usePatchActionItem(
+  options?: MutationOverrides<ActionItemDetail, { id: string; patch: ActionItemPatchPayload }>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }) => api.patch<ActionItemDetail>(`/action-items/${id}`, patch),
+    ...options,
+    onSuccess: (...args) => {
+      invalidateActionItemCaches(queryClient, args[1].id);
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * POST /api/action-items/:id/disputes — "dispute with a VEX justification". Resolves as soon as
+ * the authored statement is validated and its ingest job is queued; the effect (vexStatus flipping,
+ * the item's effective status following) only lands once that job succeeds — see `useJob`, which
+ * invalidates `actionable`/`actionItems` for `VEX_UPLOAD` on `SUCCEEDED`.
+ */
+export function useDisputeFinding(
+  options?: MutationOverrides<DisputeResponse, { id: string; payload: DisputeFindingPayload }>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => api.post<DisputeResponse>(`/action-items/${id}/disputes`, payload),
+    ...options,
+    onSuccess: (...args) => {
+      invalidateActionItemCaches(queryClient, args[1].id);
+      options?.onSuccess?.(...args);
+    },
+  });
+}
+
+/** GET /api/metrics/leadership — aggregates only, no finding rows. */
+export function useLeadershipMetrics(
+  mttrWindowDays = 90,
+  options?: QueryOverrides<LeadershipMetrics>,
+) {
+  return useQuery({
+    queryKey: queryKeys.leadership.metrics(mttrWindowDays),
+    queryFn: () => api.get<LeadershipMetrics>('/metrics/leadership', { query: { mttrWindowDays } }),
     ...options,
   });
 }

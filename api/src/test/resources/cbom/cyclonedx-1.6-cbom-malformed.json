@@ -1,0 +1,47 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "components": [
+    {
+      "type": "cryptographic-asset", "bom-ref": "not-an-object", "name": "Weird Asset",
+      "cryptoProperties": "this-should-be-an-object"
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "array-algorithm-properties", "name": "Array Algo",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": ["not", "an", "object"]
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "scalar-lists", "name": "Scalar Lists",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature",
+          "certificationLevel": "none",
+          "nistQuantumSecurityLevel": "0",
+          "cryptoFunctions": "sign"
+        }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "bad-date-cert", "name": "Bad Date Cert",
+      "cryptoProperties": {
+        "assetType": "certificate",
+        "certificateProperties": { "notValidAfter": "not-a-date" }
+      }
+    },
+    {
+      "type": "cryptographic-asset", "bom-ref": "scalar-cipher-suites", "name": "Scalar Cipher Suites",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "cipherSuites": ["TLS_RSA_WITH_AES_128_CBC_SHA"]
+        }
+      }
+    }
+  ]
+}

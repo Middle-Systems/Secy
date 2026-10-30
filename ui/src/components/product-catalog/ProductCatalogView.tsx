@@ -13,7 +13,7 @@ import { ProductCard } from './ProductCard';
 import { SbomHistoryModal } from './SbomHistoryModal';
 import { UploadSbomModal } from './UploadSbomModal';
 import { VulnerabilityDetailsModal } from './VulnerabilityDetailsModal';
-import { deriveProducts } from './product.derive';
+import { deriveProducts, sortProductsUnassignedFirst } from './product.derive';
 import type { DerivedProduct } from './product.types';
 
 /**
@@ -61,7 +61,10 @@ export function ProductCatalogView() {
     if (query.isError) toast.error('Failed to load the product catalog.');
   }, [query.isError]);
 
-  const products = useMemo(() => deriveProducts(query.data ?? []), [query.data]);
+  const products = useMemo(
+    () => sortProductsUnassignedFirst(deriveProducts(query.data ?? [])),
+    [query.data],
+  );
 
   const showInlineError = query.isError && !query.data;
 

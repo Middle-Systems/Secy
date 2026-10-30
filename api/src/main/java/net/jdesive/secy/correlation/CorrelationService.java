@@ -3,6 +3,7 @@ package net.jdesive.secy.correlation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.model.asset.ScannerFinding;
+import net.jdesive.secy.model.cbom.CryptoAssets;
 import net.jdesive.secy.model.component.ComponentIdentity;
 import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
@@ -17,6 +18,7 @@ import net.jdesive.secy.persistence.entity.SBOMComponent;
 import net.jdesive.secy.persistence.entity.Vulnerability;
 import net.jdesive.secy.persistence.entity.VulnerabilityAlert;
 import net.jdesive.secy.service.EnrichmentService;
+import net.jdesive.secy.service.vex.VexResolutionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -122,6 +124,13 @@ public class CorrelationService {
     private final EnrichmentService enrichmentService;
 
     /**
+     * M1e: what a staged, product-scoped SBOM's match set is actually built from — see that class's
+     * Javadoc for why the plain {@code sbom.getComponents()} loop below is not enough once a product
+     * can hold several simultaneously-active stage SBOMs.
+     */
+    private final SbomCorrelationScope correlationScope;
+
+    /**
      * Phase 6's third promotion path, run over the same components in the same pass.
      *
      * <p>Called from here rather than from {@code SBOMService}/{@code AssetService} because this is
@@ -131,6 +140,14 @@ public class CorrelationService {
      * without three call sites to keep in step.
      */
     private final CompromiseDetectionService compromiseDetectionService;
+
+    /**
+     * M1f: re-matches every alert this run touched against active VEX statements. Statements are
+     * stored independently of alerts (design decision #1) precisely so a statement ingested before
+     * its component ever existed still applies once correlation raises the alert — waiting for the
+     * next VEX upload to notice would miss the common case entirely.
+     */
+    private final VexResolutionService vexResolutionService;
 
     /**
      * What one correlation run did. Returned for logging and tests; nothing persists it.
@@ -158,27 +175,67 @@ public class CorrelationService {
      * Nothing does that today — the scan runs once per upload, on the SBOM the upload just made
      * active — and the behaviour is the correct reading of "last scan wins" if anything ever does.
      *
-     * <p>Must run in a transaction: the component collection and the alert relations are lazy.
+     * <p><b>Except the Unassigned bucket (M1a).</b> A bucket SBOM has no sibling versions — every
+     * upload that lands there is an unrelated document, not a new version of "the product's" SBOM —
+     * so product-wide reconciliation would be wrong: correlating one bucket SBOM would auto-resolve
+     * another bucket SBOM's alerts just because they happen to share a product row. An SBOM with no
+     * product at all (only ever a test fixture) gets the same SBOM-scoped treatment, for the same
+     * reason: there is no product-wide "truth" to reconcile against.
+     *
+     * <h2>M1e: several simultaneously-active stage SBOMs</h2>
+     *
+     * <p>"Last scan wins" above described a world with one active SBOM per product. M1e relaxed that
+     * to one active SBOM per <b>(product, stage)</b>, so for a staged SBOM the match set is not just
+     * this SBOM's own components — see {@link SbomCorrelationScope}. The rule is now <b>most-
+     * downstream current stage wins</b>: when the same component identity appears in more than one
+     * active stage slot, the more downstream stage's row (DEPLOYED over ANALYZED over BUILD over
+     * SOURCE) is what the alert attaches to and what its match confidence is derived from.
+     *
+     * <p><b>Accepted limitation:</b> if Source declares a vulnerable {@code lodash 4.17.20} and
+     * Deployed runs the fixed {@code 4.17.21}, the Deployed row represents that identity and no
+     * vulnerability alert is raised for the Source version — that disagreement surfaces instead as a
+     * {@code VERSION_MISMATCH} lifecycle drift finding (see {@code LifecycleDiffer}) whenever the
+     * adjacent pair exists, not as two competing vulnerability alerts. <b>M1i kept this behavior</b>
+     * on review (ROADMAP.md — "Scoring engine rework"): a Deployed fixed version is the more accurate
+     * risk statement, and scoring the Source-side identity too would double-count one real
+     * vulnerability as two. M1j may still revisit this when its {@code Finding} supertype absorbs
+     * both alert kinds. There is
+     * also a brief transient window where correlating one stage while a sibling stage's new upload is
+     * still {@code QUEUED} (not yet ingested) can briefly auto-resolve alerts that revive once the
+     * sibling's own correlation runs.
+     *
+     * <p>Must run in a transaction: the component collection and the alert relations are lazy (this
+     * is also why it's safe to call {@code sbom.getProduct().isUnassigned()} here — the lazy
+     * {@code Product} proxy initializes within this transaction).
      */
     @Transactional
     public CorrelationSummary correlate(SBOM sbom) {
         UUID sbomId = sbom.getId();
+        boolean productScoped = sbom.getProduct() != null && !sbom.getProduct().isUnassigned();
         UUID productId = sbom.getProduct() == null ? null : sbom.getProduct().getId();
-        log.info("Correlating SBOM {} (product {})", sbomId, productId);
+        log.info("Correlating SBOM {} (product {}, scope {})", sbomId, productId,
+                productScoped ? "product" : "sbom");
 
         // Existing alerts, keyed the way a match is keyed. This is what makes the run idempotent.
-        // Product-scoped so alerts survive a new SBOM version; an SBOM with no product (only ever a
-        // test fixture) falls back to its own scope, which is the Phase 2 behaviour.
-        List<VulnerabilityAlert> priorAlerts = productId == null
-                ? alertRepository.findAllBySbomIdForCorrelation(sbomId)
-                : alertRepository.findAllByProductIdForCorrelation(productId);
+        List<VulnerabilityAlert> priorAlerts = productScoped
+                ? alertRepository.findAllByProductIdForCorrelation(productId)
+                : alertRepository.findAllBySbomIdForCorrelation(sbomId);
 
-        // identity -> the component row of THIS SBOM that carries it, so a carried-forward alert is
-        // re-pointed at current evidence rather than at a superseded version's row.
+        // identity -> the component row that currently carries it, so a carried-forward alert is
+        // re-pointed at current evidence rather than at a superseded version's row. M1e: iterating
+        // sbomsInScope() ascending by downstream rank and using put() means, for an identity that
+        // appears in more than one active stage slot, the most-downstream stage's row wins — see this
+        // method's Javadoc.
         Map<String, SBOMComponent> componentsByIdentity = new LinkedHashMap<>();
-        for (SBOMComponent component : sbom.getComponents()) {
-            if (component != null && component.getId() != null) {
-                componentsByIdentity.put(identityOf(component, component.getId()), component);
+        for (SBOM scoped : correlationScope.sbomsInScope(sbom, productScoped)) {
+            for (SBOMComponent component : scoped.getComponents()) {
+                // M1g: crypto assets (cryptographic-asset) are not packages -- feeding them into
+                // package-oriented CPE/OSV matching produces false-positive CVE alerts on bare names
+                // like "AES" or "RSA". See CryptoAssets and ROADMAP.md's M1g note.
+                if (component != null && component.getId() != null
+                        && !CryptoAssets.isCryptoAsset(component.getType())) {
+                    componentsByIdentity.put(identityOf(component, component.getId()), component);
+                }
             }
         }
 
@@ -402,6 +459,14 @@ public class CorrelationService {
             toSave.add(stale);
             autoResolved++;
         }
+
+        // M1f: resolve VEX for the alerts this run actually confirmed, before they are saved --
+        // never for a row this same pass just auto-resolved, which keeps whatever snapshot it had.
+        // The fast path inside applyTo makes this a no-op query-for-query when no VEX exists yet.
+        List<VulnerabilityAlert> activeToSave = toSave.stream()
+                .filter(a -> a.getLifecycleState() == AlertLifecycleState.ACTIVE)
+                .toList();
+        vexResolutionService.applyTo(activeToSave);
 
         if (!toSave.isEmpty()) {
             alertRepository.saveAll(toSave);

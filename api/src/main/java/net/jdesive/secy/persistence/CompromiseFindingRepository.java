@@ -92,4 +92,8 @@ public interface CompromiseFindingRepository
             + "GROUP BY c.asset.id")
     List<Object[]> countActiveByAsset(@Param("assetIds") List<UUID> assetIds);
 
+    /** M1k — {@code LeadershipMetricsService}'s {@code weeklyFlow}: every creation timestamp since a cutoff, regardless of current state. */
+    @Query("select f.createdAt from CompromiseFinding f where f.createdAt >= :since")
+    List<LocalDateTime> findCreatedAtSince(@Param("since") LocalDateTime since);
+
 }

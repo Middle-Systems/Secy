@@ -10,6 +10,7 @@ import net.jdesive.secy.correlation.OsvMatcher;
 import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.VulnerabilityAlertRepository;
 import net.jdesive.secy.persistence.entity.*;
+import net.jdesive.secy.service.scoring.RiskScoringService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -56,6 +57,12 @@ import java.util.Optional;
  * <p>Enrichment is deliberately <em>idempotent and total</em>: every call recomputes every field it
  * owns from the CVE's current KEV/EPSS state, so re-running it can demote an alert as well as
  * promote one. The single exception is fix data — see {@link #enrich(VulnerabilityAlert, String)}.
+ *
+ * <p><b>M1i:</b> {@code enrich} calls {@code RiskScoringService.apply} as its last step, after the
+ * funnel and the fix data are written. That call reads this row's VEX columns (whatever
+ * {@code VexResolutionService} last wrote onto them) but, like everything else in this class, never
+ * writes them — scoring is strictly additive and never feeds back into {@code actionable}/
+ * {@code actionableReason}.
  */
 @Slf4j
 @Service
@@ -72,6 +79,8 @@ public class EnrichmentService {
 
     private final OsvMatcher osvMatcher;
 
+    private final RiskScoringService riskScoringService;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -79,11 +88,13 @@ public class EnrichmentService {
     public EnrichmentService(VulnerabilityAlertRepository alertRepository,
                              ExploitMaturityResolver exploitMaturityResolver,
                              ActionableProperties properties,
-                             OsvMatcher osvMatcher) {
+                             OsvMatcher osvMatcher,
+                             RiskScoringService riskScoringService) {
         this.alertRepository = alertRepository;
         this.exploitMaturityResolver = exploitMaturityResolver;
         this.properties = properties;
         this.osvMatcher = osvMatcher;
+        this.riskScoringService = riskScoringService;
     }
 
     /** Enrich an alert with no externally supplied fix information. */
@@ -128,6 +139,9 @@ public class EnrichmentService {
             alert.setKnownRansomwareUse(null);
             alert.setExploitMaturity(ExploitMaturity.NONE);
             applyFix(alert, scannerFixedVersions, correlationFix);
+            // M1i: no CVE, no score -- riskScoringService.apply clears riskScore/riskScoreModel the
+            // same total way every other snapshot above was just cleared.
+            riskScoringService.apply(alert);
             return;
         }
 
@@ -156,6 +170,10 @@ public class EnrichmentService {
         alert.setExploitMaturity(ExploitMaturity.max(fromKev, exploitMaturityResolver.resolve(cve.getId())));
 
         applyFix(alert, scannerFixedVersions, correlationFix);
+        // M1i: scoring runs strictly after the funnel above -- it reads this row's just-written
+        // snapshots (plus the VEX columns, which this method never writes) but never feeds back into
+        // actionable/actionableReason. See RiskScoringService's Javadoc.
+        riskScoringService.apply(alert);
     }
 
     /**

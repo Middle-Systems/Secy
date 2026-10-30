@@ -14,6 +14,14 @@ package net.jdesive.secy.persistence.entity;
  * <em>person</em> decided. This enum records what the <em>scanner</em> observed, and the two are
  * orthogonal: an operator can acknowledge an alert that correlation later auto-resolves. Phase 7
  * should add its own column rather than extend this one.
+ *
+ * <p><b>M1j mapping</b> (ROADMAP.md — "Finding &amp; Action-item model"): a finding's derived
+ * {@code RemediationStatus} maps {@link #AUTO_RESOLVED} straight to {@code RESOLVED} (basis
+ * {@code LIFECYCLE}) ahead of every other rule — VEX, a linked {@code ActionItem}, triage. An
+ * {@code ActionItem}'s own auto-reopen is the mirror image of this enum's revival: it fires when a
+ * finding this row backs comes back {@link #ACTIVE} with a {@code lastSeenAt} newer than the item's
+ * {@code resolvedAt}, with no new write-path hook anywhere — see
+ * {@code net.jdesive.secy.service.finding.RemediationStatusDeriver}.
  */
 public enum AlertLifecycleState {
 

@@ -3,6 +3,7 @@ package net.jdesive.secy.model.component;
 import lombok.Builder;
 import lombok.Singular;
 import net.jdesive.secy.correlation.ComponentCoordinate;
+import net.jdesive.secy.model.cbom.NormalizedCryptoAsset;
 
 import java.util.List;
 
@@ -43,6 +44,21 @@ import java.util.List;
  *                           {@link net.jdesive.secy.persistence.entity.ComponentHash#of}. Usually
  *                           empty; Phase 6 matches the SHA-256 entry against the malware-hash corpus.
  *                           Malformed entries are dropped by the normaliser rather than stored
+ * @param identifiers        declared CPE/SWID identifiers (M1c) — CycloneDX {@code component.cpe}/
+ *                           {@code component.swid}, SPDX {@code externalRefs[].cpe23Type}/
+ *                           {@code cpe22Type}/{@code swid}. Secondary only: these never feed
+ *                           {@link #identityKey()}, and disagreement with the primary identity is
+ *                           flagged (see {@code ComponentIdentityAssessor}), never merged
+ * @param crypto             CycloneDX 1.6 {@code cryptoProperties} (M1g), when {@code type} is
+ *                           {@code cryptographic-asset} and the document's {@code specVersion}
+ *                           supports it (see {@code CycloneDxSpecVersion}); null otherwise. SPDX
+ *                           never sets this
+ * @param supplier           the organization that supplied this component instance (M1h) — CycloneDX
+ *                           {@code component.supplier.name}, SPDX {@code PackageSupplier} with its
+ *                           {@code Organization:}/{@code Person:} prefix stripped; null when absent or
+ *                           SPDX {@code NOASSERTION}. Deliberately NOT CycloneDX
+ *                           manufacturer/publisher/author, NOT SPDX originator — follows the official
+ *                           NTIA→format mappings and keeps the two formats symmetric
  */
 @Builder
 public record NormalizedComponent(String name,
@@ -54,7 +70,10 @@ public record NormalizedComponent(String name,
                                   @Singular List<String> licenses,
                                   @Singular List<ExternalReference> externalReferences,
                                   String bomRef,
-                                  @Singular List<ComponentHashValue> hashes) {
+                                  @Singular List<ComponentHashValue> hashes,
+                                  @Singular List<Identifier> identifiers,
+                                  NormalizedCryptoAsset crypto,
+                                  String supplier) {
 
     /** A link the source document carried for a component. */
     public record ExternalReference(String type, String url) {
@@ -71,6 +90,21 @@ public record NormalizedComponent(String name,
     public record ComponentHashValue(String algorithm, String value) {
     }
 
+    /**
+     * One declared CPE or SWID identifier, in the format-neutral shape (M1c). See
+     * {@code net.jdesive.secy.model.component.SecondaryIdentifiers} for how these are built and
+     * {@code net.jdesive.secy.persistence.entity.SBOMComponentIdentifier} for the persisted form.
+     *
+     * @param type            {@code CPE} or {@code SWID}
+     * @param value           the identifier value — a lower-cased CPE string, or a case-preserved SWID tagId
+     * @param declaredName    the name the identifier itself states, when derivable, or null
+     * @param declaredVersion the version the identifier itself states, when derivable, or null
+     * @param source          the exact document field this came from, e.g. {@code cyclonedx:component.cpe}
+     */
+    public record Identifier(net.jdesive.secy.persistence.entity.SecondaryIdentifierType type, String value,
+                             String declaredName, String declaredVersion, String source) {
+    }
+
     public NormalizedComponent {
         name = trimToNull(name);
         version = trimToNull(version);
@@ -81,7 +115,9 @@ public record NormalizedComponent(String name,
         licenses = licenses == null ? List.of() : List.copyOf(licenses);
         externalReferences = externalReferences == null ? List.of() : List.copyOf(externalReferences);
         hashes = hashes == null ? List.of() : List.copyOf(hashes);
+        identifiers = identifiers == null ? List.of() : List.copyOf(identifiers);
         bomRef = trimToNull(bomRef);
+        supplier = trimToNull(supplier);
 
         // Derived, never supplied: a parser that guessed its own ecosystem could disagree with the
         // one correlation derives from the same PURL, and the mismatch would be invisible.

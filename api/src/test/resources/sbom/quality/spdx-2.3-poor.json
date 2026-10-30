@@ -1,0 +1,54 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "acme-spdx-poor",
+  "documentNamespace": "https://acme.example/spdx/acme-spdx-poor",
+  "creationInfo": {
+    "creators": [ "Tool: syft-0.98.0" ]
+  },
+  "documentDescribes": [ "SPDXRef-Package-root" ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-root",
+      "name": "acme-spdx-poor",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "primaryPackagePurpose": "APPLICATION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-lodash",
+      "name": "lodash",
+      "versionInfo": "4.17.20",
+      "downloadLocation": "NOASSERTION",
+      "supplier": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "externalRefs": [
+        { "referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:npm/lodash@4.17.20" }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-left-pad",
+      "name": "left-pad",
+      "versionInfo": "1.3.0",
+      "downloadLocation": "NOASSERTION",
+      "supplier": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-is-odd",
+      "name": "is-odd",
+      "versionInfo": "3.0.1",
+      "downloadLocation": "NOASSERTION",
+      "supplier": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-root"
+    }
+  ]
+}

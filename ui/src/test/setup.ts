@@ -31,6 +31,21 @@ if (!window.ResizeObserver) {
   }));
 }
 
+// jsdom implements neither of these; Radix's Select (and anything else built on
+// @radix-ui/react-use-controllable-state's pointer capture handling) reaches for them.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {};
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = () => {};
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 // This environment's File/Blob (from Node, not jsdom's own) has no `.text()` — real browsers do,
 // and UploadSbomModal reads a selected file with it. FileReader (jsdom's, which does understand
 // this Blob) fills the gap.

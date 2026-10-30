@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.jdesive.secy.correlation.version.VersionRange;
 import net.jdesive.secy.correlation.version.VersionScheme;
 import net.jdesive.secy.correlation.version.VersionSchemes;
+import net.jdesive.secy.model.cbom.CryptoAssets;
 import net.jdesive.secy.model.component.ComponentIdentity;
 import net.jdesive.secy.model.component.CorrelatableComponent;
 import net.jdesive.secy.persistence.AssetComponentRepository;
@@ -96,6 +97,9 @@ public class CompromiseDetectionService {
 
     private final CompromiseAgingService agingService;
 
+    /** M1e: same staged-scope union {@code CorrelationService} uses — see {@link SbomCorrelationScope}. */
+    private final SbomCorrelationScope correlationScope;
+
     /**
      * What one detection pass did. Returned for logging and tests; nothing persists it.
      *
@@ -118,23 +122,41 @@ public class CompromiseDetectionService {
     /* SBOM                                                               */
     /* ------------------------------------------------------------------ */
 
-    /** Detect over every component of an SBOM and reconcile the findings for its <b>product</b>. */
+    /**
+     * Detect over every component of an SBOM and reconcile the findings for its <b>product</b>.
+     *
+     * <p>Except the Unassigned bucket (M1a): a bucket SBOM has no sibling versions of "the product"
+     * to reconcile against — every upload landing there is an unrelated document that happened to
+     * arrive untagged — so, exactly like {@link CorrelationService#correlate(SBOM)}, detection stays
+     * scoped to the SBOM itself rather than the whole bucket product. An SBOM with no product at all
+     * (only ever a test fixture) gets the same treatment for the same reason.
+     *
+     * <p><b>M1e:</b> for a staged, product-scoped SBOM the component set is the union of every active
+     * stage slot's components (see {@link SbomCorrelationScope}), most-downstream stage winning for a
+     * shared identity — the same rule and the same reasoning as
+     * {@link CorrelationService#correlate(SBOM)}'s Javadoc.
+     */
     @Transactional
     public DetectionSummary detect(SBOM sbom) {
         UUID sbomId = sbom.getId();
+        boolean productScoped = sbom.getProduct() != null && !sbom.getProduct().isUnassigned();
         UUID productId = sbom.getProduct() == null ? null : sbom.getProduct().getId();
 
-        List<CompromiseFinding> prior = productId == null
-                ? findingRepository.findAllBySbomIdForDetection(sbomId)
-                : findingRepository.findAllByProductIdForDetection(productId);
+        List<CompromiseFinding> prior = productScoped
+                ? findingRepository.findAllByProductIdForDetection(productId)
+                : findingRepository.findAllBySbomIdForDetection(sbomId);
 
         Map<String, SBOMComponent> componentsByIdentity = new LinkedHashMap<>();
         Map<String, UUID> rowIds = new LinkedHashMap<>();
-        for (SBOMComponent component : sbom.getComponents()) {
-            if (component != null && component.getId() != null) {
-                String identity = identityOf(component, component.getId());
-                componentsByIdentity.put(identity, component);
-                rowIds.put(identity, component.getId());
+        for (SBOM scoped : correlationScope.sbomsInScope(sbom, productScoped)) {
+            for (SBOMComponent component : scoped.getComponents()) {
+                // M1g: crypto assets are not packages -- excluded from malware-name/hash matching too.
+                if (component != null && component.getId() != null
+                        && !CryptoAssets.isCryptoAsset(component.getType())) {
+                    String identity = identityOf(component, component.getId());
+                    componentsByIdentity.put(identity, component);
+                    rowIds.put(identity, component.getId());
+                }
             }
         }
 

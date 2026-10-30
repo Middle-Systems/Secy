@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://acme.example/vex/2099-7001",
+  "author": "Acme Product Security",
+  "version": 1,
+  "last_updated": "2026-01-01T00:00:00Z",
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2099-7001"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "JndiLookup is stripped from the shaded jar at build time."
+    }
+  ]
+}

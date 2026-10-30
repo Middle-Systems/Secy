@@ -12,9 +12,16 @@
 
 services:
   postgres:
-    # Same image pin, env shape and healthcheck as api/compose.yaml (the existing dev-only
-    # compose) so the two never drift on what "a working Postgres for Secy" looks like.
-    image: 'postgres:16'
+    # Same image build, env shape and healthcheck as api/compose.yaml (the existing dev-only
+    # compose) so the two never drift on what "a working Postgres for Secy" looks like. Apache AGE
+    # (see api/docker/postgres-age/Dockerfile) ships by default here, since this is the stack that
+    # ships the whole product, including M1d's lineage graph -- SECY_LINEAGE_ENABLED below defaults
+    # to true accordingly (api/compose.yaml's plain dev Postgres still defaults to opting out via
+    # secy.lineage.enabled's own false default; that stack builds the AGE image too, but a
+    # developer must still opt in with SECY_LINEAGE_ENABLED=true).
+    build:
+      context: ./api/docker/postgres-age
+    image: 'secy-postgres-age:16'
     container_name: secy-postgres
     restart: unless-stopped
     environment:
@@ -54,6 +61,11 @@ services:
       SECY_ACTIONABLE_EPSS_THRESHOLD: ${SECY_ACTIONABLE_EPSS_THRESHOLD:-0.1}
       SECY_OSV_ECOSYSTEMS: ${SECY_OSV_ECOSYSTEMS:-npm,Maven,PyPI,Go,NuGet,RubyGems,crates.io,Packagist,Hex,Pub}
       SECY_CVE_LIST_RELEASES_API_URL: ${SECY_CVE_LIST_RELEASES_API_URL:-https://api.github.com/repos/CVEProject/cvelistV5/releases/latest}
+      # This stack's Postgres image ships Apache AGE by default (see the postgres service above),
+      # so the lineage graph (M1d) is enabled by default here too -- api/compose.yaml's plain dev
+      # Postgres still requires opting in explicitly. Set to false to run this stack against a
+      # Postgres you know does not have AGE.
+      SECY_LINEAGE_ENABLED: ${SECY_LINEAGE_ENABLED:-true}
     # Published so Swagger UI / a direct curl / `POST /auth/register` are reachable
     # without going through the ui container's nginx proxy — handy for first-run setup
     # and debugging. Drop this if you want the API reachable only via the ui proxy.

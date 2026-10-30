@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router';
 import secyLogo from '@/assets/img/secy-logo.svg';
 import { displayNameOf, initialsOf } from '@/auth/initials';
 import { useAuth } from '@/auth/useAuth';
+import { ViewSwitcher } from '@/components/layout/ViewSwitcher';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -50,6 +51,10 @@ export function Header() {
         </div>
 
         <div className="flex items-center">
+          <ViewSwitcher />
+
+          <Separator orientation="vertical" className="mx-3 h-5" />
+
           <button
             type="button"
             title="Notifications"

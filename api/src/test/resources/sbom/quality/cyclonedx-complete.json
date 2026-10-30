@@ -1,0 +1,49 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-20T10:00:00Z",
+    "authors": [
+      { "name": "Acme Build Team" }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "acme-complete-app",
+      "name": "acme-complete-app",
+      "version": "1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/lodash@4.17.21",
+      "name": "lodash",
+      "version": "4.17.21",
+      "purl": "pkg:npm/lodash@4.17.21",
+      "supplier": { "name": "Acme" }
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.1",
+      "name": "log4j-core",
+      "version": "2.17.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.1",
+      "supplier": { "name": "Acme" }
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "acme-complete-app",
+      "dependsOn": [ "pkg:npm/lodash@4.17.21", "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.1" ]
+    },
+    {
+      "ref": "pkg:npm/lodash@4.17.21",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.1",
+      "dependsOn": []
+    }
+  ]
+}

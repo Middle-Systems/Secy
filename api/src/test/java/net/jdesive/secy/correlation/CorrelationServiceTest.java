@@ -188,6 +188,45 @@ class CorrelationServiceTest {
     }
 
     /* ------------------------------------------------------------------ */
+    /* The Unassigned bucket (M1a) — SBOM-scoped, not product-scoped       */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void twoUnrelatedSbomsInTheUnassignedBucketDoNotAutoResolveEachOtherSAlerts() {
+        cve("CVE-2099-4001", 0.9f);
+        advisory("GHSA-bucket-a", "npm", "bucket-widget", "CVE-2099-4001", "0", "2.0.0");
+        cve("CVE-2099-4002", 0.9f);
+        advisory("GHSA-bucket-b", "npm", "bucket-gadget", "CVE-2099-4002", "0", "2.0.0");
+
+        Product bucket = new Product();
+        bucket.setName("bucket-" + UUID.randomUUID());
+        bucket.setUnassigned(true);
+        bucket = productRepository.save(bucket);
+
+        // First bucket SBOM: vulnerable in "bucket-widget" only.
+        UUID first = sbomInProduct(bucket, "pkg:npm/bucket-widget@1.0.0", "bucket-widget", "1.0.0");
+        correlate(first);
+        assertThat(alertsFor(first)).as("the first bucket SBOM raises its own alert").hasSize(1);
+
+        // Second, unrelated bucket SBOM: vulnerable in "bucket-gadget" only — shares nothing with
+        // the first SBOM except the same (bucket) product row.
+        UUID second = sbomInProduct(bucket, "pkg:npm/bucket-gadget@1.0.0", "bucket-gadget", "1.0.0");
+        correlate(second);
+
+        // If the bucket were treated like a normal product, correlating "second" would reconcile
+        // against the whole product's prior alerts and auto-resolve "first"'s alert, since
+        // bucket-widget is absent from "second"'s component set. That must NOT happen: each bucket
+        // SBOM reconciles at its own scope.
+        List<VulnerabilityAlert> firstAfter = alertsFor(first);
+        assertThat(firstAfter)
+                .as("correlating an unrelated bucket SBOM must not touch another bucket SBOM's alerts")
+                .hasSize(1);
+        assertThat(firstAfter.get(0).getLifecycleState()).isEqualTo(AlertLifecycleState.ACTIVE);
+
+        assertThat(alertsFor(second)).as("the second bucket SBOM raises its own alert too").hasSize(1);
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Helpers                                                            */
     /* ------------------------------------------------------------------ */
 
@@ -265,6 +304,11 @@ class CorrelationServiceTest {
         product.setName("correlation-test-" + UUID.randomUUID());
         product = productRepository.save(product);
 
+        return sbomInProduct(product, purl, name, version);
+    }
+
+    /** Like {@link #sbom}, but against a caller-supplied product rather than a fresh one each time. */
+    private UUID sbomInProduct(Product product, String purl, String name, String version) {
         SBOM sbom = new SBOM();
         sbom.setProduct(product);
         sbom.setFormat("CycloneDX");

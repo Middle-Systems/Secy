@@ -87,6 +87,47 @@ public enum JobType {
      * {@code 013}. 14 characters — fits the {@code varchar(32)} {@code ingestion_job.type} column
      * {@code 011e} already widened for {@code MALICIOUS_PACKAGES} with no further migration needed.
      */
-    CONNECTOR_SYNC
+    CONNECTOR_SYNC,
+
+    /**
+     * A full rebuild of the Apache AGE lineage graph from Postgres (M1d).
+     *
+     * <p>A singleton feed pull like {@link #NVD}/{@link #OSV} — one rebuild at a time — so it
+     * <b>keeps</b> the {@code uq_ingestion_job_active_type} slot; no migration is needed since
+     * {@code SBOM_UPLOAD}/{@code ASSET_SCAN}/{@code COMPLIANCE_SCAN} are the only types migration
+     * {@code 013} excludes from it. Triggered by {@code POST /lineage/rebuild}, dispatched to
+     * {@code LineageRebuildService}. See {@code net.jdesive.secy.service.ReEnrichmentListener},
+     * which excludes this type for the same reason it excludes {@link #NVD}: a graph rebuild
+     * changes no alert inputs, so it must not trigger a re-enrichment pass.
+     */
+    LINEAGE_REBUILD,
+
+    /**
+     * One uploaded VEX document (OpenVEX / CSAF 2.0 subset / CycloneDX VEX) being parsed into
+     * {@code vex_statement} rows and reconciled against existing alerts (M1f).
+     *
+     * <p>Per-invocation like {@link #SBOM_UPLOAD}, {@link #ASSET_SCAN}, {@link #COMPLIANCE_SCAN} and
+     * {@link #CONNECTOR_SYNC} — each upload is its own unit of work with its own payload (which
+     * {@code vex_document} row to finish ingesting) — so it is enqueued via {@code JobService.create()}
+     * and excluded from {@code uq_ingestion_job_active_type} by migration {@code 024e}. 10 characters,
+     * well within the {@code varchar(32)} column.
+     */
+    VEX_UPLOAD,
+
+    /**
+     * A full rescore of every {@code vulnerability_alert} from its current snapshots (M1i, ROADMAP.md
+     * — "Scoring engine rework") — no enrichment side effects, just {@code RiskScoringService.rescoreAll}
+     * recomputing {@code risk_score}/{@code risk_score_model}/{@code risk_scored_at}. Used for backfill
+     * (pre-M1i rows are NULL until their next enrichment or this job) and for a future weights-model
+     * version bump.
+     *
+     * <p>A singleton feed pull like {@link #LINEAGE_REBUILD} — one rescore at a time — so it
+     * <b>keeps</b> the {@code uq_ingestion_job_active_type} slot; no migration needed, same reasoning
+     * as {@link #LINEAGE_REBUILD}. 12 characters, well within {@code varchar(32)}. Triggered by
+     * {@code POST /risk-score/rescore}. See {@code net.jdesive.secy.service.ReEnrichmentListener},
+     * which excludes this type for the same reason it excludes {@link #LINEAGE_REBUILD}/{@link #VEX_UPLOAD}:
+     * a rescore changes no funnel input at all.
+     */
+    RISK_RESCORE
 
 }

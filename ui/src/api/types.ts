@@ -80,7 +80,15 @@ export type JobType =
   | 'COMPLIANCE_SCAN'
   | 'MALICIOUS_PACKAGES'
   | 'MALWARE_HASHES'
-  | 'CONNECTOR_SYNC';
+  | 'CONNECTOR_SYNC'
+  | 'LINEAGE_REBUILD'
+  /**
+   * One VEX document (upload or M1k-authored statement) being parsed and reconciled against
+   * alerts. Added here for M1k — M1f shipped no UI for `POST /vex`, but M1k's dispute flow
+   * (`POST /action-items/:id/disputes`) and `POST /vex/statements` both hand back one of these to
+   * poll, so the frontend job-type union needs it even though no browsable VEX screen exists yet.
+   */
+  | 'VEX_UPLOAD';
 
 /**
  * Job lifecycle. `QUEUED -> RUNNING -> (SUCCEEDED | FAILED | CANCELLED)`; the
@@ -629,6 +637,10 @@ export interface Product {
   /** ISO-8601 date-time string. */
   lastScanned?: string;
   actionableCount?: number;
+  /** True only for the tenant's per-M1a "Unassigned" bucket product. Read-only. */
+  unassigned?: boolean;
+  /** The tag value this product answers to (M1a), or `null`/absent for a manually named product. */
+  tagValue?: string | null;
 }
 
 /** SBOM processing state observed on the wire. */
@@ -655,7 +667,12 @@ export interface SBOM {
   productVersion?: string | null;
   /** The SBOM's root/metadata component. Not present on every payload. */
   component?: SBOMComponent;
+  /** Where in the SDLC this SBOM was captured (M1e). Null/absent means "stage unknown". */
+  lifecycleStage?: SbomLifecycleStage | null;
 }
+
+/** M1e — SBOM lifecycle stages + diffing. See `?stage=` on the SBOM upload endpoints. */
+export type SbomLifecycleStage = 'SOURCE' | 'BUILD' | 'ANALYZED' | 'DEPLOYED';
 
 export interface SBOMTool {
   id?: string;
@@ -1008,3 +1025,255 @@ export type TriageSnapshot = Pick<
   ActionableItem,
   'triageState' | 'assigneeId' | 'assigneeName' | 'snoozedUntil'
 >;
+
+/* -------------------------------------------------------------------------- */
+/* M1k — role-based views                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** Mirrors `net.jdesive.secy.persistence.entity.TenantRole`. A VIEW, not a permission — see `GET /me/access`. */
+export type TenantRole = 'LEADERSHIP' | 'SECURITY_ENGINEER' | 'SOFTWARE_ENGINEER';
+
+/** The five OpenVEX justification values — mirrors `net.jdesive.secy.persistence.entity.VexJustification`. */
+export type VexJustification =
+  | 'COMPONENT_NOT_PRESENT'
+  | 'VULNERABLE_CODE_NOT_PRESENT'
+  | 'VULNERABLE_CODE_NOT_IN_EXECUTE_PATH'
+  | 'VULNERABLE_CODE_CANNOT_BE_CONTROLLED_BY_ADVERSARY'
+  | 'INLINE_MITIGATIONS_ALREADY_EXIST';
+
+/** `GET /api/me/access` — M1k, no enforcement; purely which views to offer. */
+export interface MyAccess {
+  tenantId: string;
+  tenantName: string | null;
+  member: boolean;
+  tenantAdmin: boolean;
+  tenantAdminSource: 'MEMBERSHIP' | 'GLOBAL_ADMIN' | null;
+  roles: TenantRole[];
+  rolesSource: 'DEFAULT' | 'EXPLICIT';
+  views: TenantRole[];
+  defaultView: TenantRole | null;
+}
+
+/** `GET /api/me/owned-products`. */
+export interface OwnedProduct {
+  productId: string;
+  productName: string;
+}
+
+/** `GET /api/tenant/members` row. */
+export interface TenantMember {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  enabled: boolean;
+  globalRole: 'USER' | 'ADMIN';
+  tenantAdmin: boolean;
+  tenantAdminSource: 'MEMBERSHIP' | 'GLOBAL_ADMIN' | null;
+  storedTenantAdmin: boolean;
+  roles: TenantRole[];
+  rolesSource: 'DEFAULT' | 'EXPLICIT';
+  accessUpdatedAt: string | null;
+  accessUpdatedById: string | null;
+}
+
+/** Mirrors `net.jdesive.secy.persistence.entity.RemediationStatus`. */
+export type RemediationStatus = 'OPEN' | 'IN_PROGRESS' | 'RISK_ACCEPTED' | 'NOT_AFFECTED' | 'RESOLVED';
+
+/** Mirrors `net.jdesive.secy.persistence.entity.StatusDerivation`. */
+export type StatusDerivation = 'REOPENED_ON_REAPPEARANCE' | 'RISK_ACCEPTANCE_EXPIRED' | 'VEX_NOT_AFFECTED';
+
+/** Mirrors `net.jdesive.secy.persistence.entity.FindingType`. */
+export type FindingType =
+  | 'VULNERABILITY'
+  | 'COMPROMISE'
+  | 'LIFECYCLE_DRIFT'
+  | 'QUANTUM_VULNERABLE'
+  | 'SBOM_QUALITY'
+  | 'PROVENANCE';
+
+/** Mirrors `net.jdesive.secy.model.finding.FixKind`. */
+export type FixKind =
+  | 'UPGRADE'
+  | 'NO_FIX_AVAILABLE'
+  | 'UNKNOWN'
+  | 'INVESTIGATE_COMPROMISE'
+  | 'RECONCILE_LIFECYCLE'
+  | 'MIGRATE_CRYPTO'
+  | 'IMPROVE_SBOM';
+
+/** Mirrors `net.jdesive.secy.model.finding.FindingFix` — M1k's "concrete fix" guidance. */
+export interface FindingFix {
+  kind: FixKind;
+  fixedVersions: string | null;
+  fixSource: FixSource | null;
+  guidance: string;
+}
+
+/** A row of `GET /api/findings`/`GET /api/findings/:type/:id` — the M1j read-model, trimmed to what M1k's UI needs. */
+export interface FindingSummary {
+  id: string;
+  type: FindingType;
+  title: string | null;
+  summary: string | null;
+  severity: string | null;
+  productId: string | null;
+  productName: string | null;
+  assetId: string | null;
+  assetName: string | null;
+  componentName: string | null;
+  componentVersion: string | null;
+  componentPurl: string | null;
+  lifecycleState: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+  riskScore: number | null;
+  vexStatus: string | null;
+  vexJustification: string | null;
+  vexConflict: boolean;
+  status: RemediationStatus;
+  statusBasis: string | null;
+  actionItemId: string | null;
+  detailPath: string | null;
+  fix: FindingFix | null;
+}
+
+/** `ActionItemScore` nested in an action item response. */
+export interface ActionItemScore {
+  maxRiskScore: number | null;
+  topFindingId: string | null;
+  scoredFindingCount: number;
+  unscoredFindingCount: number;
+}
+
+/** M1k `ActionItemFixSummary`. */
+export interface ActionItemFixSummary {
+  remainingWithKnownFix: number;
+  remainingWithoutKnownFix: number;
+}
+
+/** A row of `GET /api/action-items`. */
+export interface ActionItem {
+  id: string;
+  title: string;
+  productId: string | null;
+  productName: string | null;
+  assetId: string | null;
+  assetName: string | null;
+  status: RemediationStatus;
+  recordedStatus: RemediationStatus;
+  derivation: StatusDerivation | null;
+  reopened: boolean;
+  riskAcceptanceExpired: boolean;
+  awaitingVerification: boolean;
+  fixVerified: boolean;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  findingCount: number;
+  remainingFindingCount: number;
+  findingCountsByType: Partial<Record<FindingType, number>>;
+  score: ActionItemScore | null;
+  fixSummary: ActionItemFixSummary | null;
+  createdAt: string;
+  createdById: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
+/** `GET /api/action-items/:id` — {@link ActionItem} plus description and every linked finding. */
+export interface ActionItemDetail extends ActionItem {
+  description: string | null;
+  findings: FindingSummary[];
+}
+
+/** Body of `PATCH /api/action-items/:id`. */
+export interface ActionItemPatchPayload {
+  status?: RemediationStatus;
+  title?: string;
+  description?: string;
+  assigneeUserId?: string;
+  unassign?: boolean;
+  comment?: string;
+  riskAcceptedUntil?: string;
+  riskAcceptanceJustification?: string;
+  riskApprovedByUserId?: string;
+  riskApprovalNote?: string;
+}
+
+/** Body of `POST /api/action-items/:id/disputes`. */
+export interface DisputeFindingPayload {
+  findingId: string;
+  justification?: VexJustification;
+  impactStatement: string;
+}
+
+/** Response of `POST /api/action-items/:id/disputes` / `POST /api/vex/statements`. */
+export interface DisputeResponse {
+  job: Job;
+  vexDocumentId: string;
+}
+
+/** `GET /api/metrics/leadership`. */
+export interface LeadershipMetrics {
+  generatedAt: string;
+  scoringModelVersion: string;
+  findingsBySeverity: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    unknown: number;
+    total: number;
+  };
+  openFindingsByType: Partial<Record<FindingType, number>>;
+  kevExposure: {
+    kevFindingCount: number;
+    kevPastDueCount: number;
+    kevByLifecycleStage: Record<string, number>;
+    productsWithKevCount: number;
+  };
+  currentRisk: {
+    maxRiskScore: number | null;
+    topFindingId: string | null;
+    scoredFindingCount: number;
+    unscoredFindingCount: number;
+  };
+  riskTrend: {
+    available: boolean;
+    note: string;
+  };
+  weeklyFlow: Array<{
+    weekStart: string;
+    newFindings: number;
+    actionItemsCreated: number;
+    actionItemsResolved: number;
+  }>;
+  mttr: {
+    basis: string;
+    windowDays: number;
+    resolvedCount: number;
+    meanHours: number | null;
+    medianHours: number | null;
+    fixVerifiedCount: number;
+    awaitingVerificationCount: number;
+    note: string;
+  };
+  sbomStageCoverage: {
+    summary: {
+      productCount: number;
+      productsWithNoSbom: number;
+      productsLegacyOnly: number;
+      productsStaged: number;
+      productsWithAllFourStages: number;
+      productsWithStage: Record<string, number>;
+    };
+    products: Array<{
+      productId: string;
+      productName: string;
+      mode: 'STAGED' | 'LEGACY' | 'NONE';
+      stagesPresent: string[];
+      stagesMissing: string[];
+      hasUnstagedActiveSbom: boolean;
+      maxRiskScore: number | null;
+    }>;
+  };
+}

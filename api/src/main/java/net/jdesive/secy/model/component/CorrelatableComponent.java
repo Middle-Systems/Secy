@@ -85,6 +85,12 @@ public interface CorrelatableComponent {
      * shape {@code CorrelationService} already uses for its scope-specific prior-alert queries. The
      * matcher below stays component-kind agnostic; only the loading step knows which table it is.
      *
+     * <p><b>M1c's {@code identifiers}/{@code identityConflicts} collections are absent from this
+     * interface for the exact same reason.</b> They are {@code SBOMComponent}-only (asset-side
+     * secondary identifiers are a future M3 table) and are read the same detached-graph-safe way:
+     * through {@code SBOMComponentRepository}/{@code ComponentIdentityService}, never through a
+     * collection getter reached off this interface.
+     *
      * @see net.jdesive.secy.persistence.SBOMComponentRepository#findHashesByComponentIds
      * @see net.jdesive.secy.persistence.AssetComponentRepository#findHashesByComponentIds
      */

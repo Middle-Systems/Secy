@@ -5,6 +5,7 @@ import net.jdesive.secy.persistence.entity.CompromiseConfidence;
 import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
+import net.jdesive.secy.persistence.entity.VexStatus;
 
 import java.util.UUID;
 
@@ -68,6 +69,15 @@ import java.util.UUID;
  *                           primary screen's default.
  * @param confidence         exact {@link CompromiseConfidence}. The compromise-side analogue of
  *                           {@code matchConfidence}, and exact for the same reason.
+ * @param vexStatus          M1f: exact {@link VexStatus}. Null (the default) applies the M1f
+ *                           default-list behavior instead of an exact match: hide {@code NOT_AFFECTED}
+ *                           and {@code FIXED} rows — the same "hide what is not work" precedent Phase 7
+ *                           set for triage. Excludes every compromise row, which has no VEX status.
+ * @param vexConflict        M1f: exact match on {@link net.jdesive.secy.persistence.entity.VulnerabilityAlert#isVexConflict()}
+ *                           when non-null. Excludes every compromise row.
+ * @param minScore           M1i: risk score at or above this. Items with no stored score are
+ *                           excluded, the same "unscored is not below the bar" rule {@code minCvss}
+ *                           uses. Excludes every compromise row, which is never scored.
  */
 public record ActionableFilter(
         UUID productId,
@@ -79,7 +89,10 @@ public record ActionableFilter(
         ExploitMaturity minExploitMaturity,
         MatchConfidence matchConfidence,
         ActionableItemType itemType,
-        CompromiseConfidence confidence) {
+        CompromiseConfidence confidence,
+        VexStatus vexStatus,
+        Boolean vexConflict,
+        Double minScore) {
 
     /**
      * Whether any vulnerability row could satisfy this filter.
@@ -100,7 +113,10 @@ public record ActionableFilter(
                 && minCvss == null
                 && fixState == null
                 && matchConfidence == null
-                && (minExploitMaturity == null || minExploitMaturity == ExploitMaturity.NONE);
+                && (minExploitMaturity == null || minExploitMaturity == ExploitMaturity.NONE)
+                && vexStatus == null
+                && vexConflict == null
+                && minScore == null;
     }
 
 }

@@ -32,7 +32,7 @@ import java.util.UUID;
 @Setter
 @Entity
 @Table(name = "docker_compliance_report")
-public class DockerComplianceReport {
+public class DockerComplianceReport extends TenantOwnedEntity {
 
     /** Uploaded and validated; the {@code COMPLIANCE_SCAN} job has not started. Mirrors {@code Asset}. */
     public static final String STATUS_QUEUED = "QUEUED";

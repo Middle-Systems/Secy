@@ -10,6 +10,7 @@ import net.jdesive.secy.model.actionable.ActionableDetailResponse;
 import net.jdesive.secy.model.actionable.ActionableFilter;
 import net.jdesive.secy.model.actionable.ActionableItemResponse;
 import net.jdesive.secy.model.actionable.ActionableItemType;
+import net.jdesive.secy.model.actionable.ActionableRank;
 import net.jdesive.secy.model.actionable.AddCommentRequest;
 import net.jdesive.secy.model.actionable.BulkTriagePatchRequest;
 import net.jdesive.secy.model.actionable.TriageEventResponse;
@@ -22,6 +23,7 @@ import net.jdesive.secy.persistence.entity.ExploitMaturity;
 import net.jdesive.secy.persistence.entity.FixState;
 import net.jdesive.secy.persistence.entity.MatchConfidence;
 import net.jdesive.secy.persistence.entity.User;
+import net.jdesive.secy.persistence.entity.VexStatus;
 import net.jdesive.secy.security.AppUserPrincipal;
 import net.jdesive.secy.service.ActionableService;
 import net.jdesive.secy.service.TriageService;
@@ -127,12 +129,26 @@ public class ActionableController {
             @Parameter(description = "Exact compromise confidence: CONFIRMED (the feed named this exact "
                     + "artefact), LIKELY (the match needed an inference) or INVESTIGATE (the IOC has gone "
                     + "stale). Excludes every vulnerability row.")
-            @RequestParam(required = false) CompromiseConfidence confidence) {
+            @RequestParam(required = false) CompromiseConfidence confidence,
+            @Parameter(description = "M1f: exact VEX status. Omit for the default: NOT_AFFECTED and FIXED "
+                    + "rows are hidden (they are not work), AFFECTED/UNDER_INVESTIGATION stay visible. "
+                    + "Excludes every compromise row, which has no VEX status.")
+            @RequestParam(required = false) VexStatus vexStatus,
+            @Parameter(description = "M1f: true/false to show only conflicted/non-conflicted rows; omit for "
+                    + "both. Excludes every compromise row.")
+            @RequestParam(required = false) Boolean vexConflict,
+            @Parameter(description = "M1i: risk score (0-100) at or above this; unscored rows are excluded. "
+                    + "Excludes every compromise row, which is never scored.")
+            @RequestParam(required = false) Double minScore,
+            @Parameter(description = "M1i: which vulnerability-tier secondary sort key to use. EPSS (the "
+                    + "default, unchanged since Phase 1) sorts by EPSS descending with the risk score as a "
+                    + "tie-breaker; SCORE swaps the two. The compromise tier is unaffected either way.")
+            @RequestParam(defaultValue = "EPSS") ActionableRank rankBy) {
 
         ActionableFilter filter = new ActionableFilter(
                 productId, assetId, reason, minCvss, state, fixState, minExploitMaturity, matchConfidence,
-                itemType, confidence);
-        return actionableService.findActionable(page, size, filter);
+                itemType, confidence, vexStatus, vexConflict, minScore);
+        return actionableService.findActionable(page, size, filter, rankBy);
     }
 
     @Operation(

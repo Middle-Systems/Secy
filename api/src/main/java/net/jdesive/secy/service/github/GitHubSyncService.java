@@ -8,6 +8,8 @@ import net.jdesive.secy.model.ingest.IngestResult;
 import net.jdesive.secy.model.ingest.JobProgress;
 import net.jdesive.secy.persistence.entity.Product;
 import net.jdesive.secy.persistence.entity.SBOM;
+import net.jdesive.secy.persistence.entity.SbomIngestionSource;
+import net.jdesive.secy.persistence.entity.SbomLifecycleStage;
 import net.jdesive.secy.persistence.entity.SourceConnector;
 import net.jdesive.secy.service.ProductService;
 import net.jdesive.secy.service.SBOMService;
@@ -90,9 +92,22 @@ public class GitHubSyncService {
                     notFound++;
                 } else {
                     NormalizedSbom document = sbomParser.parse(sbomNode);
+                    // TODO(M2): once GitHub sync reads repo topics/custom-properties, replace this
+                    // one-product-per-repo lookup with ProductTaggingService.resolveProduct so
+                    // GitHub-sourced products go through the same tag-driven resolution M1a's manual
+                    // upload path uses. No behavior change yet — see ROADMAP.md's M2 section.
+                    // TODO(M2): parse this repo's CODEOWNERS file and its GitHub team repo
+                    // permissions, and write OwnershipLink rows (source=INFERRED,
+                    // inferenceMethod=CODEOWNERS/GITHUB_TEAM_PERMISSION, evidence="path:line" or the
+                    // team slug) onto the resolved product below. A refresh must replace only this
+                    // method's own INFERRED rows for that product — never a MANUAL link, and never the
+                    // Unassigned bucket. See ROADMAP.md's M1b/M2 sections and OwnershipLink's Javadoc.
                     Product product = productService.findOrCreateByName(fullName);
+                    // M1e: GitHub's dependency-graph SBOM is derived from repo manifests/lockfiles —
+                    // the textbook Source SBOM. No backfill of existing rows.
                     SBOM sbom = sbomService.createPlaceholder(
-                            product, document, defaultVersion(repo), null, null);
+                            product, document, defaultVersion(repo), null, null,
+                            SbomIngestionSource.GITHUB_CONNECTOR, connector.getId(), SbomLifecycleStage.SOURCE);
                     IngestResult result = sbomService.ingestDocument(sbom, document, progress);
                     componentsTotal += result.itemsProcessed();
                     succeeded++;

@@ -42,6 +42,7 @@ class OpenApiDocsTest {
                 .contains("\"/nvd/search\"")
                 .contains("\"/nvd/id/{cveId}\"")
                 .contains("\"/products\"")
+                .contains("\"/products/{productId}/owners\"")
                 .contains("\"/sbom/{sbomId}/vulnerabilities\"")
                 .contains("\"/stats/dashboard\"")
                 .contains("\"/compliance/reports\"")
@@ -53,7 +54,42 @@ class OpenApiDocsTest {
                 .contains("\"/threat/ingest/malicious-packages\"")
                 .contains("\"/threat/ingest/malware-hashes\"")
                 .contains("\"/threat/malicious-packages\"")
-                .contains("\"/threat/malware-hashes\"");
+                .contains("\"/threat/malware-hashes\"")
+                // M1e.
+                .contains("\"/lifecycle-drift\"")
+                .contains("\"/lifecycle-drift/{id}\"")
+                // M1f.
+                .contains("\"/vex\"")
+                .contains("\"/vex/documents\"")
+                .contains("\"/vex/documents/{id}\"")
+                .contains("\"/vex/documents/{id}/statements\"")
+                .contains("\"/vex/documents/{id}/deactivate\"")
+                .contains("\"/vex/statements\"")
+                .contains("\"/vex/reconcile\"")
+                .contains("\"/vex/settings/precedence\"")
+                // M1g.
+                .contains("\"/cbom/assets\"")
+                .contains("\"/cbom/assets/{id}\"")
+                .contains("\"/cbom/quantum-findings\"")
+                .contains("\"/cbom/quantum-findings/{id}\"")
+                // M1h.
+                .contains("\"/sbom-quality\"")
+                .contains("\"/sbom-quality/{id}\"")
+                // M1i.
+                .contains("\"/products/{id}/risk-score\"")
+                .contains("\"/assets/{id}/risk-score\"")
+                .contains("\"/risk-score/model\"")
+                .contains("\"/risk-score/rescore\"")
+                // M1j.
+                .contains("\"/findings\"")
+                .contains("\"/findings/types\"")
+                .contains("\"/findings/{type}/{id}\"")
+                .contains("\"/action-items\"")
+                .contains("\"/action-items/{id}\"")
+                .contains("\"/action-items/{id}/findings\"")
+                .contains("\"/action-items/{id}/findings/{type}/{findingId}\"")
+                .contains("\"/action-items/{id}/comments\"")
+                .contains("\"/action-items/{id}/history\"");
 
         assertThat(body)
                 .as("@Tag names")
@@ -61,11 +97,19 @@ class OpenApiDocsTest {
                 .contains("\"EPSS\"")
                 .contains("\"NVD\"")
                 .contains("\"Products\"")
+                .contains("\"Ownership\"")
                 .contains("\"SBOM\"")
                 .contains("\"Stats\"")
                 .contains("\"Compliance\"")
                 .contains("\"Compromise\"")
-                .contains("\"Threat\"");
+                .contains("\"Threat\"")
+                .contains("\"Lifecycle drift\"")
+                .contains("\"VEX\"")
+                .contains("\"CBOM\"")
+                .contains("\"SBOM quality\"")
+                .contains("\"Risk score\"")
+                .contains("\"Findings\"")
+                .contains("\"Action items\"");
 
         assertThat(body)
                 .as("the GET /actionable typed union is described to clients — itemType is the "

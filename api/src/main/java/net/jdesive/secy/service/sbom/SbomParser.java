@@ -100,6 +100,11 @@ public class SbomParser {
         }
         NormalizedSbom sbom = cycloneDXNormalizer.normalize(file);
         log.info("Parsed CycloneDX {} SBOM: {} components", sbom.specVersion(), sbom.components().size());
+        if (sbom.cryptoAssetsIgnoredForSpecVersion() > 0) {
+            log.info("{} cryptographic-asset components ignored: CBOM extraction requires CycloneDX "
+                            + "specVersion >= 1.6 (document declares {})",
+                    sbom.cryptoAssetsIgnoredForSpecVersion(), sbom.specVersion());
+        }
         return sbom;
     }
 

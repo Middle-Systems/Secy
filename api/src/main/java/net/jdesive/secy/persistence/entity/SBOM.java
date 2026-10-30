@@ -21,7 +21,7 @@ import java.util.UUID;
 @Transactional
 @Table(name = "sbom")
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-public class SBOM {
+public class SBOM extends TenantOwnedEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -60,6 +60,52 @@ public class SBOM {
      * see {@code SBOMRepository#findByJobId}.
      */
     private UUID jobId;
+
+    /** Which channel this SBOM arrived through (M1c). Null on any row that predates M1c. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ingestion_source", length = 32)
+    private SbomIngestionSource ingestionSource;
+
+    /**
+     * The {@link SourceConnector} that produced this SBOM, when {@link #ingestionSource} is
+     * {@link SbomIngestionSource#GITHUB_CONNECTOR} — a plain id, not a {@code @ManyToOne}, so
+     * serializing an {@code SBOM} never drags a connector's config along and no on-delete behavior
+     * needs modelling in the entity graph (the FK itself is {@code on delete set null}, migration
+     * {@code 021c}).
+     */
+    @Column(name = "source_connector_id")
+    private UUID sourceConnectorId;
+
+    /**
+     * Where in the SDLC this SBOM was captured. <b>M1e populates this; nothing in M1c writes it.</b>
+     * {@code null} means "stage unknown", not a default stage.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "lifecycle_stage", length = 16)
+    private SbomLifecycleStage lifecycleStage;
+
+    /**
+     * The document's own declared creation time (M1h) — CycloneDX {@code metadata.timestamp}, SPDX
+     * {@code creationInfo.created} — never {@link #uploadDate} (Secy's own ingest time). Null when
+     * the document declared none or it was unparseable.
+     */
+    @Column(name = "document_timestamp")
+    private LocalDateTime documentTimestamp;
+
+    /**
+     * Who created the SBOM DATA (M1h), joined {@code "; "} — CycloneDX {@code metadata.authors[]}/
+     * 1.6 {@code metadata.manufacturer}, SPDX {@code Person:}/{@code Organization:} creators. Tools
+     * never count. Null when the document declared none.
+     */
+    @Column(name = "document_authors", length = 1024)
+    private String documentAuthors;
+
+    /**
+     * This document's NTIA minimum-elements completeness score (M1h), or null when it was not
+     * scored (no non-crypto components). See {@code SbomQualityScorer}.
+     */
+    @Embedded
+    private SbomQualityScore quality;
 
     @OneToMany(mappedBy = "sbom", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
