@@ -613,13 +613,15 @@ public class ActionableService {
      */
     private ActionableDetailResponse.DependencyContext toDependencyContext(VulnerabilityAlert alert) {
         SBOMComponent component = alert.getComponent();
-        if (component == null) {
+        if (component == null || component.getSbom() == null) {
             return null;
         }
         DependencyDepth depth = component.getDependencyDepth() == null
                 ? DependencyDepth.UNKNOWN : component.getDependencyDepth();
         List<String> refs = parsePath(component.getDependencyPath());
-        List<ActionableDetailResponse.PathHop> hops = toPathHops(component.getSbom().getId(), refs);
+        SBOMComponent root = component.getSbom().getComponent();
+        List<ActionableDetailResponse.PathHop> hops =
+                toPathHops(component.getSbom().getId(), refs, root != null ? root.getId() : null);
         return new ActionableDetailResponse.DependencyContext(depth, component.getDependencyDistance(), hops);
     }
 
@@ -636,8 +638,15 @@ public class ActionableService {
         }
     }
 
-    /** Resolves each bom-ref against {@code sbomId}'s components; zero or multiple matches both read as unresolved. */
-    private List<ActionableDetailResponse.PathHop> toPathHops(UUID sbomId, List<String> refs) {
+    /**
+     * Resolves each bom-ref against {@code sbomId}'s components. A ref with no match, or 2+
+     * matches where none is the SBOM's own root, reads as unresolved. 2+ matches where one IS the
+     * root resolves to the root — the same "root wins over a duplicate" tie-break
+     * {@code SBOMService.persistDependencyEdges} applies at ingest time, so a document that repeats
+     * its root's bom-ref inside {@code components[]} resolves identically through both paths rather
+     * than resolving cleanly at ingest and unresolved here.
+     */
+    private List<ActionableDetailResponse.PathHop> toPathHops(UUID sbomId, List<String> refs, UUID rootComponentId) {
         if (refs.isEmpty()) {
             return List.of();
         }
@@ -646,15 +655,31 @@ public class ActionableService {
                 .collect(java.util.stream.Collectors.groupingBy(SBOMComponent::getBomRef));
         List<ActionableDetailResponse.PathHop> hops = new ArrayList<>(refs.size());
         for (String ref : refs) {
-            List<SBOMComponent> candidates = byRef.get(ref);
-            if (candidates == null || candidates.size() != 1) {
+            SBOMComponent resolved = resolveOne(byRef.get(ref), rootComponentId);
+            if (resolved == null) {
                 hops.add(new ActionableDetailResponse.PathHop(ref, null, null, null));
             } else {
-                SBOMComponent c = candidates.get(0);
-                hops.add(new ActionableDetailResponse.PathHop(ref, c.getId(), c.getName(), c.getVersion()));
+                hops.add(new ActionableDetailResponse.PathHop(ref, resolved.getId(), resolved.getName(), resolved.getVersion()));
             }
         }
         return hops;
+    }
+
+    private static SBOMComponent resolveOne(List<SBOMComponent> candidates, UUID rootComponentId) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        if (candidates.size() == 1) {
+            return candidates.get(0);
+        }
+        if (rootComponentId != null) {
+            for (SBOMComponent c : candidates) {
+                if (rootComponentId.equals(c.getId())) {
+                    return c;
+                }
+            }
+        }
+        return null;
     }
 
     /** M1i: the alert's stored risk score/model/scoredAt alongside a freshly recomputed breakdown. */

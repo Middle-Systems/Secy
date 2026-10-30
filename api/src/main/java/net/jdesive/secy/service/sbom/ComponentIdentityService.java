@@ -2,6 +2,7 @@ package net.jdesive.secy.service.sbom;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.jdesive.secy.model.component.ComponentIdentityAssessor;
 import net.jdesive.secy.model.component.ComponentIdentityResponse;
 import net.jdesive.secy.model.component.ComponentProvenance;
 import net.jdesive.secy.persistence.SBOMComponentIdentityConflictRepository;
@@ -22,7 +23,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -97,7 +97,7 @@ public class ComponentIdentityService {
             }
             ownComponentIds.add(component.getId());
             for (ComponentHash hash : component.getHashes()) {
-                String canonical = canonicalAlgorithm(hash.getAlgorithm());
+                String canonical = ComponentIdentityAssessor.canonicalAlgorithm(hash.getAlgorithm());
                 if (canonical == null || !STRONG_ALGORITHMS.contains(canonical)
                         || EMPTY_CONTENT_DIGESTS.contains(hash.getValue())) {
                     continue;
@@ -121,7 +121,7 @@ public class ComponentIdentityService {
             for (Object[] row : rows) {
                 UUID otherId = (UUID) row[0];
                 String otherKey = (String) row[1];
-                String otherCanonical = canonicalAlgorithm((String) row[2]);
+                String otherCanonical = ComponentIdentityAssessor.canonicalAlgorithm((String) row[2]);
                 String otherValue = (String) row[3];
                 if (otherCanonical == null || !STRONG_ALGORITHMS.contains(otherCanonical)) {
                     continue;
@@ -211,13 +211,6 @@ public class ComponentIdentityService {
                 component.getId(), sbomId, component.getName(), component.getVersion(), component.getPurl(),
                 component.getIdentityKey(), component.getIdentityConfidence(),
                 identifiers, hashes, conflicts, ComponentProvenance.of(component));
-    }
-
-    private static String canonicalAlgorithm(String algorithm) {
-        if (algorithm == null || algorithm.isBlank()) {
-            return null;
-        }
-        return algorithm.toUpperCase(Locale.ROOT).replace("-", "").replace("_", "");
     }
 
 }

@@ -1,6 +1,7 @@
 package net.jdesive.secy.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,6 +36,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -156,14 +158,19 @@ public class SBOMController {
     @PostMapping(value = "", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Job> uploadTaggedSbom(
             @RequestParam(value = "productVersion", defaultValue = "Unknown") String productVersion,
-            @RequestParam(value = "tag", required = false) List<String> tags,
             @RequestParam(value = "stage", required = false) String stage,
             @RequestBody JsonNode body,
-            Principal principal) {
+            Principal principal,
+            HttpServletRequest request) {
 
-        // 1. Parse the tag params. Malformed input (duplicate key, missing '=') -> 400 via
-        //    onInvalidProductTag, before anything else runs.
-        Map<String, String> tagMap = ProductTaggingService.parseTagParams(tags);
+        // 1. Parse the tag params. Read raw via the servlet request, not a `List<String> tag`
+        //    @RequestParam: Spring's StringToCollectionConverter splits a *single* param value on
+        //    commas, which would mangle a tag value like "secy:product=Acme, Inc.". A repeated
+        //    `tag` param is never split either way, so this is a strict superset, not a behavior
+        //    change for the common (ASCII, comma-free) case.
+        String[] rawTags = request.getParameterValues("tag");
+        Map<String, String> tagMap = ProductTaggingService.parseTagParams(
+                rawTags == null ? List.of() : Arrays.asList(rawTags));
 
         // 2. Detect the format and normalize -> 400 via onUnsupportedFormat for a document that can
         //    never succeed. Same synchronous validation as the manual-assignment endpoint.

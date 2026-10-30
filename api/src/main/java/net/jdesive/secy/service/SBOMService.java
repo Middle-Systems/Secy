@@ -371,10 +371,21 @@ public class SBOMService {
         if (document.dependencyEdges().isEmpty()) {
             return;
         }
+        // Resolve by the document's own RAW, untruncated bom-refs — the exact same strings
+        // DependencyGraphAnalyzer.analyze used to decide ambiguity/reachability a moment ago in
+        // this same ingestDocument call — rather than reading back SBOMComponent.getBomRef(),
+        // which is truncated to MAX_SHORT_TEXT(255) at persist time. Two distinct refs over 255
+        // characters that share an identical 255-char prefix would otherwise look identical here
+        // but not there, silently dropping or misattributing edges. Components are zipped to their
+        // persisted entity by index: ingestDocument built `saved.getComponents()` from this exact
+        // `document.components()` list, in order, two steps ago, and nothing reorders either list
+        // in between.
+        List<NormalizedComponent> rawComponents = document.components();
+        List<SBOMComponent> persistedComponents = saved.getComponents();
         Map<String, SBOMComponent> byRef = new java.util.HashMap<>();
         Set<String> ambiguous = new java.util.HashSet<>();
-        for (SBOMComponent c : saved.getComponents()) {
-            String ref = c.getBomRef();
+        for (int i = 0; i < rawComponents.size() && i < persistedComponents.size(); i++) {
+            String ref = rawComponents.get(i).bomRef();
             if (ref == null) {
                 continue;
             }
@@ -383,21 +394,22 @@ public class SBOMService {
                 byRef.remove(ref);
                 continue;
             }
-            byRef.put(ref, c);
+            byRef.put(ref, persistedComponents.get(i));
         }
         // The root wins over a duplicate — a generator that repeats metadata.component inside
         // components[] should not cost the root its own outgoing edges.
+        NormalizedComponent rawRoot = document.rootComponent();
         SBOMComponent root = saved.getComponent();
-        if (root != null && root.getBomRef() != null) {
-            byRef.put(root.getBomRef(), root);
-            ambiguous.remove(root.getBomRef());
+        if (root != null && rawRoot != null && rawRoot.bomRef() != null) {
+            byRef.put(rawRoot.bomRef(), root);
+            ambiguous.remove(rawRoot.bomRef());
         }
 
         List<SBOMComponentDependency> rows = new ArrayList<>();
         Set<String> seenPairs = new java.util.HashSet<>();
         for (DependencyEdge edge : document.dependencyEdges()) {
-            SBOMComponent from = byRef.get(truncate(edge.fromRef(), MAX_SHORT_TEXT));
-            SBOMComponent to = byRef.get(truncate(edge.toRef(), MAX_SHORT_TEXT));
+            SBOMComponent from = byRef.get(edge.fromRef());
+            SBOMComponent to = byRef.get(edge.toRef());
             if (from == null || to == null || from.getId().equals(to.getId())) {
                 continue;
             }
@@ -559,8 +571,8 @@ public class SBOMService {
             SBOMComponentIdentityConflict row = new SBOMComponentIdentityConflict();
             row.setConflictType(conflict.type());
             row.setIdentifierType(conflict.identifierType());
-            row.setIdentifierValue(conflict.identifierValue());
-            row.setDetail(conflict.detail());
+            row.setIdentifierValue(truncate(conflict.identifierValue(), MAX_DESCRIPTION));
+            row.setDetail(truncate(conflict.detail(), MAX_DESCRIPTION));
             row.setOtherComponentId(null);
             row.setOtherIdentityKey(null);
             row.setDetectedAt(LocalDateTime.now());

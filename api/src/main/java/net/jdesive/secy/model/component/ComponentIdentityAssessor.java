@@ -174,7 +174,14 @@ public final class ComponentIdentityAssessor {
         return conflicts;
     }
 
-    private static String canonicalAlgorithm(String algorithm) {
+    /**
+     * Normalizes a declared hash algorithm name for cross-document/cross-pass comparison (e.g.
+     * {@code "SHA-256"} and {@code "sha_256"} both canonicalize to {@code "SHA256"}). Public: Pass B
+     * ({@code ComponentIdentityService}'s cross-instance hash-collision sweep) must canonicalize
+     * identically to this Pass A check, or the two can silently disagree about which digests share
+     * an algorithm.
+     */
+    public static String canonicalAlgorithm(String algorithm) {
         if (algorithm == null || algorithm.isBlank()) {
             return null;
         }

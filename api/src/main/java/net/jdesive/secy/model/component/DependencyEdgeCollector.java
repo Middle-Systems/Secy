@@ -46,12 +46,20 @@ public final class DependencyEdgeCollector {
         if (f == null || t == null || f.equals(t)) {
             return;
         }
+        DependencyEdge edge = new DependencyEdge(f, t);
+        // Check membership before the size cap: re-adding an edge already in the set must not
+        // count as growth, or a document sitting at exactly maxEdges distinct edges that simply
+        // repeats one (normal, deduplicated input — see duplicateDependsOnIsDedupedAndSelfLoopIsDropped)
+        // would spuriously overflow and discard every real edge.
+        if (edges.contains(edge)) {
+            return;
+        }
         if (edges.size() >= maxEdges) {
             overflowed = true;
             edges.clear();
             return;
         }
-        edges.add(new DependencyEdge(f, t));
+        edges.add(edge);
     }
 
     /** Every edge added, document order, deduplicated — empty (not partial) when {@link #overflowed()}. */

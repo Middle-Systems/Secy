@@ -64,8 +64,8 @@ public final class SecondaryIdentifiers {
 
         Optional<Cpe23> parsed = Cpe23.parse(trimmed);
         if (parsed.isPresent() && parsed.get().hasConcreteVersion()) {
-            declaredName = parsed.get().product();
-            declaredVersion = parsed.get().version();
+            declaredName = truncate(parsed.get().product(), MAX_DECLARED_LENGTH);
+            declaredVersion = truncate(parsed.get().version(), MAX_DECLARED_LENGTH);
         }
 
         return new NormalizedComponent.Identifier(

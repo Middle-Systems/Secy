@@ -3,9 +3,11 @@ package net.jdesive.secy.service;
 import lombok.RequiredArgsConstructor;
 import net.jdesive.secy.persistence.ProductRepository;
 import net.jdesive.secy.persistence.entity.Product;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -16,6 +18,7 @@ import java.util.UUID;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final TransactionTemplate transactionTemplate;
 
     @Transactional(readOnly = true)
     public List<Product> getAllProducts() {
@@ -92,8 +95,18 @@ public class ProductService {
      * {@code 019c}'s backfill so a hand-created "Unassigned" product from before this migration isn't
      * duplicated); 3) a freshly created bucket row.
      */
-    @Transactional
     public Product getOrCreateUnassigned(UUID tenantId) {
+        try {
+            return transactionTemplate.execute(status -> getOrCreateUnassignedInTransaction(tenantId));
+        } catch (DataIntegrityViolationException e) {
+            // uq_products_tenant_name rejected the insert: a concurrent first call for this tenant
+            // won. That transaction has rolled back, so re-read outside it and hand back the
+            // winning bucket, same pattern as JobService#enqueue.
+            return productRepository.findByTenantIdAndUnassignedTrue(tenantId).orElseThrow(() -> e);
+        }
+    }
+
+    private Product getOrCreateUnassignedInTransaction(UUID tenantId) {
         return productRepository.findByTenantIdAndUnassignedTrue(tenantId)
                 .or(() -> productRepository.findByTenantIdAndName(tenantId, Product.UNASSIGNED_NAME)
                         .map(existing -> {
@@ -107,7 +120,7 @@ public class ProductService {
                     bucket.setDescription("SBOMs that arrived without the tenant's product tag. "
                             + "Visible to security engineers for triage.");
                     bucket.setUnassigned(true);
-                    return productRepository.save(bucket);
+                    return productRepository.saveAndFlush(bucket);
                 });
     }
 
@@ -120,8 +133,21 @@ public class ProductService {
      * <em>unless</em> that name-match is already answering to a different tag value, which is a
      * conflict, not an adoption; 3) a freshly created product named after the tag value.
      */
-    @Transactional
     public Product findOrCreateByTagValue(UUID tenantId, String tagValue) {
+        try {
+            return transactionTemplate.execute(status -> findOrCreateByTagValueInTransaction(tenantId, tagValue));
+        } catch (DataIntegrityViolationException e) {
+            // uq_products_tenant_tag_value (or uq_products_tenant_name) rejected the insert: a
+            // concurrent first upload for this not-yet-seen tag value won. That transaction has
+            // rolled back, so re-read outside it and hand back the winning product, same pattern
+            // as JobService#enqueue/getOrCreateUnassigned.
+            return productRepository.findByTenantIdAndTagValue(tenantId, tagValue)
+                    .or(() -> productRepository.findByTenantIdAndName(tenantId, tagValue))
+                    .orElseThrow(() -> e);
+        }
+    }
+
+    private Product findOrCreateByTagValueInTransaction(UUID tenantId, String tagValue) {
         return productRepository.findByTenantIdAndTagValue(tenantId, tagValue)
                 .or(() -> productRepository.findByTenantIdAndName(tenantId, tagValue).map(existing -> {
                     if (existing.isUnassigned()) {
@@ -140,7 +166,7 @@ public class ProductService {
                     product.setTenantId(tenantId);
                     product.setName(tagValue);
                     product.setTagValue(tagValue);
-                    return productRepository.save(product);
+                    return productRepository.saveAndFlush(product);
                 });
     }
 
